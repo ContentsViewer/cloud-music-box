@@ -1,8 +1,16 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { AppContextProvider } from '@/src/AppContext'
+import { StatusBar } from '@/src/components/StatusBar'
+import App from "next/app";
+import { ThemeProvider } from '@mui/material/styles';
+import theme from '@/src/theme';
+import { AppRouterCacheProvider } from '@mui/material-nextjs/v13-appRouter';
+import { Css } from "@mui/icons-material";
+import { CssBaseline } from "@mui/material";
 
-const inter = Inter({ subsets: ["latin"] });
+// const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -19,7 +27,19 @@ export default function RootLayout({
       <head>
         <link rel="manifest" href="/manifest.json" />
       </head>
-      <body className={inter.className}>{children}</body>
+      <body>
+        <AppRouterCacheProvider>
+          <AppContextProvider>
+            <ThemeProvider theme={theme}>
+              <CssBaseline />
+              <div className="flex flex-col h-screen">
+                <StatusBar />
+                <div className="grow">{children}</div>
+              </div>
+            </ThemeProvider>
+          </AppContextProvider>
+        </AppRouterCacheProvider>
+      </body>
     </html>
   );
 }
