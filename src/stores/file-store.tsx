@@ -66,6 +66,37 @@ function getFileItemFromIdb(db: IDBDatabase, id: string): Promise<BaseFileItem> 
   });
 }
 
+async function makeFileItemFromResponseAndSync(responseItem: any, db: IDBDatabase): Promise<BaseFileItem> {
+  let dbItem = await getFileItemFromIdb(db, responseItem.id);
+  if (responseItem.folder) {
+    if (dbItem === undefined) {
+      dbItem = {
+        name: responseItem.name,
+        id: responseItem.id,
+        type: 'folder',
+      } as FolderItem;
+    } else {
+      dbItem.name = responseItem.name;
+      dbItem.type = 'folder';
+    }
+  } else {
+    if (dbItem === undefined) {
+      dbItem = {
+        name: responseItem.name,
+        id: responseItem.id,
+        type: 'file',
+      } as FileItem;
+    } else {
+      dbItem.name = responseItem.name;
+      dbItem.type = 'file';
+    }
+  }
+
+  db.transaction("files", "readwrite").objectStore("files").put(dbItem);
+  return dbItem;
+}
+
+
 export const FileStoreProvider = ({ children }: { children: React.ReactNode }) => {
   const [pca, setPca] = useState<PublicClientApplication | undefined>(undefined);
   const [driveClient, setDriveClient] = useState<Client | undefined>(undefined);
@@ -186,28 +217,12 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       if (driveClient) {
         try {
           const response = await driveClient.api('/me/drive/root/children').get();
-          console.log(response);
 
-          fileDb?.transaction("roots", "readwrite").objectStore("roots").clear();
+          fileDb.transaction("roots", "readwrite").objectStore("roots").clear();
 
-          const roots: BaseFileItem[] = response.value.map((item: any) => {
-            if (item.folder) {
-              const folderItem: FolderItem = {
-                name: item.name,
-                id: item.id,
-                type: 'folder',
-              };
-              fileDb.transaction("files", "readwrite").objectStore("files").put(folderItem);
-              return folderItem;
-            }
-            const fileItem: FileItem = {
-              name: item.name,
-              id: item.id,
-              type: 'file',
-            };
-            fileDb.transaction("files", "readwrite").objectStore("files").put(fileItem);
-            return fileItem;
-          });
+          const roots: BaseFileItem[] = await Promise.all(response.value.map((item: any) => {
+            return makeFileItemFromResponseAndSync(item, fileDb);
+          }));
 
           roots.forEach((root) => {
             fileDb?.transaction("roots", "readwrite").objectStore("roots").put({ id: root.id });
@@ -246,11 +261,9 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
         const roots = await Promise.all(rootsPromise);
         setRootFiles(roots);
       }
-      console.log("@@@@");
     };
 
     init().then(() => {
-      console.log("!!!!");
       setConfigured(true);
     }).catch((error) => {
       console.error(error);
@@ -287,25 +300,9 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
     if (driveClient) {
       try {
         const response = await driveClient.api(`/me/drive/items/${id}/children`).get();
-        console.log("QQQ", response);
-        const children: BaseFileItem[] = response.value.map((item: any) => {
-          if (item.folder) {
-            const folderItem: FolderItem = {
-              name: item.name,
-              id: item.id,
-              type: 'folder',
-            };
-            fileDb?.transaction("files", "readwrite").objectStore("files").put(folderItem);
-            return folderItem;
-          }
-          const fileItem: FileItem = {
-            name: item.name,
-            id: item.id,
-            type: 'file',
-          };
-          fileDb?.transaction("files", "readwrite").objectStore("files").put(fileItem);
-          return fileItem;
-        });
+        const children: BaseFileItem[] = await Promise.all(response.value.map((item: any) => {
+          return makeFileItemFromResponseAndSync(item, fileDb);
+        }));
 
         const childrenIds = children.map((child) => child.id);
         currentFolder.childrenIds = childrenIds;
@@ -318,7 +315,6 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
         return [];
       }
     } else {
-      console.log("BBB");
       const childrenIds: string[] = await new Promise((resolve, reject) => {
         const transaction = fileDb.transaction("files", "readonly");
         const objectStore = transaction.objectStore("files");

@@ -10,7 +10,6 @@ export default function Page({ params }: { params: { id: string } }) {
   const [files, setFiles] = useState<BaseFileItem[]>([]);
 
   useEffect(() => {
-    console.log("AAAA", fileStore.configured)
     if (!fileStore.configured) {
       return;
     }
@@ -19,7 +18,6 @@ export default function Page({ params }: { params: { id: string } }) {
       try {
         const files = await fileStore.getChildren(params.id);
         setFiles(files);
-        console.log(files);
 
       } catch (error) {
         console.error(error);
