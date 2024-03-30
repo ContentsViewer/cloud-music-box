@@ -2,16 +2,31 @@
 
 import { useEffect, useState } from "react";
 import { usePlayerStore } from "../stores/player-store";
+import { enqueueSnackbar } from "notistack";
 
 export const useAudioPlayer = (): void => {
-  const [audio] = useState<HTMLAudioElement>(new Audio());
+  const [audio, setAudio] = useState<HTMLAudioElement | undefined>();
   const playerStore = usePlayerStore();
 
   useEffect(() => {
+    const audio = new Audio();
+    audio.addEventListener("ended", () => {
+      // playerStore.pause();
+    });
+
+    setAudio(audio);
+  }, [])
+
+  useEffect(() => {
+    if (!audio) {
+      return;
+    }
+    
     console.log("Audio player effect", playerStore);
 
     if (!playerStore.isPlaying) {
       audio.pause();
+      return;
     }
 
     try {
@@ -24,6 +39,7 @@ export const useAudioPlayer = (): void => {
     } catch (error) {
       playerStore.pause();
       console.error(error);
+      enqueueSnackbar(`${error}`, { variant: "error" })
     }
   }, [playerStore]);
 

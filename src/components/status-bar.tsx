@@ -1,13 +1,15 @@
-'use client'
-
 import { Box, Typography, colors } from "@mui/material";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function StatusBar() {
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isOnline, setIsOnline] = useState(false);
 
-  window.addEventListener('offline', () => setIsOnline(false));
-  window.addEventListener('online', () => setIsOnline(true));
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+
+    window.addEventListener('offline', () => setIsOnline(false));
+    window.addEventListener('online', () => setIsOnline(true));
+  }, [])
 
   return (
     <Box sx={{
