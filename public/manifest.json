@@ -1,6 +1,6 @@
 {
-  "short_name": "NextPWA",
-  "name": "Next.js PWA Example",
+  "name": "Cloud Music Client",
+  "short_name": "Cloud Music Client",
   "icons": [
     {
       "src": "/icon-192x192.png",

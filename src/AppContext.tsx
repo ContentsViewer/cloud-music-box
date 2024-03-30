@@ -26,6 +26,7 @@ export const AppContextProvider = ({ children }: { children: React.ReactNode }) 
   const [cloudClient, setCloudClient] = React.useState<Client | undefined>(undefined);
 
   React.useEffect(() => {
+    return;
     console.log("Initializing MSAL");
     const msalConfig = {
       auth: {
@@ -42,9 +43,9 @@ export const AppContextProvider = ({ children }: { children: React.ReactNode }) 
     })
   }, []);
 
-  if (!msalInstance) {
-    return null;
-  }
+  // if (!msalInstance) {
+  //   return null;
+  // }
 
   return (
     <AppContext.Provider value={{
