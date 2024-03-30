@@ -118,6 +118,9 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
           clientId: "28af6fb9-c605-4ad3-8039-3e90df0933cb",
           redirectUri: window.location.origin,
         },
+        cache: {
+          cacheLocation: "localStorage"
+        }
       });
 
       await pca.initialize();
@@ -130,7 +133,6 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
             return redirectResponse.accessToken;
           }
         } catch (error) {
-          console.error("AAAA", error);
           enqueueSnackbar(`${error}`, { variant: 'error' });
         }
 

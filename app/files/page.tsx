@@ -2,21 +2,30 @@
 
 import { BaseFileItem, useFileStore } from '@/src/stores/file-store';
 import { enqueueSnackbar } from 'notistack';
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { FileList } from '@/src/components/file-list';
+import { useSearchParams } from "next/navigation";
 
-export default function Page({ params }: { params: { id: string } }) {
+function Content() {
+
   const fileStore = useFileStore();
   const [files, setFiles] = useState<BaseFileItem[]>([]);
+  const searchParams = useSearchParams();
+  const fileId = searchParams.get("id");
+
 
   useEffect(() => {
     if (!fileStore.configured) {
       return;
     }
+    console.log(fileId)
 
     const getFiles = async () => {
+      if (!fileId) {
+        return;
+      }
       try {
-        const files = await fileStore.getChildren(params.id);
+        const files = await fileStore.getChildren(fileId);
         setFiles(files);
 
       } catch (error) {
@@ -25,9 +34,17 @@ export default function Page({ params }: { params: { id: string } }) {
       }
     }
     getFiles();
-  }, [fileStore.configured])
+  }, [fileStore.configured, fileId])
 
   return (
     <FileList files={files} />
+  )
+}
+
+export default function Page() {
+  return (
+    <Suspense>
+      <Content />
+    </Suspense>
   )
 }

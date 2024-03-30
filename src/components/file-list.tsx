@@ -14,7 +14,8 @@ export function FileList(props: FileListProps) {
       {props.files?.map((file) => {
         if (file.type === 'folder') {
           return <ListItemFolder key={file.id} name={file.name} onClick={() => {
-            router.push(`/files/${file.id}`)
+            console.log("Folder clicked", file.id)
+            router.push(`/files?id=${file.id}`);
           }} />
         }
         if (file.type === 'track') {
