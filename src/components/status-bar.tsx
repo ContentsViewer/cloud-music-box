@@ -1,31 +1,20 @@
-import { Box, Typography, colors } from "@mui/material";
+import { AppBar, Box, Typography, colors } from "@mui/material";
 import { useEffect, useState } from "react";
+import { useNetworkMonitor } from "../stores/network-monitor";
 
 export function StatusBar() {
-  const [isOnline, setIsOnline] = useState(false);
-
-  useEffect(() => {
-    setIsOnline(navigator.onLine);
-
-    window.addEventListener('offline', () => setIsOnline(false));
-    window.addEventListener('online', () => setIsOnline(true));
-  }, [])
-
+  const networkMonitor = useNetworkMonitor();
+  
   return (
-    <Box sx={{
+    <AppBar position="sticky" sx={{
       display: 'flex',
       justifyContent: 'end',
+      backdropFilter: 'blur(10px)',
+      backgroundColor: 'transparent'
     }}>
-      {isOnline ?
+      {networkMonitor.isOnline ?
         (<Typography color={colors.green[500]}>online</Typography>)
         : (<Typography color={colors.red[500]}>offline</Typography>)}
-      {/* <div className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0">
-        {isOffline ? (
-          <p className="text-red-500">You are offline</p>
-        ) : (
-          <p className="text-green-500">You are online</p>
-        )}
-      </div> */}
-    </Box>
+    </AppBar>
   )
 }

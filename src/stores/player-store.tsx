@@ -1,23 +1,22 @@
 'use client'
 
 import React, { createContext, useContext, useState } from "react";
+import { AudioTrackFileItem } from "./file-store";
 
-export interface MusicTrack {
-  blob: Blob;
-};
+
 
 interface PlayerStoreProps {
   isPlaying: boolean;
   play: () => void;
-  playTrack: (track: MusicTrack) => void;
+  playTrack: (track: AudioTrackFileItem) => void;
   pause: () => void;
-  activeTrack: MusicTrack | null;
+  activeTrack: AudioTrackFileItem | null;
 }
 
 export const PlayerStore = createContext<PlayerStoreProps>({
   isPlaying: false,
   play: () => { },
-  playTrack: (track: MusicTrack) => { },
+  playTrack: (track: AudioTrackFileItem) => { },
   pause: () => { },
   activeTrack: null,
 });
@@ -28,13 +27,14 @@ export const usePlayerStore = () => {
 
 export const PlayerStoreProvider = ({ children }: { children: React.ReactNode }) => {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [activeTrack, setActiveTrack] = useState<MusicTrack | null>(null);
+  const [activeTrack, setActiveTrack] = useState<AudioTrackFileItem | null>(null);
   const play = () => {
     setIsPlaying(true);
   };
-  const playTrack = (track: MusicTrack) => {
+  const playTrack = (track: AudioTrackFileItem) => {
     setActiveTrack(track);
     setIsPlaying(true);
+    console.log("Playing track", track);
   };
   const pause = () => {
     setIsPlaying(false);
@@ -42,7 +42,7 @@ export const PlayerStoreProvider = ({ children }: { children: React.ReactNode })
 
   return (
     <PlayerStore.Provider value={{
-      isPlaying: isPlaying,
+      isPlaying,
       play,
       playTrack,
       pause,

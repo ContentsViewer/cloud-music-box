@@ -9,7 +9,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 export interface BaseFileItem {
   name: string;
   id: string;
-  type: 'file' | 'folder' | 'track';
+  type: 'file' | 'folder' | 'audio-track';
 }
 
 export interface FileItem extends BaseFileItem {
@@ -21,8 +21,8 @@ export interface FolderItem extends BaseFileItem {
   childrenIds?: string[];
 }
 
-export interface TrackFileItem extends BaseFileItem {
-  type: 'track';
+export interface AudioTrackFileItem extends BaseFileItem {
+  type: 'audio-track';
   downloadUrl: string;
 }
 
@@ -66,7 +66,17 @@ function getFileItemFromIdb(db: IDBDatabase, id: string): Promise<BaseFileItem> 
   });
 }
 
+
 async function makeFileItemFromResponseAndSync(responseItem: any, db: IDBDatabase): Promise<BaseFileItem> {
+  const audioFileExtensions = [
+    '.aac',
+    '.mp3',
+    '.ogg',
+    '.wav',
+    '.flac',
+    '.m4a',
+  ];
+
   let dbItem = await getFileItemFromIdb(db, responseItem.id);
   if (responseItem.folder) {
     if (dbItem === undefined) {
@@ -79,16 +89,32 @@ async function makeFileItemFromResponseAndSync(responseItem: any, db: IDBDatabas
       dbItem.name = responseItem.name;
       dbItem.type = 'folder';
     }
-  } else {
-    if (dbItem === undefined) {
-      dbItem = {
-        name: responseItem.name,
-        id: responseItem.id,
-        type: 'file',
-      } as FileItem;
+  }
+  if (responseItem.file) {
+    if (audioFileExtensions.some((ext) => responseItem.name.endsWith(ext))) {
+      if (dbItem === undefined) {
+        dbItem = {
+          name: responseItem.name,
+          id: responseItem.id,
+          type: 'audio-track',
+          downloadUrl: responseItem['@microsoft.graph.downloadUrl'],
+        } as AudioTrackFileItem;
+      } else {
+        dbItem.name = responseItem.name;
+        dbItem.type = 'audio-track';
+        (dbItem as AudioTrackFileItem).downloadUrl = responseItem['@microsoft.graph.downloadUrl'];
+      }
     } else {
-      dbItem.name = responseItem.name;
-      dbItem.type = 'file';
+      if (dbItem === undefined) {
+        dbItem = {
+          name: responseItem.name,
+          id: responseItem.id,
+          type: 'file',
+        } as FileItem;
+      } else {
+        dbItem.name = responseItem.name;
+        dbItem.type = 'file';
+      }
     }
   }
 
@@ -203,6 +229,9 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
             }
             {
               const store = db.createObjectStore("roots", { keyPath: "id" });
+            }
+            {
+              const store = db.createObjectStore("blobs", { keyPath: "id" })
             }
           };
         });
@@ -347,6 +376,33 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       const children = await Promise.all(childrenPromise);
       return children;
     }
+  }
+
+  const getTrackBlob = async (id: string) => {
+    if (!configured) {
+      throw new Error("File store not configured");
+    }
+    if (!fileDb) {
+      throw new Error("File database not initialized");
+    }
+
+    const track = await getFileItemFromIdb(fileDb, id) as AudioTrackFileItem;
+    if (track.type !== 'audio-track') {
+      throw new Error("Item is not a track");
+    }
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      const request = fileDb?.transaction("blobs", "readwrite").objectStore("blobs").get(id);
+      request.onsuccess = (event) => {
+        const item = (event.target as IDBRequest).result;
+        resolve(item);
+      };
+      request.onerror = (event) => {
+        reject((event.target as IDBRequest).error);
+      };
+    });
+
+    return blob;
   }
 
   return (

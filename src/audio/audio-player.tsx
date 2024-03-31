@@ -4,24 +4,38 @@ import { useEffect, useState } from "react";
 import { usePlayerStore } from "../stores/player-store";
 import { enqueueSnackbar } from "notistack";
 
-export const useAudioPlayer = (): void => {
+export const AudioPlayer = () => {
   const [audio, setAudio] = useState<HTMLAudioElement | undefined>();
   const playerStore = usePlayerStore();
 
   useEffect(() => {
     const audio = new Audio();
-    audio.addEventListener("ended", () => {
+
+    const onEnded = () => {
       // playerStore.pause();
-    });
+    }
+
+    audio.addEventListener("ended", () => onEnded);
 
     setAudio(audio);
+
+    console.log("Audio player initialized");
+
+    return () => {
+      audio.removeEventListener("ended", onEnded);
+      audio.pause();
+      audio.src = "";
+      audio.load();
+      console.log("Audio player disposed");
+    }
   }, [])
 
   useEffect(() => {
     if (!audio) {
+      console.error("Audio player not initialized");
       return;
     }
-    
+
     console.log("Audio player effect", playerStore);
 
     if (!playerStore.isPlaying) {
@@ -32,7 +46,8 @@ export const useAudioPlayer = (): void => {
     try {
       if (!audio.src) {
         if (playerStore.activeTrack) {
-          audio.src = URL.createObjectURL(playerStore.activeTrack?.blob);
+          // audio.src = URL.createObjectURL(playerStore.activeTrack?.blob);
+          audio.src = playerStore.activeTrack.downloadUrl;
         }
         audio.play();
       }
@@ -69,4 +84,6 @@ export const useAudioPlayer = (): void => {
       ms.setActionHandler("nexttrack", null);
     };
   }, []);
+
+  return null;
 }
