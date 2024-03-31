@@ -4,12 +4,14 @@ import { InteractionRequiredAuthError, PublicClientApplication } from "@azure/ms
 import { Client } from "@microsoft/microsoft-graph-client";
 import { enqueueSnackbar } from "notistack";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useNetworkMonitor } from "./network-monitor";
 
 
 export interface BaseFileItem {
   name: string;
   id: string;
   type: 'file' | 'folder' | 'audio-track';
+  parentId?: string;
 }
 
 export interface FileItem extends BaseFileItem {
@@ -128,6 +130,59 @@ async function makeFileItemFromResponseAndSync(responseItem: any, db: IDBDatabas
   return dbItem;
 }
 
+const acquireAccessToken = async (pca: PublicClientApplication) => {
+  try {
+    const redirectResponse = await pca.handleRedirectPromise();
+    if (redirectResponse) {
+      return redirectResponse.accessToken;
+    }
+  } catch (error) {
+    console.error(error);
+    enqueueSnackbar(`${error}`, { variant: 'error' });
+  }
+
+  const loginRequest = {
+    scopes: ['Files.Read', 'Sites.Read.All'],
+  };
+
+  const accounts = pca.getAllAccounts();
+  if (accounts.length === 0) {
+    pca.loginRedirect(loginRequest);
+    return "";
+  }
+
+  const silentRequest = {
+    scopes: ['Files.Read', 'Sites.Read.All'],
+    account: accounts[0],
+  };
+
+  try {
+    const response = await pca.acquireTokenSilent(silentRequest);
+    return response.accessToken;
+  } catch (error) {
+    if (error instanceof InteractionRequiredAuthError) {
+      pca.acquireTokenRedirect(loginRequest);
+      return "";
+    }
+    throw error;
+  }
+}
+
+const getRootsAndSync = async (client: Client, db: IDBDatabase) => {
+  const response = await client.api('/me/drive/root/children').get();
+
+  db.transaction("roots", "readwrite").objectStore("roots").clear();
+
+  const roots: BaseFileItem[] = await Promise.all(response.value.map((item: any) => {
+    return makeFileItemFromResponseAndSync(item, db);
+  }));
+
+  roots.forEach((root) => {
+    db.transaction("roots", "readwrite").objectStore("roots").put({ id: root.id });
+  });
+
+  return roots;
+}
 
 export const FileStoreProvider = ({ children }: { children: React.ReactNode }) => {
   const [pca, setPca] = useState<PublicClientApplication | undefined>(undefined);
@@ -135,6 +190,7 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
   const [fileDb, setFileDb] = useState<IDBDatabase | undefined>(undefined);
   const [rootFiles, setRootFiles] = useState<BaseFileItem[] | undefined>(undefined);
   const [configured, setConfigured] = useState(false);
+  const networkMonitor = useNetworkMonitor();
 
   const initialized = useRef(false);
 
@@ -158,60 +214,6 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       await pca.initialize();
       setPca(pca);
 
-      const acquireAccessToken = async () => {
-        try {
-          const redirectResponse = await pca.handleRedirectPromise();
-          if (redirectResponse) {
-            return redirectResponse.accessToken;
-          }
-        } catch (error) {
-          enqueueSnackbar(`${error}`, { variant: 'error' });
-        }
-
-        const loginRequest = {
-          scopes: ['Files.Read', 'Sites.Read.All'],
-        };
-
-        const accounts = pca.getAllAccounts();
-        if (accounts.length === 0) {
-          pca.loginRedirect(loginRequest);
-          return "";
-        }
-
-        const silentRequest = {
-          scopes: ['Files.Read', 'Sites.Read.All'],
-          account: accounts[0],
-        };
-
-        try {
-          const response = await pca.acquireTokenSilent(silentRequest);
-          return response.accessToken;
-        } catch (error) {
-          if (error instanceof InteractionRequiredAuthError) {
-            pca.acquireTokenRedirect(loginRequest);
-            return "";
-          }
-          throw error;
-        }
-      };
-
-      let driveClient: Client | undefined = undefined;
-
-      try {
-        const accessToken = await acquireAccessToken();
-        const client = Client.init({
-          authProvider: (done) => {
-            done(null, accessToken);
-          },
-        });
-        driveClient = client;
-        setDriveClient(client);
-        enqueueSnackbar("Drive Client Connected", { variant: 'success' });
-      } catch (error) {
-        console.error(error);
-        enqueueSnackbar(`${error}`, { variant: 'error' });
-      }
-
       let fileDb: IDBDatabase | undefined = undefined;
 
       try {
@@ -231,13 +233,12 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
             {
               const store = db.createObjectStore("files", { keyPath: "id" });
               store.createIndex("path", "path");
-
             }
             {
-              const store = db.createObjectStore("roots", { keyPath: "id" });
+              db.createObjectStore("roots", { keyPath: "id" });
             }
             {
-              const store = db.createObjectStore("blobs", { keyPath: "id" })
+              db.createObjectStore("blobs", { keyPath: "id" })
             }
           };
         });
@@ -251,26 +252,7 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
         throw error;
       }
 
-      if (driveClient) {
-        try {
-          const response = await driveClient.api('/me/drive/root/children').get();
-
-          fileDb.transaction("roots", "readwrite").objectStore("roots").clear();
-
-          const roots: BaseFileItem[] = await Promise.all(response.value.map((item: any) => {
-            return makeFileItemFromResponseAndSync(item, fileDb);
-          }));
-
-          roots.forEach((root) => {
-            fileDb?.transaction("roots", "readwrite").objectStore("roots").put({ id: root.id });
-          });
-
-          setRootFiles(roots);
-        } catch (error) {
-          console.error(error);
-          enqueueSnackbar(`${error}`, { variant: 'error' });
-        }
-      } else {
+      {
         const rootIds: any[] = await new Promise((resolve, reject) => {
           const transaction = fileDb.transaction("roots", "readonly");
           const objectStore = transaction.objectStore("roots");
@@ -311,6 +293,41 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       initialized.current = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!configured) return;
+    if (!networkMonitor.isOnline) {
+      // If offline, client should be disconnected.
+      setDriveClient(undefined);
+      return;
+    }
+
+    if (!pca) return;
+
+    acquireAccessToken(pca).then((accessToken) => {
+      const client = Client.init({
+        authProvider: (done) => {
+          done(null, accessToken);
+        },
+      });
+      setDriveClient(client);
+      enqueueSnackbar("Drive Client Connected", { variant: 'success' });
+    }).catch((error) => {
+      console.error(error);
+      enqueueSnackbar(`${error}`, { variant: 'error' });
+    });
+  }, [networkMonitor, configured])
+
+  useEffect(() => {
+    if (driveClient === undefined) return;
+
+    getRootsAndSync(driveClient, fileDb as IDBDatabase).then((roots) => {
+      setRootFiles(roots);
+    }).catch((error) => {
+      console.error(error);
+      enqueueSnackbar(`${error}`, { variant: 'error' });
+    });
+  }, [driveClient])
 
 
   const getFileByPath = async (path: string) => {
@@ -409,6 +426,26 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
     });
 
     return blob;
+  }
+
+  const hasTrackBlobInLocal = async (id: string) => {
+    if (!configured) {
+      throw new Error("File store not configured");
+    }
+    if (!fileDb) return;
+
+    const count = await new Promise<number>((resolve, reject) => {
+      const request = fileDb.transaction("blobs").objectStore("blobs").count(id);
+      request.onsuccess = (event) => {
+        const count = (event.target as IDBRequest).result;
+        resolve(count);
+      };
+      request.onerror = (event) => {
+        reject((event.target as IDBRequest).error);
+      };
+    });
+
+    return count > 0;
   }
 
   return (

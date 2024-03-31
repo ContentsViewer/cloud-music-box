@@ -2,15 +2,16 @@ import { ListItemButton, ListItemIcon, ListItemText } from "@mui/material";
 import FolderIcon from '@mui/icons-material/Folder';
 import { AudioFileOutlined, CloudOff, InsertDriveFileOutlined } from '@mui/icons-material';
 
-interface ListItemFileBasicProps {
+interface FileListItemBasicProps {
   name: string;
   secondaryName?: string;
   icon: React.ReactElement;
   onClick?: () => void;
   disabled?: boolean;
+  
 }
 
-export function ListItemFileBasic({ name, secondaryName, icon, onClick, disabled }: ListItemFileBasicProps) {
+export function FileListItemBasic({ name, secondaryName, icon, onClick, disabled }: FileListItemBasicProps) {
   return (
     <ListItemButton onClick={onClick} disabled={disabled}>
       <ListItemIcon>{icon}</ListItemIcon>

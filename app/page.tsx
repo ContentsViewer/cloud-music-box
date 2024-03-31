@@ -5,7 +5,6 @@ import { usePlayerStore } from '@/src/stores/player-store';
 import { BaseFileItem, useFileStore } from '@/src/stores/file-store';
 import { FileList } from '@/src/components/file-list';
 import { useRouter } from 'next/navigation';
-import { ListItemFile, ListItemFolder } from '@/src/components/list-item';
 
 
 // function isSupportedAudioFile(name: string) {
