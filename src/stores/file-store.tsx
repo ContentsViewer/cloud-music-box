@@ -24,6 +24,7 @@ export interface FolderItem extends BaseFileItem {
 export interface AudioTrackFileItem extends BaseFileItem {
   type: 'audio-track';
   downloadUrl: string;
+  mimeType: string;
 }
 
 
@@ -66,16 +67,17 @@ function getFileItemFromIdb(db: IDBDatabase, id: string): Promise<BaseFileItem> 
   });
 }
 
+const audioFormatMapping: { [key: string]: { mimeType: string } } = {
+  "aac": { mimeType: "audio/aac" },
+  "mp3": { mimeType: "audio/mpeg" },
+  "ogg": { mimeType: "audio/ogg" },
+  "wav": { mimeType: "audio/wav" },
+  "flac": { mimeType: "audio/flac" },
+  "m4a": { mimeType: "audio/mp4" },
+};
 
 async function makeFileItemFromResponseAndSync(responseItem: any, db: IDBDatabase): Promise<BaseFileItem> {
-  const audioFileExtensions = [
-    '.aac',
-    '.mp3',
-    '.ogg',
-    '.wav',
-    '.flac',
-    '.m4a',
-  ];
+  // console.log(responseItem);
 
   let dbItem = await getFileItemFromIdb(db, responseItem.id);
   if (responseItem.folder) {
@@ -91,13 +93,17 @@ async function makeFileItemFromResponseAndSync(responseItem: any, db: IDBDatabas
     }
   }
   if (responseItem.file) {
-    if (audioFileExtensions.some((ext) => responseItem.name.endsWith(ext))) {
+    const ext: string = responseItem.name.split('.').pop();
+    const audioMimeType = audioFormatMapping[ext]?.mimeType;
+
+    if (audioMimeType !== undefined) {
       if (dbItem === undefined) {
         dbItem = {
           name: responseItem.name,
           id: responseItem.id,
           type: 'audio-track',
           downloadUrl: responseItem['@microsoft.graph.downloadUrl'],
+          mimeType: audioMimeType,
         } as AudioTrackFileItem;
       } else {
         dbItem.name = responseItem.name;

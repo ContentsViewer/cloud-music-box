@@ -13,9 +13,14 @@ export const AudioPlayer = () => {
 
     const onEnded = () => {
       // playerStore.pause();
+      console.log("Track ended");
+    }
+    const onError = (error: any) => {
+      console.log(error);
     }
 
-    audio.addEventListener("ended", () => onEnded);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("error", onError);
 
     setAudio(audio);
 
@@ -23,6 +28,7 @@ export const AudioPlayer = () => {
 
     return () => {
       audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("error", onError);
       audio.pause();
       audio.src = "";
       audio.load();
@@ -37,24 +43,33 @@ export const AudioPlayer = () => {
     }
 
     console.log("Audio player effect", playerStore);
+    console.trace();
 
     if (!playerStore.isPlaying) {
       audio.pause();
       return;
     }
 
-    try {
-      if (!audio.src) {
-        if (playerStore.activeTrack) {
-          // audio.src = URL.createObjectURL(playerStore.activeTrack?.blob);
-          audio.src = playerStore.activeTrack.downloadUrl;
-        }
-        audio.play();
+    if (audio.src) {
+      audio.src = "";
+      audio.removeAttribute("src");
+    }
+
+    if (!audio.src) {
+      if (playerStore.activeTrack) {
+        // audio.src = URL.createObjectURL(playerStore.activeTrack?.blob);
+        audio.src = playerStore.activeTrack.downloadUrl;
+        // safari(iOS) cannot detect the mime type(especially flac) from the binary.
+        audio.setAttribute("type", playerStore.activeTrack.mimeType);
+        console.log("AAAA", audio.getAttribute("type"));
+
+        console.log(playerStore.activeTrack.mimeType, playerStore.activeTrack.downloadUrl);
       }
-    } catch (error) {
-      playerStore.pause();
-      console.error(error);
-      enqueueSnackbar(`${error}`, { variant: "error" })
+      audio.play().catch((error) => {
+        playerStore.pause();
+        console.error(error);
+        enqueueSnackbar(`${error}`, { variant: "error" })
+      })
     }
   }, [playerStore]);
 
