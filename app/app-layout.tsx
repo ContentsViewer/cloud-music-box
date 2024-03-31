@@ -17,10 +17,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <PlayerStoreProvider>
             <AudioPlayer />
             <StatusBar />
-            <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>{children}</Box>
-            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-            </Box>
-            <MiniPlayer />
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', mt: 4, mb: 10}}>{children}</Box>
+            <MiniPlayer sx={{ position: "fixed", bottom: 0 }} />
           </PlayerStoreProvider>
         </FileStoreProvider>
       </NetworkMonitorProvider>

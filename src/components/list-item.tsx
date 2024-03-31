@@ -1,30 +1,30 @@
-import { ListItemButton, ListItemIcon } from "@mui/material";
+import { ListItemButton, ListItemIcon, ListItemText } from "@mui/material";
 import FolderIcon from '@mui/icons-material/Folder';
-import { AudioFileOutlined, InsertDriveFileOutlined } from '@mui/icons-material';
+import { AudioFileOutlined, CloudOff, InsertDriveFileOutlined } from '@mui/icons-material';
 
-export function ListItemFile({ name, onClick, disabled = false }: { name: string, onClick?: () => void, disabled?: boolean }) {
+interface ListItemFileBasicProps {
+  name: string;
+  secondaryName?: string;
+  icon: React.ReactElement;
+  onClick?: () => void;
+  disabled?: boolean;
+}
+
+export function ListItemFileBasic({ name, secondaryName, icon, onClick, disabled }: ListItemFileBasicProps) {
   return (
     <ListItemButton onClick={onClick} disabled={disabled}>
-      <ListItemIcon><InsertDriveFileOutlined /></ListItemIcon>
-      {name}
-    </ListItemButton>
-  );
-}
-
-export function ListItemAudioTrack({ name, onClick }: { name: string, onClick: () => void }) {
-  return (
-    <ListItemButton onClick={onClick}>
-      <ListItemIcon><AudioFileOutlined /></ListItemIcon>
-      {name}
-    </ListItemButton>
-  );
-}
-
-export function ListItemFolder({ name, onClick }: { name: string, onClick: () => void }) {
-  return (
-    <ListItemButton onClick={onClick}>
-      <ListItemIcon><FolderIcon /></ListItemIcon>
-      {name}
+      <ListItemIcon>{icon}</ListItemIcon>
+      <ListItemText
+        primaryTypographyProps={{
+          style: {
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis'
+          }
+        }}
+        primary={name}
+        secondary={secondaryName} />
+      <CloudOff fontSize="small" color="disabled"  />
     </ListItemButton>
   );
 }

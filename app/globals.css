@@ -31,3 +31,7 @@ body {
     text-wrap: balance;
   }
 } */
+
+html, body {
+  min-height: 100vh;
+}

@@ -6,7 +6,7 @@ export function StatusBar() {
   const networkMonitor = useNetworkMonitor();
   
   return (
-    <AppBar position="sticky" sx={{
+    <AppBar position="fixed" sx={{
       display: 'flex',
       justifyContent: 'end',
       backdropFilter: 'blur(10px)',

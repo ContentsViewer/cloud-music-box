@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react';
-import { MusicTrack, usePlayerStore } from '@/src/stores/player-store';
+import { usePlayerStore } from '@/src/stores/player-store';
 import { BaseFileItem, useFileStore } from '@/src/stores/file-store';
 import { FileList } from '@/src/components/file-list';
 import { useRouter } from 'next/navigation';

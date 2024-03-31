@@ -21,6 +21,10 @@ export const AudioPlayer = () => {
     const onEnded = () => {
       // playerStore.pause();
       console.log("Track ended");
+
+      setTimeout(() => {
+        console.log("Next track");
+      }, 2000);
     }
     const onError = (error: any) => {
       console.log(error);
