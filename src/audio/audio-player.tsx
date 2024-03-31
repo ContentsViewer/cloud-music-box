@@ -1,15 +1,22 @@
 'use client'
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePlayerStore } from "../stores/player-store";
 import { enqueueSnackbar } from "notistack";
 
 export const AudioPlayer = () => {
-  const [audio, setAudio] = useState<HTMLAudioElement | undefined>();
+  // const [audio, setAudio] = useState<HTMLAudioElement | undefined>();
   const playerStore = usePlayerStore();
 
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const sourceRef = useRef<HTMLSourceElement>(null);
+
   useEffect(() => {
-    const audio = new Audio();
+    const audio = audioRef.current;
+    const source = sourceRef.current;
+    if (!audio || !source) return;
+
+    // const audio = new Audio();
 
     const onEnded = () => {
       // playerStore.pause();
@@ -22,7 +29,7 @@ export const AudioPlayer = () => {
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("error", onError);
 
-    setAudio(audio);
+    // setAudio(audio);
 
     console.log("Audio player initialized");
 
@@ -30,46 +37,54 @@ export const AudioPlayer = () => {
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
       audio.pause();
-      audio.src = "";
+      source.removeAttribute("src");
+      source.removeAttribute("type");
       audio.load();
       console.log("Audio player disposed");
     }
-  }, [])
+  }, [audioRef])
 
   useEffect(() => {
-    if (!audio) {
+    const audio = audioRef.current;
+    const source = sourceRef.current;
+
+    if (!audio || !source) {
       console.error("Audio player not initialized");
       return;
     }
 
     console.log("Audio player effect", playerStore);
-    console.trace();
+    // console.trace();
 
     if (!playerStore.isPlaying) {
       audio.pause();
       return;
     }
 
-    if (audio.src) {
-      audio.src = "";
-      audio.removeAttribute("src");
+    if (source.src) {
+      source.src = "";
+      source.removeAttribute("src");
     }
 
-    if (!audio.src) {
+    if (!source.src) {
       if (playerStore.activeTrack) {
         // audio.src = URL.createObjectURL(playerStore.activeTrack?.blob);
-        audio.src = playerStore.activeTrack.downloadUrl;
+        source.src = playerStore.activeTrack.downloadUrl;
         // safari(iOS) cannot detect the mime type(especially flac) from the binary.
-        audio.setAttribute("type", playerStore.activeTrack.mimeType);
-        console.log("AAAA", audio.getAttribute("type"));
+        source.type = playerStore.activeTrack.mimeType;
+        // audio.setAttribute("type", playerStore.activeTrack.mimeType);
+        // console.log("AAAA", audio.getAttribute("type"));
 
         console.log(playerStore.activeTrack.mimeType, playerStore.activeTrack.downloadUrl);
       }
+      audio.pause();
+      audio.load();
       audio.play().catch((error) => {
         playerStore.pause();
         console.error(error);
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
+      enqueueSnackbar("Playing", { variant: "info" });
     }
   }, [playerStore]);
 
@@ -100,5 +115,9 @@ export const AudioPlayer = () => {
     };
   }, []);
 
-  return null;
+  return (
+    <audio ref={audioRef}>
+      <source ref={sourceRef} />
+    </audio>
+  );
 }
