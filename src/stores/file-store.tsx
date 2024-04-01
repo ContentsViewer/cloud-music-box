@@ -1,7 +1,7 @@
 'use client'
 
 import { InteractionRequiredAuthError, PublicClientApplication } from "@azure/msal-browser";
-import { Client } from "@microsoft/microsoft-graph-client";
+import { Client, ResponseType } from "@microsoft/microsoft-graph-client";
 import { enqueueSnackbar } from "notistack";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useNetworkMonitor } from "./network-monitor";
@@ -34,6 +34,8 @@ interface FileStoreProps {
   getFileByPath: (path: string) => Promise<BaseFileItem>;
   getFileById: (id: string) => Promise<BaseFileItem>;
   getChildren: (id: string) => Promise<BaseFileItem[]>;
+  hasTrackBlobInLocal: (id: string) => Promise<boolean>;
+  requestDownloadTrackBlob: (id: string) => Promise<Blob>;
   rootFiles: BaseFileItem[] | undefined;
   configured: boolean;
 }
@@ -46,6 +48,12 @@ export const FileStore = createContext<FileStoreProps>({
     throw new Error("Not implemented");
   },
   getChildren: async (id: string) => {
+    throw new Error("Not implemented");
+  },
+  hasTrackBlobInLocal: async (id: string) => {
+    throw new Error("Not implemented");
+  },
+  requestDownloadTrackBlob: async (id: string) => {
     throw new Error("Not implemented");
   },
   rootFiles: undefined,
@@ -432,7 +440,9 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
     if (!configured) {
       throw new Error("File store not configured");
     }
-    if (!fileDb) return;
+    if (!fileDb) {
+      throw new Error("File database not initialized");
+    }
 
     const count = await new Promise<number>((resolve, reject) => {
       const request = fileDb.transaction("blobs").objectStore("blobs").count(id);
@@ -448,6 +458,35 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
     return count > 0;
   }
 
+  const requestDownloadTrackBlob = async (id: string) => {
+    if (!configured) {
+      throw new Error("File store not configured");
+    }
+    if (!driveClient) {
+      throw new Error("Drive client not initialized");
+    }
+    if (!fileDb) {
+      throw new Error("File database not initialized");
+    }
+
+    const track = await getFileItemFromIdb(fileDb, id) as AudioTrackFileItem;
+    if (track.type !== 'audio-track') {
+      throw new Error("Item is not a track");
+    }
+
+    const blob = await getTrackBlob(id);
+    if (blob) {
+      return blob;
+    }
+
+    const response = await driveClient.api(`/me/drive/items/${id}/content`).responseType(ResponseType.BLOB).get();
+    const blobData = response.parsedBody as Blob;
+
+    fileDb.transaction("blobs", "readwrite").objectStore("blobs").put(blobData, id);
+
+    return blobData;
+  }
+
   return (
     <FileStore.Provider value={{
       getFileByPath,
@@ -455,6 +494,8 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       rootFiles,
       getChildren,
       configured,
+      hasTrackBlobInLocal,
+      requestDownloadTrackBlob,
     }}>
       {children}
     </FileStore.Provider>

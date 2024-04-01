@@ -1,8 +1,8 @@
 'use client'
 
-import { AudioTrackFileItem, BaseFileItem, FolderItem } from "../stores/file-store";
+import { AudioTrackFileItem, BaseFileItem, FolderItem, useFileStore } from "../stores/file-store";
 import { useRouter } from 'next/navigation';
-import { FileListItemBasic } from "./file-list-item";
+import { FileListItemAudioTrack, FileListItemBasic } from "./file-list-item";
 import { usePlayerStore } from "../stores/player-store";
 import { InsertDriveFileOutlined, AudioFileOutlined } from "@mui/icons-material";
 import FolderIcon from '@mui/icons-material/Folder';
@@ -16,6 +16,7 @@ export function FileList(props: FileListProps) {
   const router = useRouter();
   const playerStore = usePlayerStore();
   const networkMonitor = useNetworkMonitor();
+  const fileStore = useFileStore();
 
   return (
     <div>
@@ -24,31 +25,34 @@ export function FileList(props: FileListProps) {
           const folderItem = file as FolderItem;
           // If the folderItem has childrenIds, can open it even if offline.
           const inLocal = folderItem.childrenIds !== undefined;
-          const disabled = (folderItem.childrenIds === undefined) && !networkMonitor.isOnline; 
-
+          const disabled = (folderItem.childrenIds === undefined) && !networkMonitor.isOnline;
+          const fileStatus = inLocal ? 'local' : networkMonitor.isOnline ? 'online' : 'offline';
           return <FileListItemBasic
             disabled={disabled}
             key={file.id} name={file.name}
             icon={<FolderIcon />}
+            fileStatus={fileStatus}
             onClick={(event) => {
-              //window.history.pushState({}, '', `/files#${file.id}`);
-              // event.preventDefault();
               router.push(`/files#${file.id}`);
             }} />
         }
         if (file.type === 'audio-track') {
-          return <FileListItemBasic
-            key={file.id} name={file.name}
-            icon={<AudioFileOutlined />}
-            onClick={() => {
-              console.log("Audio track clicked", file.id)
-              playerStore.playTrack(file as AudioTrackFileItem)
-            }} />
+          return <FileListItemAudioTrack
+            key={file.id} fileId={file.id} name={file.name}
+            onClick={(event) => {
+              if (!props.files) return;
+              const tracks = props.files.filter((f) => f.type === 'audio-track') as AudioTrackFileItem[];
+              const index = tracks.findIndex((t) => t.id === file.id);
+              playerStore.playTrack(index, tracks);
+            }}
+          />
         }
+
         return <FileListItemBasic
           key={file.id} name={file.name}
           icon={<InsertDriveFileOutlined />}
           disabled
+          fileStatus='local'
         />
       })}
     </div>

@@ -1,8 +1,15 @@
 'use client'
 
 import { useEffect, useRef, useState } from "react";
-import { usePlayerStore } from "../stores/player-store";
+import { usePlayerStore, AudioTrack } from "../stores/player-store";
 import { enqueueSnackbar } from "notistack";
+
+const getPlayableSourceUrl = (track: AudioTrack) => {
+  if (track.blob) {
+    return URL.createObjectURL(track.blob);
+  }
+  return track.remoteUrl;
+}
 
 export const AudioPlayer = () => {
   // const [audio, setAudio] = useState<HTMLAudioElement | undefined>();
@@ -16,37 +23,44 @@ export const AudioPlayer = () => {
     const source = sourceRef.current;
     if (!audio || !source) return;
 
-    // const audio = new Audio();
-
-    const onEnded = () => {
-      // playerStore.pause();
-      console.log("Track ended");
-
-      setTimeout(() => {
-        console.log("Next track");
-      }, 2000);
-    }
     const onError = (error: any) => {
       console.log(error);
+      playerStore.pause();
+      enqueueSnackbar(`${error}`, { variant: "error" });
     }
 
-    audio.addEventListener("ended", onEnded);
+    const onDurationChange = () => {
+
+    }
+    const onTimeUpdate = () => {
+
+    }
+
+    const onEnded = () => {
+      playerStore.playNextTrack();
+    }
+
     audio.addEventListener("error", onError);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("durationchange", onDurationChange);
+    audio.addEventListener("timeupdate", onTimeUpdate);
 
-    // setAudio(audio);
-
+    
     console.log("Audio player initialized");
 
     return () => {
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
+      audio.removeEventListener("durationchange", onDurationChange);
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+
       audio.pause();
       source.removeAttribute("src");
       source.removeAttribute("type");
       audio.load();
       console.log("Audio player disposed");
     }
-  }, [audioRef])
+  }, [audioRef, playerStore])
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -58,7 +72,6 @@ export const AudioPlayer = () => {
     }
 
     console.log("Audio player effect", playerStore);
-    // console.trace();
 
     if (!playerStore.isPlaying) {
       audio.pause();
@@ -72,16 +85,14 @@ export const AudioPlayer = () => {
 
     if (!source.src) {
       if (playerStore.activeTrack) {
-        // audio.src = URL.createObjectURL(playerStore.activeTrack?.blob);
-        source.src = playerStore.activeTrack.downloadUrl;
-        // safari(iOS) cannot detect the mime type(especially flac) from the binary.
-        source.type = playerStore.activeTrack.mimeType;
-        // audio.setAttribute("type", playerStore.activeTrack.mimeType);
-        // console.log("AAAA", audio.getAttribute("type"));
-
-        console.log(playerStore.activeTrack.mimeType, playerStore.activeTrack.downloadUrl);
+        const src = getPlayableSourceUrl(playerStore.activeTrack);
+        if (src) {
+          source.src = src;
+          // safari(iOS) cannot detect the mime type(especially flac) from the binary.
+          source.type = playerStore.activeTrack.file.mimeType;
+        }
       }
-      audio.pause();
+      // audio.pause();
       audio.load();
       audio.play().catch((error) => {
         playerStore.pause();
@@ -98,26 +109,62 @@ export const AudioPlayer = () => {
       return;
     }
 
+    console.log("Setting media session handlers");
+
     ms.setActionHandler("play", () => {
+      console.log("Play");
       playerStore.play();
     });
     ms.setActionHandler("pause", () => {
+      console.log("Pause");
       playerStore.pause();
     });
     ms.setActionHandler("previoustrack", () => {
-      console.log("Previous track");
+      playerStore.playPreviousTrack();
     });
     ms.setActionHandler("nexttrack", () => {
-      console.log("Next track");
+      playerStore.playNextTrack();
     });
+    ms.setActionHandler("seekbackward", null);
+    ms.setActionHandler("seekforward", null);
 
     return () => {
       ms.setActionHandler("play", null);
       ms.setActionHandler("pause", null);
       ms.setActionHandler("previoustrack", null);
       ms.setActionHandler("nexttrack", null);
+      ms.setActionHandler("seekbackward", null);
+      ms.setActionHandler("seekforward", null);
     };
-  }, []);
+  }, [playerStore]);
+
+  useEffect(() => {
+    const ms = window.navigator.mediaSession;
+    if (!ms) return;
+
+    if (playerStore.activeTrack) {
+      console.log("Setting metadata", playerStore.activeTrack.file.name);
+      ms.metadata = new MediaMetadata({
+        title: playerStore.activeTrack.file.name,
+        // artist: playerStore.activeTrack.file.owner,
+        // album: playerStore.activeTrack.file.parentId,
+        // artwork: [
+        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "96x96", type: "image/png" },
+        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "128x128", type: "image/png" },
+        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "192x192", type: "image/png" },
+        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "256x256", type: "image/png" },
+        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "384x384", type: "image/png" },
+        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "512x512", type: "image/png" },
+        // ],
+      });
+    }
+
+    ms.playbackState = playerStore.isPlaying ? "playing" : "paused";
+
+    return () => {
+      ms.metadata = null;
+    }
+  }, [playerStore])
 
   return (
     <audio ref={audioRef}>
