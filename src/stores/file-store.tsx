@@ -35,7 +35,7 @@ interface FileStoreProps {
   getFileById: (id: string) => Promise<BaseFileItem>;
   getChildren: (id: string) => Promise<BaseFileItem[]>;
   hasTrackBlobInLocal: (id: string) => Promise<boolean>;
-  requestDownloadTrackBlob: (id: string) => Promise<Blob>;
+  getTrackBlob: (id: string) => Promise<Blob | undefined>;
   rootFiles: BaseFileItem[] | undefined;
   configured: boolean;
 }
@@ -53,7 +53,7 @@ export const FileStore = createContext<FileStoreProps>({
   hasTrackBlobInLocal: async (id: string) => {
     throw new Error("Not implemented");
   },
-  requestDownloadTrackBlob: async (id: string) => {
+  getTrackBlob: async (id: string) => {
     throw new Error("Not implemented");
   },
   rootFiles: undefined,
@@ -246,7 +246,7 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
               db.createObjectStore("roots", { keyPath: "id" });
             }
             {
-              db.createObjectStore("blobs", { keyPath: "id" })
+              db.createObjectStore("blobs")
             }
           };
         });
@@ -286,6 +286,7 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
         });
 
         const roots = await Promise.all(rootsPromise);
+        roots.sort((a, b) => a.name.localeCompare(b.name));
         setRootFiles(roots);
       }
     };
@@ -422,16 +423,38 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       throw new Error("Item is not a track");
     }
 
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      const request = fileDb?.transaction("blobs", "readwrite").objectStore("blobs").get(id);
-      request.onsuccess = (event) => {
-        const item = (event.target as IDBRequest).result;
-        resolve(item);
-      };
-      request.onerror = (event) => {
-        reject((event.target as IDBRequest).error);
-      };
-    });
+    {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        const request = fileDb?.transaction("blobs", "readwrite").objectStore("blobs").get(id);
+        request.onsuccess = (event) => {
+          const item = (event.target as IDBRequest).result;
+          resolve(item);
+        };
+        request.onerror = (event) => {
+          reject((event.target as IDBRequest).error);
+        };
+      });
+
+      if (blob) return blob;
+    }
+
+    if (!driveClient) return undefined;
+
+
+    let downloadUrl: string;
+    {
+      const response = await driveClient.api(`/me/drive/items/${id}?select=id,@microsoft.graph.downloadUrl`).get();
+      downloadUrl = response['@microsoft.graph.downloadUrl'];
+    }
+  
+    let blob: Blob;
+
+    {
+      const response = await fetch(downloadUrl);
+      blob = await response.blob();
+    }
+
+    fileDb.transaction("blobs", "readwrite").objectStore("blobs").put(blob, id);
 
     return blob;
   }
@@ -458,35 +481,6 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
     return count > 0;
   }
 
-  const requestDownloadTrackBlob = async (id: string) => {
-    if (!configured) {
-      throw new Error("File store not configured");
-    }
-    if (!driveClient) {
-      throw new Error("Drive client not initialized");
-    }
-    if (!fileDb) {
-      throw new Error("File database not initialized");
-    }
-
-    const track = await getFileItemFromIdb(fileDb, id) as AudioTrackFileItem;
-    if (track.type !== 'audio-track') {
-      throw new Error("Item is not a track");
-    }
-
-    const blob = await getTrackBlob(id);
-    if (blob) {
-      return blob;
-    }
-
-    const response = await driveClient.api(`/me/drive/items/${id}/content`).responseType(ResponseType.BLOB).get();
-    const blobData = response.parsedBody as Blob;
-
-    fileDb.transaction("blobs", "readwrite").objectStore("blobs").put(blobData, id);
-
-    return blobData;
-  }
-
   return (
     <FileStore.Provider value={{
       getFileByPath,
@@ -495,7 +489,7 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       getChildren,
       configured,
       hasTrackBlobInLocal,
-      requestDownloadTrackBlob,
+      getTrackBlob,
     }}>
       {children}
     </FileStore.Provider>

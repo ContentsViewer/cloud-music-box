@@ -6,8 +6,11 @@ import { enqueueSnackbar } from "notistack";
 
 const getPlayableSourceUrl = (track: AudioTrack) => {
   if (track.blob) {
+    console.log("Using blob URL")
     return URL.createObjectURL(track.blob);
   }
+
+  console.log("Using remote URL")
   return track.remoteUrl;
 }
 

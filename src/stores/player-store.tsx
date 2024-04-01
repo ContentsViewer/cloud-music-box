@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { AudioTrackFileItem, useFileStore } from "./file-store";
+import { enqueueSnackbar } from "notistack";
 
 
 /**
@@ -45,6 +46,34 @@ export const usePlayerStore = () => {
   return useContext(PlayerStore);
 }
 
+const cacheBlobs = (currentIndex: number, tracks: AudioTrack[], fileStore: ReturnType<typeof useFileStore>) => {
+  const currentTrack = tracks[currentIndex];
+
+  const process = [currentIndex, currentIndex + 1, currentIndex + 2].map((index) => {
+    if (index >= tracks.length) {
+      return Promise.resolve();
+    }
+
+    const track = tracks[index];
+    if (track.blob) {
+      return Promise.resolve();
+    }
+
+    return fileStore.getTrackBlob(track.file.id).then((blob) => {
+      track.blob = blob;
+    }).catch((error) => {
+      console.error(error);
+      enqueueSnackbar(`${error}`, { variant: "error" });
+    });
+  })
+
+  Promise.all(process).then(() => {
+    console.log("Blobs cached");
+  }).catch((error) => {
+    console.error(error);
+    enqueueSnackbar(`${error}`, { variant: "error" });
+  });
+}
 
 
 export const PlayerStoreProvider = ({ children }: { children: React.ReactNode }) => {
@@ -75,10 +104,10 @@ export const PlayerStoreProvider = ({ children }: { children: React.ReactNode })
       setTracks(currentTracks);
     }
 
+    cacheBlobs(index, currentTracks, fileStore);
+
     setActiveTrackIndex(index);
     setActiveTrack(currentTracks[index]);
-
-    console.log("Playing track", currentTracks[index]);
 
     setIsPlaying(true);
   };
