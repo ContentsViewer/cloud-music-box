@@ -1,3 +1,5 @@
+'use client'
+
 import { ListItemButton, ListItemIcon, ListItemText } from "@mui/material";
 import FolderIcon from '@mui/icons-material/Folder';
 import { AudioFileOutlined, CloudOff, InsertDriveFileOutlined } from '@mui/icons-material';
@@ -6,7 +8,7 @@ interface FileListItemBasicProps {
   name: string;
   secondaryName?: string;
   icon: React.ReactElement;
-  onClick?: () => void;
+  onClick?: (event: any) => void;
   disabled?: boolean;
   
 }

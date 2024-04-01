@@ -1,3 +1,5 @@
+'use client'
+
 import { Card, SxProps, Theme } from "@mui/material"
 
 interface MiniPlayerProps {

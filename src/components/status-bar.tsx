@@ -1,3 +1,5 @@
+'use client'
+
 import { AppBar, Box, Typography, colors } from "@mui/material";
 import { useEffect, useState } from "react";
 import { useNetworkMonitor } from "../stores/network-monitor";

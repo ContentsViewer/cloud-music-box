@@ -1,3 +1,5 @@
+'use client'
+
 import { AudioTrackFileItem, BaseFileItem, FolderItem } from "../stores/file-store";
 import { useRouter } from 'next/navigation';
 import { FileListItemBasic } from "./file-list-item";
@@ -28,8 +30,10 @@ export function FileList(props: FileListProps) {
             disabled={disabled}
             key={file.id} name={file.name}
             icon={<FolderIcon />}
-            onClick={() => {
-              router.push(`/files?id=${file.id}`);
+            onClick={(event) => {
+              //window.history.pushState({}, '', `/files#${file.id}`);
+              // event.preventDefault();
+              router.push(`/files#${file.id}`);
             }} />
         }
         if (file.type === 'audio-track') {
