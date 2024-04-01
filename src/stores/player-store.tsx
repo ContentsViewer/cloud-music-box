@@ -89,7 +89,6 @@ export const PlayerStoreProvider = ({ children }: { children: React.ReactNode })
 
   const play = () => {
     setIsPlaying(activeTrack !== null);
-    console.log(activeTrack !== null, activeTrack);
   };
 
   const playTrack = (index: number, files?: AudioTrackFileItem[]) => {

@@ -16,7 +16,6 @@ export default function Page() {
   const params = useParams();
   
   useEffect(() => {
-    console.log("AAAAA");
     setFolderId(window.location.hash.slice(1));
   }, [params])
 
@@ -24,7 +23,6 @@ export default function Page() {
     if (!fileStore.configured) {
       return;
     }
-    console.log(folderId)
 
     const getFiles = async () => {
       if (!folderId) {
