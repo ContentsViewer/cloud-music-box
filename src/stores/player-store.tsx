@@ -107,6 +107,7 @@ const reducer = (state: PlayerStateProps, action: any) => {
       const { fileStore } = action.payload as { fileStore: ReturnType<typeof useFileStore> };
 
       console.log("Playing next track");
+      console.trace();
       if (state.tracks.length === 0) {
         return state;
       }

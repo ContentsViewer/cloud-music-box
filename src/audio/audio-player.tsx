@@ -17,7 +17,10 @@ const getPlayableSourceUrl = (track: AudioTrack) => {
 
 export const AudioPlayer = () => {
   const [playerState, playerDispatch] = usePlayerStore();
-  const fileStoreRef = useRef(useFileStore());
+  const fileStore = useFileStore();
+
+  const fileStoreRef = useRef(fileStore);
+  fileStoreRef.current = fileStore;
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const sourceRef = useRef<HTMLSourceElement>(null);
@@ -43,6 +46,7 @@ export const AudioPlayer = () => {
     }
 
     const onEnded = () => {
+      console.log("Track ended")
       playerDispatch({ type: "playNextTrack", payload: { fileStore: fileStoreRef.current } });
     }
 
@@ -96,6 +100,7 @@ export const AudioPlayer = () => {
           source.src = src;
           // safari(iOS) cannot detect the mime type(especially flac) from the binary.
           source.type = playerState.activeTrack.file.mimeType;
+          console.log("Setting source", src, source.type)
         }
       }
       // audio.pause();
@@ -131,6 +136,7 @@ export const AudioPlayer = () => {
       // playPreviousTrack();
     });
     ms.setActionHandler("nexttrack", () => {
+      console.log("Click next track")
       playerDispatch({ type: "playNextTrack", payload: { fileStore: fileStoreRef.current } });
     });
     ms.setActionHandler("seekbackward", null);
