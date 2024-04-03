@@ -30,8 +30,6 @@ export const AudioPlayer = () => {
     const source = sourceRef.current;
     if (!audio || !source) return;
 
-    console.log(audio)
-
     const onError = (error: any) => {
       console.log(error);
       playerDispatch({ type: "pause" });
@@ -44,6 +42,9 @@ export const AudioPlayer = () => {
     const onTimeUpdate = () => {
 
     }
+    const onPlay = () => {
+      console.log("Track started playing")
+    }
 
     const onEnded = () => {
       console.log("Track ended")
@@ -54,6 +55,7 @@ export const AudioPlayer = () => {
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("durationchange", onDurationChange);
     audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("play", onPlay);
 
     
     console.log("Audio player initialized");
@@ -63,6 +65,7 @@ export const AudioPlayer = () => {
       audio.removeEventListener("error", onError);
       audio.removeEventListener("durationchange", onDurationChange);
       audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("play", onPlay);
 
       audio.pause();
       source.removeAttribute("src");

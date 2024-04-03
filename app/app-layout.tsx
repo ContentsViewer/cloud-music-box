@@ -25,14 +25,22 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   })
   return (
-    <SnackbarProvider>
+    <SnackbarProvider
+      anchorOrigin={{
+        vertical: 'bottom',
+        horizontal: 'left',
+      }}
+      classes={{
+        containerAnchorOriginBottomLeft: 'snackbar-container'
+      }}
+    >
       <NetworkMonitorProvider>
         <FileStoreProvider>
           <PlayerStoreProvider>
             <AudioPlayer />
             <StatusBar />
             <Box sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', mt: 4, mb: 10 }}>{children}</Box>
-            <MiniPlayer sx={{ position: "fixed", bottom: 0 }} />
+            <MiniPlayer sx={{ position: "fixed", bottom: 0, left: 0, right: 0 }} />
           </PlayerStoreProvider>
         </FileStoreProvider>
       </NetworkMonitorProvider>

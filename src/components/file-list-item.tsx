@@ -7,6 +7,7 @@ import { useNetworkMonitor } from "../stores/network-monitor";
 import { useEffect, useState } from "react";
 import { useFileStore } from "../stores/file-store";
 import { enqueueSnackbar } from "notistack";
+import { usePlayerStore } from "../stores/player-store";
 
 interface FileListItemBasicProps {
   name: string;
@@ -15,13 +16,14 @@ interface FileListItemBasicProps {
   onClick?: (event: any) => void;
   disabled?: boolean;
   fileStatus: 'online' | 'offline' | 'local';
+  selected?: boolean;
 }
 
 export function FileListItemBasic(
-  { name, secondaryName, icon, onClick, disabled, fileStatus }: FileListItemBasicProps
+  { name, secondaryName, icon, onClick, disabled, fileStatus, selected }: FileListItemBasicProps
 ) {
   return (
-    <ListItemButton onClick={onClick} disabled={disabled}>
+    <ListItemButton onClick={onClick} disabled={disabled} selected={selected}>
       <ListItemIcon>{icon}</ListItemIcon>
       <ListItemText
         primaryTypographyProps={{
@@ -55,6 +57,8 @@ export function FileListItemAudioTrack(
   const [fileStatus, setFileStatus] = useState<'online' | 'offline' | 'local'>('offline');
   const networkMonitor = useNetworkMonitor();
   const fileStore = useFileStore();
+  const [playerState] = usePlayerStore();
+
 
   useEffect(() => {
     fileStore.hasTrackBlobInLocal(fileId).then((hasBlob) => {
@@ -70,6 +74,7 @@ export function FileListItemAudioTrack(
       name={name}
       icon={<AudioFileOutlined />}
       fileStatus={fileStatus}
+      selected={playerState.activeTrack?.file.id === fileId}
       disabled={fileStatus === 'offline'}
       onClick={onClick}
     />

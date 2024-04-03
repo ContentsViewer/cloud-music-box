@@ -35,3 +35,7 @@ body {
 html, body {
   min-height: 100vh;
 }
+
+.snackbar-container {
+  bottom: 80px !important;
+}

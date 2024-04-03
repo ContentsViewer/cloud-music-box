@@ -79,15 +79,11 @@ const reducer = (state: PlayerStateProps, action: any) => {
           remoteUrl: file.downloadUrl,
         };
       });
-      state.tracks = currentTracks;
     }
 
     cacheBlobs(index, currentTracks, fileStore);
 
-    state.activeTrackIndex = index;
-    state.activeTrack = currentTracks[index];
-    state.isPlaying = true;
-    return { ...state };
+    return { ...state, tracks: currentTracks, activeTrackIndex: index, activeTrack: currentTracks[index], isPlaying: true};
   }
   switch (action.type) {
     case "play": {
@@ -107,7 +103,6 @@ const reducer = (state: PlayerStateProps, action: any) => {
       const { fileStore } = action.payload as { fileStore: ReturnType<typeof useFileStore> };
 
       console.log("Playing next track");
-      console.trace();
       if (state.tracks.length === 0) {
         return state;
       }
