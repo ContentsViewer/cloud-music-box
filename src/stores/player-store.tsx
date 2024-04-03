@@ -35,6 +35,7 @@ type Action =
   | { type: "play" }
   | { type: "pause" }
   | { type: "playTrack", payload: { index: number, tracks: AudioTrack[], isActiveTrackLoading: boolean } }
+  | { type: "activeTrackLoaded" }
 
 export const PlayerDispatchContext = createContext<Dispatch<Action>>(() => { });
 
@@ -53,7 +54,7 @@ export const usePlayerStore = () => {
       });
     }
 
-    cacheBlobs(index, currentTracks, fileStore);
+    cacheBlobs(index, currentTracks, fileStore, dispatch);
 
     const track = currentTracks[index];
     const isActiveTrackLoading = !track.blob;
@@ -87,7 +88,9 @@ export const usePlayerStore = () => {
   return [state, actions] as const;
 }
 
-const cacheBlobs = (currentIndex: number, tracks: AudioTrack[], fileStore: ReturnType<typeof useFileStore>) => {
+const cacheBlobs = (
+  currentIndex: number, tracks: AudioTrack[], fileStore: ReturnType<typeof useFileStore>,
+  dispatch: React.Dispatch<Action>) => {
 
   [currentIndex, currentIndex + 1, currentIndex + 2].reduce((promiseChain, index) => {
     return promiseChain.then(() => {
@@ -102,7 +105,9 @@ const cacheBlobs = (currentIndex: number, tracks: AudioTrack[], fileStore: Retur
 
       return fileStore.getTrackBlob(track.file.id).then((blob) => {
         track.blob = blob;
-        console.log("!!!");
+        if (index === currentIndex) {
+          dispatch({ type: "activeTrackLoaded" })
+        }
       }).catch((error) => {
         console.error(error);
         enqueueSnackbar(`${error}`, { variant: "error" });
@@ -124,6 +129,9 @@ const reducer = (state: PlayerStateProps, action: Action) => {
     }
     case "pause": {
       return { ...state, isPlaying: false };
+    }
+    case "activeTrackLoaded": {
+      return { ...state, isActiveTrackLoading: false };
     }
     default: {
       throw new Error(`Unknown action: ${action}`);

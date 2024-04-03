@@ -5,16 +5,6 @@ import { usePlayerStore, AudioTrack } from "../stores/player-store";
 import { enqueueSnackbar } from "notistack";
 import { useFileStore } from "../stores/file-store";
 
-const getPlayableSourceUrl = (track: AudioTrack) => {
-  if (track.blob) {
-    console.log("Using blob URL")
-    return URL.createObjectURL(track.blob);
-  }
-
-  console.log("Using remote URL")
-  return track.remoteUrl;
-}
-
 export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore();
   const playerActionsRef = useRef(playerActions);
@@ -93,22 +83,28 @@ export const AudioPlayer = () => {
       return;
     }
 
-    if (source.src) {
-      source.src = "";
-      source.removeAttribute("src");
+    if (playerState.isActiveTrackLoading) {
+      return;
     }
 
-    if (!source.src) {
-      if (playerState.activeTrack) {
-        const src = getPlayableSourceUrl(playerState.activeTrack);
-        if (src) {
-          source.src = src;
-          // safari(iOS) cannot detect the mime type(especially flac) from the binary.
-          source.type = playerState.activeTrack.file.mimeType;
-          console.log("Setting source", src, source.type)
-        }
+    if (source.src) {
+      const previousSrc = source.src;
+      source.src = "";
+      source.removeAttribute("src");
+      URL.revokeObjectURL(previousSrc);
+    }
+
+
+    if (playerState.activeTrack) {
+      const src = playerState.activeTrack.blob ? URL.createObjectURL(playerState.activeTrack.blob) : undefined;
+      
+      if (src) {
+        source.src = src;
+        // safari(iOS) cannot detect the mime type(especially flac) from the binary.
+        source.type = playerState.activeTrack.file.mimeType;
+        console.log("Setting source", src, source.type)
       }
-      // audio.pause();
+
       audio.load();
       audio.play().catch((error) => {
         playerActionsRef.current.pause();
