@@ -16,9 +16,11 @@ const getPlayableSourceUrl = (track: AudioTrack) => {
 }
 
 export const AudioPlayer = () => {
-  const [playerState, playerDispatch] = usePlayerStore();
-  const fileStore = useFileStore();
+  const [playerState, playerActions] = usePlayerStore();
+  const playerActionsRef = useRef(playerActions);
+  playerActionsRef.current = playerActions;
 
+  const fileStore = useFileStore();
   const fileStoreRef = useRef(fileStore);
   fileStoreRef.current = fileStore;
 
@@ -31,8 +33,8 @@ export const AudioPlayer = () => {
     if (!audio || !source) return;
 
     const onError = (error: any) => {
-      console.log(error);
-      playerDispatch({ type: "pause" });
+      console.error(error);
+      playerActionsRef.current.pause();
       enqueueSnackbar(`${error}`, { variant: "error" });
     }
 
@@ -48,7 +50,7 @@ export const AudioPlayer = () => {
 
     const onEnded = () => {
       console.log("Track ended")
-      playerDispatch({ type: "playNextTrack", payload: { fileStore: fileStoreRef.current } });
+      playerActionsRef.current.playNextTrack(fileStoreRef.current);
     }
 
     audio.addEventListener("error", onError);
@@ -57,7 +59,7 @@ export const AudioPlayer = () => {
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("play", onPlay);
 
-    
+
     console.log("Audio player initialized");
 
     return () => {
@@ -73,7 +75,7 @@ export const AudioPlayer = () => {
       audio.load();
       console.log("Audio player disposed");
     }
-  }, [playerDispatch])
+  }, [])
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -109,14 +111,14 @@ export const AudioPlayer = () => {
       // audio.pause();
       audio.load();
       audio.play().catch((error) => {
-        playerDispatch({ type: "pause" });
+        playerActionsRef.current.pause();
 
         console.error(error);
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
       enqueueSnackbar("Playing", { variant: "info" });
     }
-  }, [playerState, playerDispatch]);
+  }, [playerState]);
 
 
   useEffect(() => {
@@ -129,18 +131,18 @@ export const AudioPlayer = () => {
 
     ms.setActionHandler("play", () => {
       console.log("Play");
-      playerDispatch({ type: "play" });
+      playerActionsRef.current.play();
     });
     ms.setActionHandler("pause", () => {
       console.log("Pause");
-      playerDispatch({ type: "pause" });
+      playerActionsRef.current.pause();
     });
     ms.setActionHandler("previoustrack", () => {
       // playPreviousTrack();
     });
     ms.setActionHandler("nexttrack", () => {
       console.log("Click next track")
-      playerDispatch({ type: "playNextTrack", payload: { fileStore: fileStoreRef.current } });
+      playerActionsRef.current.playNextTrack(fileStoreRef.current);
     });
     ms.setActionHandler("seekbackward", null);
     ms.setActionHandler("seekforward", null);
@@ -154,7 +156,7 @@ export const AudioPlayer = () => {
       ms.setActionHandler("seekforward", null);
       console.log("Unsetting media session handlers");
     };
-  }, [playerDispatch]);
+  }, []);
 
   useEffect(() => {
     const ms = window.navigator.mediaSession;

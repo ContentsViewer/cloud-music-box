@@ -10,7 +10,7 @@ interface MiniPlayerProps {
 };
 
 export const MiniPlayer = (props: MiniPlayerProps) => {
-  const [playerState, playerDispatch] = usePlayerStore();
+  const [playerState, playerActions] = usePlayerStore();
   const fileStore = useFileStore();
 
   const title = playerState.activeTrack?.file.name || "No track playing";
@@ -34,15 +34,15 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
       </IconButton>
       <IconButton onClick={() => { 
         if (playerState.isPlaying) {
-          playerDispatch({ type: "pause" });
+          playerActions.pause();
         } else {
-          playerDispatch({ type: "play" });
+          playerActions.play();
         }
       }}>
         {playerState.isPlaying ? <Stop /> : <PlayArrow />}
       </IconButton>
       <IconButton onClick={() => {
-        playerDispatch({ type: "playNextTrack", payload: { fileStore } });
+        playerActions.playNextTrack(fileStore);
       }}>
         <SkipNext />
       </IconButton>
