@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { Dispatch, createContext, useContext, useEffect, useState } from "react";
 import { AudioTrackFileItem, useFileStore } from "./file-store";
 import { enqueueSnackbar } from "notistack";
 
@@ -14,41 +14,34 @@ export interface AudioTrack {
   file: AudioTrackFileItem;
 }
 
-
-interface PlayerStoreProps {
+interface PlayerStateProps {
   isPlaying: boolean;
-  play: () => void;
-  playTrack: (index: number, trackFiles: AudioTrackFileItem[]) => void;
-  playNextTrack: () => void;
-  playPreviousTrack: () => void;
-  pause: () => void;
   activeTrack: AudioTrack | null;
+  tracks: AudioTrack[];
+  activeTrackIndex: number;
 }
 
-export const PlayerStore = createContext<PlayerStoreProps>({
+export const PlayerStateContext = createContext<PlayerStateProps>({
   isPlaying: false,
-  play: () => { },
-  playTrack: (index: number, trackFiles: AudioTrackFileItem[]) => {
-    throw new Error("Not implemented");
-  },
-  pause: () => { },
-  playNextTrack: () => {
-    throw new Error("Not implemented");
-  },
-  playPreviousTrack: () => {
-    throw new Error("Not implemented");
-  },
   activeTrack: null,
+  tracks: [],
+  activeTrackIndex: -1,
 });
 
 
+type Action =
+  | { type: "play" }
+  | { type: "pause" }
+  | { type: "playTrack", payload: { index: number, files?: AudioTrackFileItem[], fileStore: ReturnType<typeof useFileStore> } }
+  | { type: "playNextTrack", payload: { fileStore: ReturnType<typeof useFileStore> } }
+
+export const PlayerDispatchContext = createContext<Dispatch<Action>>(() => { });
+
 export const usePlayerStore = () => {
-  return useContext(PlayerStore);
+  return [useContext(PlayerStateContext), useContext(PlayerDispatchContext)] as const;
 }
 
 const cacheBlobs = (currentIndex: number, tracks: AudioTrack[], fileStore: ReturnType<typeof useFileStore>) => {
-  const currentTrack = tracks[currentIndex];
-
   const process = [currentIndex, currentIndex + 1, currentIndex + 2].map((index) => {
     if (index >= tracks.length) {
       return Promise.resolve();
@@ -76,23 +69,9 @@ const cacheBlobs = (currentIndex: number, tracks: AudioTrack[], fileStore: Retur
 }
 
 
-export const PlayerStoreProvider = ({ children }: { children: React.ReactNode }) => {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [activeTrack, setActiveTrack] = useState<AudioTrack | null>(null);
-  const [tracks, setTracks] = useState<AudioTrack[]>([]);
-
-  // The index of the active track in the tracks array.
-  // If no track is active, this is -1.
-  const [activeTrackIndex, setActiveTrackIndex] = useState<number>(-1);
-
-  const fileStore = useFileStore();
-
-  const play = () => {
-    setIsPlaying(activeTrack !== null);
-  };
-
-  const playTrack = (index: number, files?: AudioTrackFileItem[]) => {
-    let currentTracks = tracks;
+const reducer = (state: PlayerStateProps, action: any) => {
+  const playTrack = (state: PlayerStateProps, fileStore: ReturnType<typeof useFileStore>, index: number, files?: AudioTrackFileItem[]) => {
+    let currentTracks = state.tracks;
     if (files) {
       currentTracks = files.map((file) => {
         return {
@@ -100,59 +79,69 @@ export const PlayerStoreProvider = ({ children }: { children: React.ReactNode })
           remoteUrl: file.downloadUrl,
         };
       });
-      setTracks(currentTracks);
+      state.tracks = currentTracks;
     }
 
     cacheBlobs(index, currentTracks, fileStore);
 
-    setActiveTrackIndex(index);
-    setActiveTrack(currentTracks[index]);
-
-    setIsPlaying(true);
-  };
-
-  const pause = () => {
-    setIsPlaying(false);
-  };
-
-  const playNextTrack = () => {
-    console.log("Playing next track");
-    if (tracks.length === 0) {
-      return;
-    }
-
-    // If the queue has tracks but not an activeTrack.
-    // play the first track instead.
-    if (activeTrackIndex === -1) {
-      playTrack(0)
-      return;
-    }
-
-    const isTheLastTrack = tracks.length === activeTrackIndex + 1;
-    if (isTheLastTrack) {
-      setIsPlaying(false);
-      return;
-    }
-
-    const newIndex = isTheLastTrack ? 0 : activeTrackIndex + 1;
-    playTrack(newIndex);
+    state.activeTrackIndex = index;
+    state.activeTrack = currentTracks[index];
+    state.isPlaying = true;
+    return { ...state };
   }
+  switch (action.type) {
+    case "play": {
+      let currentTrack = state.activeTrack;
+      return { ...state, isPlaying: currentTrack !== null };
+    }
+    case "playTrack": {
+      const { index, files, fileStore } = action.payload as {
+        index: number, files?: AudioTrackFileItem[], fileStore: ReturnType<typeof useFileStore>
+      };
+      return playTrack(state, fileStore, index, files);
+    }
+    case "pause": {
+      return { ...state, isPlaying: false };
+    }
+    case "playNextTrack": {
+      const { fileStore } = action.payload as { fileStore: ReturnType<typeof useFileStore> };
 
-  const playPreviousTrack = () => {
+      console.log("Playing next track");
+      if (state.tracks.length === 0) {
+        return state;
+      }
 
+      if (state.activeTrackIndex === -1) {
+        return playTrack(state, fileStore, 0);
+      }
+
+      const isTheLastTrack = state.tracks.length === state.activeTrackIndex + 1;
+      if (isTheLastTrack) {
+        return { ...state, isPlaying: false };
+      }
+
+      const newIndex = isTheLastTrack ? 0 : state.activeTrackIndex + 1;
+      return playTrack(state, fileStore, newIndex);
+    }
+    default: {
+      throw new Error(`Unknown action: ${action.type}`);
+    }
   }
+}
+
+export const PlayerStoreProvider = ({ children }: { children: React.ReactNode }) => {
+  const [state, dispatch] = React.useReducer(reducer, {
+    isPlaying: false,
+    activeTrack: null,
+    tracks: [],
+    activeTrackIndex: -1,
+  });
 
   return (
-    <PlayerStore.Provider value={{
-      isPlaying,
-      play,
-      playTrack,
-      pause,
-      activeTrack,
-      playNextTrack,
-      playPreviousTrack,
-    }}>
-      {children}
-    </PlayerStore.Provider>
+    <PlayerStateContext.Provider value={state}>
+      <PlayerDispatchContext.Provider value={dispatch}>
+        {children}
+        </PlayerDispatchContext.Provider>
+    </PlayerStateContext.Provider>
   );
 }

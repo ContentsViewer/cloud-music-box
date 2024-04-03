@@ -14,7 +14,7 @@ export interface FileListProps {
 
 export function FileList(props: FileListProps) {
   const router = useRouter();
-  const playerStore = usePlayerStore();
+  const [playerState, playerDispatch] = usePlayerStore();
   const networkMonitor = useNetworkMonitor();
   const fileStore = useFileStore();
 
@@ -43,7 +43,7 @@ export function FileList(props: FileListProps) {
               if (!props.files) return;
               const tracks = props.files.filter((f) => f.type === 'audio-track') as AudioTrackFileItem[];
               const index = tracks.findIndex((t) => t.id === file.id);
-              playerStore.playTrack(index, tracks);
+              playerDispatch({ type: "playTrack", payload: { index, files: tracks, fileStore } });
             }}
           />
         }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePlayerStore, AudioTrack } from "../stores/player-store";
 import { enqueueSnackbar } from "notistack";
+import { useFileStore } from "../stores/file-store";
 
 const getPlayableSourceUrl = (track: AudioTrack) => {
   if (track.blob) {
@@ -15,8 +16,8 @@ const getPlayableSourceUrl = (track: AudioTrack) => {
 }
 
 export const AudioPlayer = () => {
-  // const [audio, setAudio] = useState<HTMLAudioElement | undefined>();
-  const playerStore = usePlayerStore();
+  const [playerState, playerDispatch] = usePlayerStore();
+  const fileStoreRef = useRef(useFileStore());
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const sourceRef = useRef<HTMLSourceElement>(null);
@@ -26,9 +27,11 @@ export const AudioPlayer = () => {
     const source = sourceRef.current;
     if (!audio || !source) return;
 
+    console.log(audio)
+
     const onError = (error: any) => {
       console.log(error);
-      playerStore.pause();
+      playerDispatch({ type: "pause" });
       enqueueSnackbar(`${error}`, { variant: "error" });
     }
 
@@ -40,7 +43,7 @@ export const AudioPlayer = () => {
     }
 
     const onEnded = () => {
-      playerStore.playNextTrack();
+      playerDispatch({ type: "playNextTrack", payload: { fileStore: fileStoreRef.current } });
     }
 
     audio.addEventListener("error", onError);
@@ -63,7 +66,7 @@ export const AudioPlayer = () => {
       audio.load();
       console.log("Audio player disposed");
     }
-  }, [audioRef, playerStore])
+  }, [playerDispatch])
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -74,9 +77,9 @@ export const AudioPlayer = () => {
       return;
     }
 
-    console.log("Audio player effect", playerStore);
+    console.log("Audio player effect", playerState);
 
-    if (!playerStore.isPlaying) {
+    if (!playerState.isPlaying) {
       audio.pause();
       return;
     }
@@ -87,24 +90,26 @@ export const AudioPlayer = () => {
     }
 
     if (!source.src) {
-      if (playerStore.activeTrack) {
-        const src = getPlayableSourceUrl(playerStore.activeTrack);
+      if (playerState.activeTrack) {
+        const src = getPlayableSourceUrl(playerState.activeTrack);
         if (src) {
           source.src = src;
           // safari(iOS) cannot detect the mime type(especially flac) from the binary.
-          source.type = playerStore.activeTrack.file.mimeType;
+          source.type = playerState.activeTrack.file.mimeType;
         }
       }
       // audio.pause();
       audio.load();
       audio.play().catch((error) => {
-        playerStore.pause();
+        playerDispatch({ type: "pause" });
+
         console.error(error);
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
       enqueueSnackbar("Playing", { variant: "info" });
     }
-  }, [playerStore]);
+  }, [playerState, playerDispatch]);
+
 
   useEffect(() => {
     const ms = window.navigator.mediaSession;
@@ -116,17 +121,17 @@ export const AudioPlayer = () => {
 
     ms.setActionHandler("play", () => {
       console.log("Play");
-      playerStore.play();
+      playerDispatch({ type: "play" });
     });
     ms.setActionHandler("pause", () => {
       console.log("Pause");
-      playerStore.pause();
+      playerDispatch({ type: "pause" });
     });
     ms.setActionHandler("previoustrack", () => {
-      playerStore.playPreviousTrack();
+      // playPreviousTrack();
     });
     ms.setActionHandler("nexttrack", () => {
-      playerStore.playNextTrack();
+      playerDispatch({ type: "playNextTrack", payload: { fileStore: fileStoreRef.current } });
     });
     ms.setActionHandler("seekbackward", null);
     ms.setActionHandler("seekforward", null);
@@ -138,17 +143,18 @@ export const AudioPlayer = () => {
       ms.setActionHandler("nexttrack", null);
       ms.setActionHandler("seekbackward", null);
       ms.setActionHandler("seekforward", null);
+      console.log("Unsetting media session handlers");
     };
-  }, [playerStore]);
+  }, [playerDispatch]);
 
   useEffect(() => {
     const ms = window.navigator.mediaSession;
     if (!ms) return;
 
-    if (playerStore.activeTrack) {
-      console.log("Setting metadata", playerStore.activeTrack.file.name);
+    if (playerState.activeTrack) {
+      console.log("Setting metadata", playerState.activeTrack.file.name);
       ms.metadata = new MediaMetadata({
-        title: playerStore.activeTrack.file.name,
+        title: playerState.activeTrack.file.name,
         // artist: playerStore.activeTrack.file.owner,
         // album: playerStore.activeTrack.file.parentId,
         // artwork: [
@@ -162,12 +168,12 @@ export const AudioPlayer = () => {
       });
     }
 
-    ms.playbackState = playerStore.isPlaying ? "playing" : "paused";
+    ms.playbackState = playerState.isPlaying ? "playing" : "paused";
 
     return () => {
       ms.metadata = null;
     }
-  }, [playerStore])
+  }, [playerState])
 
   return (
     <audio ref={audioRef}>
