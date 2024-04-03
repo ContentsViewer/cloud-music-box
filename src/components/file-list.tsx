@@ -7,6 +7,7 @@ import { usePlayerStore } from "../stores/player-store";
 import { InsertDriveFileOutlined, AudioFileOutlined } from "@mui/icons-material";
 import FolderIcon from '@mui/icons-material/Folder';
 import { useNetworkMonitor } from "../stores/network-monitor";
+import { ListItemIcon } from "@mui/material";
 
 export interface FileListProps {
   files: BaseFileItem[] | undefined;
@@ -30,7 +31,11 @@ export function FileList(props: FileListProps) {
           return <FileListItemBasic
             disabled={disabled}
             key={file.id} name={file.name}
-            icon={<FolderIcon />}
+            icon={
+              <ListItemIcon>
+                <FolderIcon />
+              </ListItemIcon>
+            }
             fileStatus={fileStatus}
             onClick={(event) => {
               router.push(`/files#${file.id}`);
@@ -38,7 +43,7 @@ export function FileList(props: FileListProps) {
         }
         if (file.type === 'audio-track') {
           return <FileListItemAudioTrack
-            key={file.id} fileId={file.id} name={file.name}
+            key={file.id} file={file as AudioTrackFileItem}
             onClick={(event) => {
               if (!props.files) return;
               const tracks = props.files.filter((f) => f.type === 'audio-track') as AudioTrackFileItem[];
@@ -50,7 +55,11 @@ export function FileList(props: FileListProps) {
 
         return <FileListItemBasic
           key={file.id} name={file.name}
-          icon={<InsertDriveFileOutlined />}
+          icon={
+            <ListItemIcon>
+              <InsertDriveFileOutlined />
+            </ListItemIcon>
+          }
           disabled
           fileStatus='local'
         />

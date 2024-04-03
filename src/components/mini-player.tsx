@@ -13,7 +13,10 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
   const [playerState, playerActions] = usePlayerStore();
   const fileStore = useFileStore();
 
-  const title = playerState.activeTrack?.file.name || "No track playing";
+  const activeTrack = playerState.activeTrack;
+
+  const title = activeTrack?.file.metadata?.common.title
+    || activeTrack?.file.name || "No track playing";
 
   return (
     <Card sx={{
@@ -32,7 +35,7 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
       <IconButton>
         <SkipPrevious />
       </IconButton>
-      <IconButton onClick={() => { 
+      <IconButton onClick={() => {
         if (playerState.isPlaying) {
           playerActions.pause();
         } else {

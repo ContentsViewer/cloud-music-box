@@ -1,13 +1,14 @@
 'use client'
 
-import { ListItemButton, ListItemIcon, ListItemText } from "@mui/material";
+import { Avatar, ListItemAvatar, ListItemButton, ListItemIcon, ListItemText } from "@mui/material";
 import FolderIcon from '@mui/icons-material/Folder';
 import { AudioFileOutlined, CloudOff, CloudQueue, InsertDriveFileOutlined, Inventory } from '@mui/icons-material';
 import { useNetworkMonitor } from "../stores/network-monitor";
 import { useEffect, useState } from "react";
-import { useFileStore } from "../stores/file-store";
+import { AudioTrackFileItem, useFileStore } from "../stores/file-store";
 import { enqueueSnackbar } from "notistack";
 import { usePlayerStore } from "../stores/player-store";
+import * as mm from "music-metadata-browser";
 
 interface FileListItemBasicProps {
   name: string;
@@ -24,7 +25,7 @@ export function FileListItemBasic(
 ) {
   return (
     <ListItemButton onClick={onClick} disabled={disabled} selected={selected}>
-      <ListItemIcon>{icon}</ListItemIcon>
+      {icon}
       <ListItemText
         primaryTypographyProps={{
           style: {
@@ -46,35 +47,55 @@ export function FileListItemBasic(
 }
 
 interface FileListItemAudioTrackProps {
-  fileId: string;
-  name: string;
+  file: AudioTrackFileItem;
   onClick?: (event: any) => void;
 }
 
 export function FileListItemAudioTrack(
-  { fileId, name, onClick }: FileListItemAudioTrackProps
+  { file, onClick }: FileListItemAudioTrackProps
 ) {
   const [fileStatus, setFileStatus] = useState<'online' | 'offline' | 'local'>('offline');
   const networkMonitor = useNetworkMonitor();
   const fileStore = useFileStore();
   const [playerState] = usePlayerStore();
+  const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined);
 
+  const title = file.metadata?.common.title || file.name;
 
   useEffect(() => {
-    fileStore.hasTrackBlobInLocal(fileId).then((hasBlob) => {
+    const cover = mm.selectCover(file.metadata?.common.picture);
+    if (cover) {
+      const url = URL.createObjectURL(new Blob([cover.data], { type: cover.format }));
+      setCoverUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+  }, [file.metadata?.common.picture]);
+
+  useEffect(() => {
+    fileStore.hasTrackBlobInLocal(file.id).then((hasBlob) => {
       setFileStatus(hasBlob ? 'local' : networkMonitor.isOnline ? 'online' : 'offline');
     }).catch((error) => {
       console.error(error);
       enqueueSnackbar(`${error}`, { variant: "error" });
     });
-  }, [networkMonitor.isOnline, fileStore, fileId])
+  }, [networkMonitor.isOnline, fileStore, file])
 
   return (
     <FileListItemBasic
-      name={name}
-      icon={<AudioFileOutlined />}
+      name={title}
+      icon={
+        coverUrl ? (
+          <ListItemAvatar>
+            <Avatar src={coverUrl} variant="rounded" />
+          </ListItemAvatar>
+        ) : (
+          <ListItemIcon>
+            <AudioFileOutlined />
+          </ListItemIcon>
+        )
+      }
       fileStatus={fileStatus}
-      selected={playerState.activeTrack?.file.id === fileId}
+      selected={playerState.activeTrack?.file.id === file.id}
       disabled={fileStatus === 'offline'}
       onClick={onClick}
     />

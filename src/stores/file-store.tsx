@@ -5,6 +5,7 @@ import { Client, ResponseType } from "@microsoft/microsoft-graph-client";
 import { enqueueSnackbar } from "notistack";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useNetworkMonitor } from "./network-monitor";
+import * as mm from 'music-metadata-browser';
 
 
 export interface BaseFileItem {
@@ -25,8 +26,8 @@ export interface FolderItem extends BaseFileItem {
 
 export interface AudioTrackFileItem extends BaseFileItem {
   type: 'audio-track';
-  downloadUrl: string;
   mimeType: string;
+  metadata?: mm.IAudioMetadata;
 }
 
 
@@ -112,13 +113,11 @@ async function makeFileItemFromResponseAndSync(responseItem: any, db: IDBDatabas
           name: responseItem.name,
           id: responseItem.id,
           type: 'audio-track',
-          downloadUrl: responseItem['@microsoft.graph.downloadUrl'],
           mimeType: audioMimeType,
         } as AudioTrackFileItem;
       } else {
         dbItem.name = responseItem.name;
         dbItem.type = 'audio-track';
-        (dbItem as AudioTrackFileItem).downloadUrl = responseItem['@microsoft.graph.downloadUrl'];
       }
     } else {
       if (dbItem === undefined) {
@@ -190,6 +189,15 @@ const getRootsAndSync = async (client: Client, db: IDBDatabase) => {
   });
 
   return roots;
+}
+
+const updateTrackMetadata = async (db: IDBDatabase, id: string, blob: Blob) => {
+  const metadata = await mm.parseBlob(blob);
+  console.log(metadata);
+
+  const track = await getFileItemFromIdb(db, id) as AudioTrackFileItem;
+  track.metadata = metadata;
+  db.transaction("files", "readwrite").objectStore("files").put(track);
 }
 
 export const FileStoreProvider = ({ children }: { children: React.ReactNode }) => {
@@ -423,20 +431,20 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       throw new Error("Item is not a track");
     }
 
-    {
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        const request = fileDb?.transaction("blobs", "readwrite").objectStore("blobs").get(id);
-        request.onsuccess = (event) => {
-          const item = (event.target as IDBRequest).result;
-          resolve(item);
-        };
-        request.onerror = (event) => {
-          reject((event.target as IDBRequest).error);
-        };
-      });
+    // {
+    //   const blob = await new Promise<Blob>((resolve, reject) => {
+    //     const request = fileDb?.transaction("blobs", "readwrite").objectStore("blobs").get(id);
+    //     request.onsuccess = (event) => {
+    //       const item = (event.target as IDBRequest).result;
+    //       resolve(item);
+    //     };
+    //     request.onerror = (event) => {
+    //       reject((event.target as IDBRequest).error);
+    //     };
+    //   });
 
-      if (blob) return blob;
-    }
+    //   if (blob) return blob;
+    // }
 
     if (!driveClient) return undefined;
 
@@ -446,12 +454,13 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       const response = await driveClient.api(`/me/drive/items/${id}?select=id,@microsoft.graph.downloadUrl`).get();
       downloadUrl = response['@microsoft.graph.downloadUrl'];
     }
-  
+
     let blob: Blob;
 
     {
       const response = await fetch(downloadUrl);
       blob = await response.blob();
+      await updateTrackMetadata(fileDb, id, blob);
     }
 
     fileDb.transaction("blobs", "readwrite").objectStore("blobs").put(blob, id);

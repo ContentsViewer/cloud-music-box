@@ -10,7 +10,6 @@ import { enqueueSnackbar } from "notistack";
  */
 export interface AudioTrack {
   blob?: Blob;
-  remoteUrl?: string;
   file: AudioTrackFileItem;
 }
 
@@ -49,7 +48,6 @@ export const usePlayerStore = () => {
       currentTracks = files.map((file) => {
         return {
           file,
-          remoteUrl: file.downloadUrl,
         };
       });
     }
