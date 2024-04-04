@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePlayerStore, AudioTrack } from "../stores/player-store";
 import { enqueueSnackbar } from "notistack";
 import { useFileStore } from "../stores/file-store";
+import * as mm from "music-metadata-browser";
 
 export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore();
@@ -40,7 +41,7 @@ export const AudioPlayer = () => {
 
     const onEnded = () => {
       console.log("Track ended")
-      playerActionsRef.current.playNextTrack(fileStoreRef.current);
+      playerActionsRef.current.playNextTrack();
     }
 
     audio.addEventListener("error", onError);
@@ -97,7 +98,7 @@ export const AudioPlayer = () => {
 
     if (playerState.activeTrack) {
       const src = playerState.activeTrack.blob ? URL.createObjectURL(playerState.activeTrack.blob) : undefined;
-      
+
       if (src) {
         source.src = src;
         // safari(iOS) cannot detect the mime type(especially flac) from the binary.
@@ -138,7 +139,7 @@ export const AudioPlayer = () => {
     });
     ms.setActionHandler("nexttrack", () => {
       console.log("Click next track")
-      playerActionsRef.current.playNextTrack(fileStoreRef.current);
+      playerActionsRef.current.playNextTrack();
     });
     ms.setActionHandler("seekbackward", null);
     ms.setActionHandler("seekforward", null);
@@ -158,26 +159,29 @@ export const AudioPlayer = () => {
     const ms = window.navigator.mediaSession;
     if (!ms) return;
 
-    if (playerState.activeTrack) {
+    if (playerState.activeTrack && !playerState.isActiveTrackLoading) {
       console.log("Setting metadata", playerState.activeTrack.file.name);
+      const cover = mm.selectCover(playerState.activeTrack.file.metadata?.common.picture);
+      const artwork = []
+      if (cover) {
+        const coverUrl = URL.createObjectURL(new Blob([cover.data], { type: cover.format }));
+        artwork.push({ src: coverUrl, sizes: "512x512", type: cover.format })
+      }
+
       ms.metadata = new MediaMetadata({
-        title: playerState.activeTrack.file.name,
-        // artist: playerStore.activeTrack.file.owner,
-        // album: playerStore.activeTrack.file.parentId,
-        // artwork: [
-        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "96x96", type: "image/png" },
-        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "128x128", type: "image/png" },
-        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "192x192", type: "image/png" },
-        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "256x256", type: "image/png" },
-        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "384x384", type: "image/png" },
-        //   { src: playerStore.activeTrack.file.thumbnailUrl, sizes: "512x512", type: "image/png" },
-        // ],
+        title: playerState.activeTrack.file.metadata?.common.title || playerState.activeTrack.file.name,
+        artist: playerState.activeTrack.file.metadata?.common.artists?.join(", "),
+        album: playerState.activeTrack.file.metadata?.common.album,
+        artwork: artwork
       });
     }
 
     ms.playbackState = playerState.isPlaying ? "playing" : "paused";
 
     return () => {
+      if (ms.metadata && ms.metadata.artwork.length > 0) {
+        URL.revokeObjectURL(ms.metadata.artwork[0].src);
+      }
       ms.metadata = null;
     }
   }, [playerState])
