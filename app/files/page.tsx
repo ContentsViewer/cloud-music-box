@@ -2,25 +2,27 @@
 
 import { BaseFileItem, useFileStore } from '@/src/stores/file-store';
 import { enqueueSnackbar } from 'notistack';
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { FileList } from '@/src/components/file-list';
 import { useParams, usePathname, useSearchParams } from "next/navigation";
 
 
 export default function Page() {
 
-  const fileStore = useFileStore();
+  const [fileStoreState, fileStoreActions] = useFileStore();
+  const fileStoreActionsRef = useRef(fileStoreActions);
+  fileStoreActionsRef.current = fileStoreActions;
+
   const [files, setFiles] = useState<BaseFileItem[]>([]);
-  // const searchParams = useSearchParams();
   const [folderId, setFolderId] = useState<string | null>(null);
   const params = useParams();
-  
+
   useEffect(() => {
     setFolderId(window.location.hash.slice(1));
   }, [params])
 
   useEffect(() => {
-    if (!fileStore.configured) {
+    if (!fileStoreState.configured) {
       return;
     }
 
@@ -29,7 +31,7 @@ export default function Page() {
         return;
       }
       try {
-        const files = await fileStore.getChildren(folderId);
+        const files = await fileStoreActionsRef.current.getChildren(folderId);
         setFiles(files);
 
       } catch (error) {
@@ -38,7 +40,7 @@ export default function Page() {
       }
     }
     getFiles();
-  }, [fileStore.configured, folderId])
+  }, [fileStoreState, folderId])
 
   return (
     <FileList files={files} />

@@ -4,7 +4,7 @@ import { Avatar, ListItemAvatar, ListItemButton, ListItemIcon, ListItemText } fr
 import FolderIcon from '@mui/icons-material/Folder';
 import { AudioFileOutlined, CloudOff, CloudQueue, InsertDriveFileOutlined, Inventory } from '@mui/icons-material';
 import { useNetworkMonitor } from "../stores/network-monitor";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AudioTrackFileItem, useFileStore } from "../stores/file-store";
 import { enqueueSnackbar } from "notistack";
 import { usePlayerStore } from "../stores/player-store";
@@ -56,7 +56,10 @@ export function FileListItemAudioTrack(
 ) {
   const [fileStatus, setFileStatus] = useState<'online' | 'offline' | 'local'>('offline');
   const networkMonitor = useNetworkMonitor();
-  const fileStore = useFileStore();
+  const [fileStoreState, fileStoreActions] = useFileStore();
+  const fileStoreActionsRef = useRef(fileStoreActions);
+  fileStoreActionsRef.current = fileStoreActions;
+
   const [playerState] = usePlayerStore();
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined);
 
@@ -72,13 +75,13 @@ export function FileListItemAudioTrack(
   }, [file.metadata?.common.picture]);
 
   useEffect(() => {
-    fileStore.hasTrackBlobInLocal(file.id).then((hasBlob) => {
+    fileStoreActionsRef.current.hasTrackBlobInLocal(file.id).then((hasBlob) => {
       setFileStatus(hasBlob ? 'local' : networkMonitor.isOnline ? 'online' : 'offline');
     }).catch((error) => {
       console.error(error);
       enqueueSnackbar(`${error}`, { variant: "error" });
     });
-  }, [networkMonitor.isOnline, fileStore, file])
+  }, [networkMonitor.isOnline, file])
 
   return (
     <FileListItemBasic

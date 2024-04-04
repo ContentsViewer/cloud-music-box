@@ -1,36 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react';
-import { usePlayerStore } from '@/src/stores/player-store';
-import { BaseFileItem, useFileStore } from '@/src/stores/file-store';
 import { FileList } from '@/src/components/file-list';
-import { useRouter } from 'next/navigation';
+import { useFileStore } from '@/src/stores/file-store';
 
-
-// function isSupportedAudioFile(name: string) {
-//   return name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.flac') || name.endsWith('.ogg');
-// }
-
-// let wakeLock: WakeLockSentinel | null = null;
-
-// async function requestWakeLock() {
-//   try {
-//     if ('wakeLock' in navigator) {
-//       wakeLock = await navigator.wakeLock.request('screen');
-//       console.log(wakeLock);
-//     }
-//   } catch (err) {
-//     console.error(`${err.name}, ${err.message}`);
-//   }
-// }
 
 export default function Page() {
-  const playerStore = usePlayerStore();
-  const fileStore = useFileStore();
-  const router = useRouter();
-  const { rootFiles } = fileStore;
+  const [fileStoreState] = useFileStore();
 
   return (
-    <FileList files={rootFiles} />
+    <FileList files={fileStoreState.rootFiles} />
   );
 }

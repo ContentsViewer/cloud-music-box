@@ -36,7 +36,6 @@ export const useThemeStore = () => {
       const image = document.createElement('img');
       image.src = imageSrc;
       const theme = await themeFromImage(image);
-      console.log("!!!", theme);
       dispatch({ type: "setTheme", payload: { theme } });
     }
   }
@@ -83,7 +82,6 @@ export const ThemeStoreProvider = ({ children }: { children: React.ReactNode }) 
       fontFamily: roboto.style.fontFamily,
     },
   });
-  console.log("XXX", theme);
 
   return (
     <ThemeProvider theme={theme}>

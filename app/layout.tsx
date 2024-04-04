@@ -1,5 +1,4 @@
 import "./globals.css";
-import { ThemeProvider } from '@mui/material/styles';
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v13-appRouter';
 import { CssBaseline } from "@mui/material";
 import { AppLayout } from "./app-layout";
