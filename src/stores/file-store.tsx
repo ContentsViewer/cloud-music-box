@@ -193,7 +193,7 @@ const getRootsAndSync = async (client: Client, db: IDBDatabase) => {
 
 const updateTrackMetadata = async (db: IDBDatabase, id: string, blob: Blob) => {
   const metadata = await mm.parseBlob(blob);
-  console.log(metadata);
+  console.log("VVVV", metadata);
 
   const track = await getFileItemFromIdb(db, id) as AudioTrackFileItem;
   track.metadata = metadata;
@@ -431,20 +431,20 @@ export const FileStoreProvider = ({ children }: { children: React.ReactNode }) =
       throw new Error("Item is not a track");
     }
 
-    // {
-    //   const blob = await new Promise<Blob>((resolve, reject) => {
-    //     const request = fileDb?.transaction("blobs", "readwrite").objectStore("blobs").get(id);
-    //     request.onsuccess = (event) => {
-    //       const item = (event.target as IDBRequest).result;
-    //       resolve(item);
-    //     };
-    //     request.onerror = (event) => {
-    //       reject((event.target as IDBRequest).error);
-    //     };
-    //   });
+    {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        const request = fileDb?.transaction("blobs", "readwrite").objectStore("blobs").get(id);
+        request.onsuccess = (event) => {
+          const item = (event.target as IDBRequest).result;
+          resolve(item);
+        };
+        request.onerror = (event) => {
+          reject((event.target as IDBRequest).error);
+        };
+      });
 
-    //   if (blob) return blob;
-    // }
+      if (blob) return blob;
+    }
 
     if (!driveClient) return undefined;
 

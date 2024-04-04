@@ -1,9 +1,9 @@
 import "./globals.css";
 import { ThemeProvider } from '@mui/material/styles';
-import theme from '@/src/theme';
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v13-appRouter';
 import { CssBaseline } from "@mui/material";
 import { AppLayout } from "./app-layout";
+import { ThemeStoreProvider } from "@/src/stores/theme-store";
 
 
 export default function RootLayout({
@@ -19,12 +19,12 @@ export default function RootLayout({
       </head>
       <body>
         <AppRouterCacheProvider>
-          <ThemeProvider theme={theme}>
+          <ThemeStoreProvider>
             <CssBaseline />
             <AppLayout>
               {children}
             </AppLayout>
-          </ThemeProvider>
+          </ThemeStoreProvider>
         </AppRouterCacheProvider>
       </body>
     </html>
