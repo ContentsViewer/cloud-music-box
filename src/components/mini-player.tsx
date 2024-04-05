@@ -45,7 +45,7 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
         {playerState.isPlaying ? <Stop /> : <PlayArrow />}
       </IconButton>
       <IconButton onClick={() => {
-        playerActions.playNextTrack(fileStore);
+        playerActions.playNextTrack();
       }}>
         <SkipNext />
       </IconButton>

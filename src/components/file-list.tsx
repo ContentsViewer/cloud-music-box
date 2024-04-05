@@ -49,7 +49,7 @@ export function FileList(props: FileListProps) {
               if (!props.files) return;
               const tracks = props.files.filter((f) => f.type === 'audio-track') as AudioTrackFileItem[];
               const index = tracks.findIndex((t) => t.id === file.id);
-              console.log('play track', index, tracks);
+              // console.log('play track', index, tracks);
               playerActions.playTrack(index, tracks);
             }}
           />

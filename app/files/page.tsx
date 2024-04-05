@@ -11,6 +11,28 @@ import { useTheme } from '@emotion/react';
 import { useThemeStore } from '@/src/stores/theme-store';
 import { MaterialDynamicColors, hexFromArgb } from '@material/material-color-utilities';
 
+
+function ElevationAppBar(props: { children: React.ReactElement }) {
+  const theme = useTheme();
+  const [themeStoreState,] = useThemeStore();
+
+  const trigger = useScrollTrigger({
+    disableHysteresis: true,
+    threshold: 0,
+  });
+
+  return (
+    <AppBar sx={{
+      backdropFilter: 'blur(16px)',
+      backgroundColor: alpha(
+        hexFromArgb(MaterialDynamicColors.surfaceContainer.getArgb(themeStoreState.scheme)), trigger ? 0.8 : 0),
+      transition: theme.transitions.create(['background-color', 'backdrop-filter']),
+    }} elevation={0}>
+      {props.children}
+    </AppBar>
+  )
+}
+
 export default function Page() {
   const router = useRouter();
 
@@ -18,7 +40,6 @@ export default function Page() {
   const fileStoreActionsRef = useRef(fileStoreActions);
   fileStoreActionsRef.current = fileStoreActions;
 
-  const [themeStoreState,] = useThemeStore();
 
   const [currentFile, setCurrentFile] = useState<BaseFileItem | null>(null);
   const [files, setFiles] = useState<BaseFileItem[]>([]);
@@ -53,12 +74,10 @@ export default function Page() {
     getFiles();
   }, [fileStoreState, folderId])
 
+
   return (
     <Box>
-      <AppBar sx={{
-        backdropFilter: 'blur(16px)',
-        backgroundColor: alpha(hexFromArgb(themeStoreState.m3Theme.schemes.dark.surface), 0.8),
-      }} elevation={0}>
+      <ElevationAppBar>
         <Toolbar>
           <IconButton size='large' edge="start" color="inherit" aria-label="menu" sx={{ mr: 2 }}
             onClick={() => {
@@ -78,7 +97,7 @@ export default function Page() {
             {currentFile?.name || "Files"}
           </Typography>
         </Toolbar>
-      </AppBar>
+      </ElevationAppBar>
       <FileList sx={{ mt: 5 }} files={files} />
     </Box>
   )

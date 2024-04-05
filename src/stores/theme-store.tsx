@@ -4,8 +4,9 @@ import { Roboto } from 'next/font/google';
 import { createTheme } from '@mui/material/styles';
 import { ThemeProvider } from '@mui/material/styles';
 import { useTheme } from '@mui/material/styles';
-import { themeFromImage, Theme, themeFromSourceColor, hexFromArgb } from '@material/material-color-utilities';
+import { themeFromImage, Theme, themeFromSourceColor, hexFromArgb, SchemeContent, sourceColorFromImage, DynamicScheme, argbFromHex, Hct, MaterialDynamicColors } from '@material/material-color-utilities';
 import { Dispatch, createContext, useContext, useReducer } from 'react';
+import { GlobalStyles } from '@mui/material';
 
 const roboto = Roboto({
   weight: ['300', '400', '500', '700'],
@@ -14,15 +15,15 @@ const roboto = Roboto({
 });
 
 interface ThemeStateProps {
-  m3Theme: Theme
+  scheme: DynamicScheme
 }
 
 export const ThemeStateContext = createContext<ThemeStateProps>({
-  m3Theme: themeFromSourceColor(0x6200EE),
+  scheme: new SchemeContent(Hct.fromInt(0x6200EE), true, 0.3),
 });
 
 type Action =
-  | { type: "setTheme"; payload: { theme: Theme } }
+  | { type: "setTheme"; payload: { scheme: DynamicScheme } }
 
 export const ThemeDispatchContext = createContext<Dispatch<Action>>(() => { });
 
@@ -32,11 +33,11 @@ export const useThemeStore = () => {
 
   const actions = {
     applyThemeFromImage: async (imageSrc: string) => {
-      console.log("Applying theme from image");
       const image = document.createElement('img');
       image.src = imageSrc;
-      const theme = await themeFromImage(image);
-      dispatch({ type: "setTheme", payload: { theme } });
+      const sourceColor = await sourceColorFromImage(image);
+      const scheme = new SchemeContent(Hct.fromInt(sourceColor), true, 0.3);
+      dispatch({ type: "setTheme", payload: { scheme } });
     }
   }
   return [state, actions] as const;
@@ -45,7 +46,7 @@ export const useThemeStore = () => {
 const reducer = (state: ThemeStateProps, action: Action) => {
   switch (action.type) {
     case "setTheme":
-      return { ...state, m3Theme: action.payload.theme };
+      return { ...state, scheme: action.payload.scheme };
     default:
       return state;
   }
@@ -53,38 +54,43 @@ const reducer = (state: ThemeStateProps, action: Action) => {
 
 export const ThemeStoreProvider = ({ children }: { children: React.ReactNode }) => {
   const [state, dispatch] = useReducer(reducer, {
-    m3Theme: themeFromSourceColor(0x6200EE),
+    scheme: new SchemeContent(Hct.fromInt(0x6200EE), true, 0.3),
   });
 
   const theme = createTheme({
     palette: {
       mode: 'dark',
       primary: {
-        main: hexFromArgb(state.m3Theme.schemes.dark.primary),
+        main: hexFromArgb(MaterialDynamicColors.primary.getArgb(state.scheme)),
       },
       secondary: {
-        main: hexFromArgb(state.m3Theme.schemes.dark.secondary),
+        main: hexFromArgb(MaterialDynamicColors.secondary.getArgb(state.scheme)),
       },
       background: {
-        default: hexFromArgb(state.m3Theme.schemes.dark.surface),
-        paper: hexFromArgb(state.m3Theme.schemes.dark.surface),
+        default: hexFromArgb(MaterialDynamicColors.surface.getArgb(state.scheme)),
+        paper: hexFromArgb(MaterialDynamicColors.surface.getArgb(state.scheme)),
       },
       error: {
-        main: hexFromArgb(state.m3Theme.schemes.dark.error),
+        main: hexFromArgb(MaterialDynamicColors.error.getArgb(state.scheme)),
       },
       text: {
-        primary: hexFromArgb(state.m3Theme.schemes.dark.onSurface)
+        primary: hexFromArgb(MaterialDynamicColors.onSurface.getArgb(state.scheme))
       }
     },
     typography: {
       fontFamily: roboto.style.fontFamily,
     },
   });
-  // console.log(theme);
-  console.log("ASASASA")
+
+  console.log(theme);
 
   return (
     <ThemeProvider theme={theme}>
+      <GlobalStyles styles={(theme) => ({
+        body: {
+          transition: theme.transitions.create(['background-color', 'transform'])
+        }
+      })} />
       <ThemeStateContext.Provider value={state}>
         <ThemeDispatchContext.Provider value={dispatch}>
           {children}
