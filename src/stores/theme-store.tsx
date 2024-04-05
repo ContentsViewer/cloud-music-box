@@ -14,11 +14,11 @@ const roboto = Roboto({
 });
 
 interface ThemeStateProps {
-  theme: Theme
+  m3Theme: Theme
 }
 
 export const ThemeStateContext = createContext<ThemeStateProps>({
-  theme: themeFromSourceColor(0x6200EE),
+  m3Theme: themeFromSourceColor(0x6200EE),
 });
 
 type Action =
@@ -27,25 +27,25 @@ type Action =
 export const ThemeDispatchContext = createContext<Dispatch<Action>>(() => { });
 
 export const useThemeStore = () => {
-  const theme = useTheme();
   const state = useContext(ThemeStateContext);
   const dispatch = useContext(ThemeDispatchContext);
 
   const actions = {
     applyThemeFromImage: async (imageSrc: string) => {
+      console.log("Applying theme from image");
       const image = document.createElement('img');
       image.src = imageSrc;
       const theme = await themeFromImage(image);
       dispatch({ type: "setTheme", payload: { theme } });
     }
   }
-  return [theme, actions] as const;
+  return [state, actions] as const;
 }
 
 const reducer = (state: ThemeStateProps, action: Action) => {
   switch (action.type) {
     case "setTheme":
-      return { ...state, theme: action.payload.theme };
+      return { ...state, m3Theme: action.payload.theme };
     default:
       return state;
   }
@@ -53,35 +53,35 @@ const reducer = (state: ThemeStateProps, action: Action) => {
 
 export const ThemeStoreProvider = ({ children }: { children: React.ReactNode }) => {
   const [state, dispatch] = useReducer(reducer, {
-    theme: themeFromSourceColor(0x6200EE),
+    m3Theme: themeFromSourceColor(0x6200EE),
   });
-
 
   const theme = createTheme({
     palette: {
       mode: 'dark',
       primary: {
-        main: hexFromArgb(state.theme.schemes.dark.primary),
+        main: hexFromArgb(state.m3Theme.schemes.dark.primary),
       },
       secondary: {
-        main: hexFromArgb(state.theme.schemes.dark.secondary),
+        main: hexFromArgb(state.m3Theme.schemes.dark.secondary),
       },
       background: {
-        default: hexFromArgb(state.theme.schemes.dark.surface),
-        paper: hexFromArgb(state.theme.schemes.dark.surface),
+        default: hexFromArgb(state.m3Theme.schemes.dark.surface),
+        paper: hexFromArgb(state.m3Theme.schemes.dark.surface),
       },
       error: {
-        main: hexFromArgb(state.theme.schemes.dark.error),
+        main: hexFromArgb(state.m3Theme.schemes.dark.error),
       },
-      // text: {
-      //   primary: hexFromArgb(state.theme.schemes.dark.onPrimary),
-      //   secondary: hexFromArgb(state.theme.schemes.dark.onSecondary),
-      // },
+      text: {
+        primary: hexFromArgb(state.m3Theme.schemes.dark.onSurface)
+      }
     },
     typography: {
       fontFamily: roboto.style.fontFamily,
     },
   });
+  // console.log(theme);
+  console.log("ASASASA")
 
   return (
     <ThemeProvider theme={theme}>

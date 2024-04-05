@@ -7,10 +7,11 @@ import { usePlayerStore } from "../stores/player-store";
 import { InsertDriveFileOutlined, AudioFileOutlined } from "@mui/icons-material";
 import FolderIcon from '@mui/icons-material/Folder';
 import { useNetworkMonitor } from "../stores/network-monitor";
-import { ListItemIcon } from "@mui/material";
+import { List, ListItemIcon, SxProps } from "@mui/material";
 
 export interface FileListProps {
   files: BaseFileItem[] | undefined;
+  sx?: SxProps;
 }
 
 export function FileList(props: FileListProps) {
@@ -20,7 +21,7 @@ export function FileList(props: FileListProps) {
   const fileStore = useFileStore();
 
   return (
-    <div>
+    <List sx={props.sx}>
       {props.files?.map((file) => {
         if (file.type === 'folder') {
           const folderItem = file as FolderItem;
@@ -65,6 +66,6 @@ export function FileList(props: FileListProps) {
           fileStatus='local'
         />
       })}
-    </div>
+    </List>
   )
 }

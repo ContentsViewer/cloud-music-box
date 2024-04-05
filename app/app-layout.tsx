@@ -69,7 +69,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <PlayerStoreProvider>
             <ThemeChanger />
             <AudioPlayer />
-            <StatusBar />
+            {/* <StatusBar /> */}
             <Box sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', mt: 4, mb: 10 }}>{children}</Box>
             <MiniPlayer sx={{ position: "fixed", bottom: 0, left: 0, right: 0 }} />
           </PlayerStoreProvider>

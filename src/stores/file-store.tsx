@@ -63,7 +63,24 @@ export const useFileStore = () => {
 
   const actions = {
     getFileById: async (id: string) => {
-      throw new Error("Not implemented");
+      if (!state.configured) {
+        throw new Error("File store not configured");
+      }
+      if (!state.fileDb) {
+        throw new Error("File database not initialized");
+      }
+      {
+        const item = await getFileItemFromIdb(state.fileDb, id);
+        if (item) return item;
+      }
+
+      if (!state.driveClient) {
+        throw new Error("Drive client not connected");
+      }
+
+      const response = await state.driveClient.api(`/me/drive/items/${id}`).get();
+      const item = await makeFileItemFromResponseAndSync(response, state.fileDb);
+      return item;
     },
     getChildren: async (id: string) => {
       if (!state.configured) {
@@ -103,13 +120,12 @@ export const useFileStore = () => {
           return [];
         }
 
-
-        const childrenPromise: Promise<BaseFileItem>[] = childrenIds.map((childId) => {
+        const childrenPromise: Promise<BaseFileItem | undefined>[] = childrenIds.map((childId) => {
           if (!state.fileDb) throw new Error("File database not initialized");
           return getFileItemFromIdb(state.fileDb, childId);
         });
         const children = await Promise.all(childrenPromise);
-        return children;
+        return children.filter((child) => child !== undefined) as BaseFileItem[];
       }
     },
 
@@ -174,11 +190,11 @@ export const useFileStore = () => {
   return [state, actions] as const;
 }
 
-function getFileItemFromIdb(db: IDBDatabase, id: string): Promise<BaseFileItem> {
+function getFileItemFromIdb(db: IDBDatabase, id: string): Promise<BaseFileItem | undefined> {
   return new Promise((resolve, reject) => {
     const request = db.transaction("files", "readwrite").objectStore("files").get(id);
     request.onsuccess = (event) => {
-      const item = (event.target as IDBRequest).result as BaseFileItem;
+      const item = (event.target as IDBRequest).result;
       resolve(item);
     };
     request.onerror = (event) => {
@@ -197,53 +213,42 @@ const audioFormatMapping: { [key: string]: { mimeType: string } } = {
 };
 
 async function makeFileItemFromResponseAndSync(responseItem: any, db: IDBDatabase): Promise<BaseFileItem> {
-  // console.log(responseItem);
-
   let dbItem = await getFileItemFromIdb(db, responseItem.id);
   if (responseItem.folder) {
-    if (dbItem === undefined) {
-      dbItem = {
-        name: responseItem.name,
-        id: responseItem.id,
-        type: 'folder',
-      } as FolderItem;
-    } else {
-      dbItem.name = responseItem.name;
-      dbItem.type = 'folder';
-    }
+    dbItem = {
+      ...dbItem,
+      name: responseItem.name,
+      id: responseItem.id,
+      type: 'folder',
+      parentId: responseItem.parentReference.id,
+    } as FolderItem;
   }
   if (responseItem.file) {
     const ext: string = responseItem.name.split('.').pop();
     const audioMimeType = audioFormatMapping[ext]?.mimeType;
 
     if (audioMimeType !== undefined) {
-      if (dbItem === undefined) {
-        dbItem = {
-          name: responseItem.name,
-          id: responseItem.id,
-          type: 'audio-track',
-          mimeType: audioMimeType,
-        } as AudioTrackFileItem;
-      } else {
-        dbItem.name = responseItem.name;
-        dbItem.type = 'audio-track';
-      }
+      dbItem = {
+        ...dbItem,
+        name: responseItem.name,
+        id: responseItem.id,
+        type: 'audio-track',
+        mimeType: audioMimeType,
+        parentId: responseItem.parentReference.id,
+      } as AudioTrackFileItem;
     } else {
-      if (dbItem === undefined) {
-        dbItem = {
-          name: responseItem.name,
-          id: responseItem.id,
-          type: 'file',
-        } as FileItem;
-      } else {
-        dbItem.name = responseItem.name;
-        dbItem.type = 'file';
-      }
+      dbItem = {
+        ...dbItem,
+        name: responseItem.name,
+        id: responseItem.id,
+        type: 'file',
+        parentId: responseItem.parentReference.id,
+      } as FileItem;
     }
   }
 
   db.transaction("files", "readwrite").objectStore("files").put(dbItem);
-  return dbItem;
+  return dbItem as BaseFileItem;
 }
 
 const acquireAccessToken = async (pca: PublicClientApplication) => {
