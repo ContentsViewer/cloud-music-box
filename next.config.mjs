@@ -235,7 +235,7 @@ export default withPWA({
   //   },
   // ],
 })({
-  basePath: "/cloud-music-client",
+  // basePath: "/cloud-music-client",
   reactStrictMode: true,
   output: "export"
 });

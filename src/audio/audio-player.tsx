@@ -1,39 +1,86 @@
-'use client'
+"use client"
 
-import { useEffect, useRef, useState } from "react";
-import { usePlayerStore, AudioTrack } from "../stores/player-store";
-import { enqueueSnackbar } from "notistack";
-import { useFileStore } from "../stores/file-store";
-import * as mm from "music-metadata-browser";
+import { useEffect, useRef, useState } from "react"
+import { usePlayerStore, AudioTrack } from "../stores/player-store"
+import { enqueueSnackbar } from "notistack"
+import { useFileStore } from "../stores/file-store"
+import * as mm from "music-metadata-browser"
 
 export const AudioPlayer = () => {
-  const [playerState, playerActions] = usePlayerStore();
-  const playerActionsRef = useRef(playerActions);
-  playerActionsRef.current = playerActions;
+  const [playerState, playerActions] = usePlayerStore()
+  const playerActionsRef = useRef(playerActions)
+  playerActionsRef.current = playerActions
 
-  const fileStore = useFileStore();
-  const fileStoreRef = useRef(fileStore);
-  fileStoreRef.current = fileStore;
+  const fileStore = useFileStore()
+  const fileStoreRef = useRef(fileStore)
+  fileStoreRef.current = fileStore
 
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const sourceRef = useRef<HTMLSourceElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const sourceRef = useRef<HTMLSourceElement>(null)
+  
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const timeDomainDataRef = useRef<Float32Array | null>(null)
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
+
+  const makeAudioContext = () => {
+    if (audioContextRef.current) return
+
+    const audio = audioRef.current
+    if (!audio) return
+
+    const audioContext = new AudioContext()
+
+    const analyser = new AnalyserNode(audioContext, {
+      fftSize: 2048,
+    })
+    analyserRef.current = analyser
+    const timeDomainData = new Float32Array(analyser.fftSize)
+    timeDomainDataRef.current = timeDomainData
+
+    const sourceNode = audioContext.createMediaElementSource(audio)
+    sourceNodeRef.current = sourceNode
+
+    analyser.connect(audioContext.destination)
+    sourceNode.connect(analyser)
+
+    audioContextRef.current = audioContext
+    audioContextRef.current = audioContext
+    analyserRef.current = analyser
+    timeDomainDataRef.current = timeDomainData
+  }
 
   useEffect(() => {
-    const audio = audioRef.current;
-    const source = sourceRef.current;
-    if (!audio || !source) return;
+    // if (configured.current) return
+
+    const audio = audioRef.current
+    const source = sourceRef.current
+
+    if (!audio || !source) {
+      return
+    }
+
+    console.log("Initializing audio player")
 
     const onError = (error: any) => {
-      console.error(error);
-      playerActionsRef.current.pause();
-      enqueueSnackbar(`${error}`, { variant: "error" });
+      console.error(error)
+      playerActionsRef.current.pause()
+      enqueueSnackbar(`${error}`, { variant: "error" })
     }
 
-    const onDurationChange = () => {
-
-    }
+    const onDurationChange = () => {}
     const onTimeUpdate = () => {
-
+      const analyser = analyserRef.current
+      const timeDomainData = timeDomainDataRef.current
+      if (!analyser || !timeDomainData) return
+      analyser.getFloatTimeDomainData(timeDomainData)
+      console.log(
+        "Time update",
+        audioRef.current?.currentTime,
+        timeDomainData[0],
+        analyser.fftSize,
+        analyser.frequencyBinCount
+      )
     }
     const onPlay = () => {
       console.log("Track started playing")
@@ -41,148 +88,161 @@ export const AudioPlayer = () => {
 
     const onEnded = () => {
       console.log("Track ended")
-      playerActionsRef.current.playNextTrack();
+      playerActionsRef.current.playNextTrack()
     }
 
-    audio.addEventListener("error", onError);
-    audio.addEventListener("ended", onEnded);
-    audio.addEventListener("durationchange", onDurationChange);
-    audio.addEventListener("timeupdate", onTimeUpdate);
-    audio.addEventListener("play", onPlay);
+    audio.addEventListener("error", onError)
+    audio.addEventListener("ended", onEnded)
+    audio.addEventListener("durationchange", onDurationChange)
+    audio.addEventListener("timeupdate", onTimeUpdate)
+    audio.addEventListener("play", onPlay)
 
-
-    console.log("Audio player initialized");
+    console.log("Audio player initialized")
 
     return () => {
-      audio.removeEventListener("ended", onEnded);
-      audio.removeEventListener("error", onError);
-      audio.removeEventListener("durationchange", onDurationChange);
-      audio.removeEventListener("timeupdate", onTimeUpdate);
-      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("ended", onEnded)
+      audio.removeEventListener("error", onError)
+      audio.removeEventListener("durationchange", onDurationChange)
+      audio.removeEventListener("timeupdate", onTimeUpdate)
+      audio.removeEventListener("play", onPlay)
 
-      audio.pause();
-      source.removeAttribute("src");
-      source.removeAttribute("type");
-      audio.load();
-      console.log("Audio player disposed");
+      audio.pause()
+      source.removeAttribute("src")
+      source.removeAttribute("type")
+      audio.load()
+      console.log("Audio player disposed")
+
+      // configured.current = true
     }
   }, [])
 
   useEffect(() => {
-    const audio = audioRef.current;
-    const source = sourceRef.current;
+    const audio = audioRef.current
+    const source = sourceRef.current
 
     if (!audio || !source) {
-      console.error("Audio player not initialized");
-      return;
+      console.error("Audio player not initialized")
+      return
     }
 
-    console.log("Audio player effect", playerState);
+    console.log("Audio player effect", playerState)
 
     if (!playerState.isPlaying) {
-      audio.pause();
-      return;
+      audio.pause()
+      return
     }
 
+    makeAudioContext();
+
     if (playerState.isActiveTrackLoading) {
-      return;
+      return
     }
 
     if (source.src) {
-      const previousSrc = source.src;
-      source.src = "";
-      source.removeAttribute("src");
-      URL.revokeObjectURL(previousSrc);
+      const previousSrc = source.src
+      source.src = ""
+      source.removeAttribute("src")
+      URL.revokeObjectURL(previousSrc)
     }
 
-
     if (playerState.activeTrack) {
-      const src = playerState.activeTrack.blob ? URL.createObjectURL(playerState.activeTrack.blob) : undefined;
+      const src = playerState.activeTrack.blob
+        ? URL.createObjectURL(playerState.activeTrack.blob)
+        : undefined
 
       if (src) {
-        source.src = src;
+        source.src = src
         // safari(iOS) cannot detect the mime type(especially flac) from the binary.
-        source.type = playerState.activeTrack.file.mimeType;
+        source.type = playerState.activeTrack.file.mimeType
         console.log("Setting source", src, source.type)
       }
 
-      audio.load();
-      audio.play().catch((error) => {
-        playerActionsRef.current.pause();
+      audio.load()
 
-        console.error(error);
+      console.log(audioContextRef.current)
+
+      audio.play().catch(error => {
+        playerActionsRef.current.pause()
+
+        console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
-      enqueueSnackbar("Playing", { variant: "info" });
+      enqueueSnackbar("Playing", { variant: "info" })
     }
-  }, [playerState]);
-
+  }, [playerState])
 
   useEffect(() => {
-    const ms = window.navigator.mediaSession;
+    const ms = window.navigator.mediaSession
     if (!ms) {
-      return;
+      return
     }
 
-    console.log("Setting media session handlers");
+    console.log("Setting media session handlers")
 
     ms.setActionHandler("play", () => {
-      console.log("Play");
-      playerActionsRef.current.play();
-    });
+      console.log("Play")
+      playerActionsRef.current.play()
+    })
     ms.setActionHandler("pause", () => {
-      console.log("Pause");
-      playerActionsRef.current.pause();
-    });
+      console.log("Pause")
+      playerActionsRef.current.pause()
+    })
     ms.setActionHandler("previoustrack", () => {
       // playPreviousTrack();
-    });
+    })
     ms.setActionHandler("nexttrack", () => {
       console.log("Click next track")
-      playerActionsRef.current.playNextTrack();
-    });
-    ms.setActionHandler("seekbackward", null);
-    ms.setActionHandler("seekforward", null);
+      playerActionsRef.current.playNextTrack()
+    })
+    ms.setActionHandler("seekbackward", null)
+    ms.setActionHandler("seekforward", null)
 
     return () => {
-      ms.setActionHandler("play", null);
-      ms.setActionHandler("pause", null);
-      ms.setActionHandler("previoustrack", null);
-      ms.setActionHandler("nexttrack", null);
-      ms.setActionHandler("seekbackward", null);
-      ms.setActionHandler("seekforward", null);
-      console.log("Unsetting media session handlers");
-    };
-  }, []);
+      ms.setActionHandler("play", null)
+      ms.setActionHandler("pause", null)
+      ms.setActionHandler("previoustrack", null)
+      ms.setActionHandler("nexttrack", null)
+      ms.setActionHandler("seekbackward", null)
+      ms.setActionHandler("seekforward", null)
+      console.log("Unsetting media session handlers")
+    }
+  }, [])
 
   useEffect(() => {
-    const ms = window.navigator.mediaSession;
-    if (!ms) return;
+    const ms = window.navigator.mediaSession
+    if (!ms) return
 
     if (playerState.activeTrack && !playerState.isActiveTrackLoading) {
-      console.log("Setting metadata", playerState.activeTrack.file.name);
-      const cover = mm.selectCover(playerState.activeTrack.file.metadata?.common.picture);
+      console.log("Setting metadata", playerState.activeTrack.file.name)
+      const cover = mm.selectCover(
+        playerState.activeTrack.file.metadata?.common.picture
+      )
       const artwork = []
       if (cover) {
-        const coverUrl = URL.createObjectURL(new Blob([cover.data], { type: cover.format }));
+        const coverUrl = URL.createObjectURL(
+          new Blob([cover.data], { type: cover.format })
+        )
         artwork.push({ src: coverUrl, sizes: "512x512", type: cover.format })
       }
 
       ms.metadata = new MediaMetadata({
-        title: playerState.activeTrack.file.metadata?.common.title || playerState.activeTrack.file.name,
-        artist: playerState.activeTrack.file.metadata?.common.artists?.join(", "),
+        title:
+          playerState.activeTrack.file.metadata?.common.title ||
+          playerState.activeTrack.file.name,
+        artist:
+          playerState.activeTrack.file.metadata?.common.artists?.join(", "),
         album: playerState.activeTrack.file.metadata?.common.album,
-        artwork: artwork
-      });
+        artwork: artwork,
+      })
     }
 
-    ms.playbackState = playerState.isPlaying ? "playing" : "paused";
+    ms.playbackState = playerState.isPlaying ? "playing" : "paused"
 
     return () => {
       if (ms.metadata && ms.metadata.artwork.length > 0) {
-        URL.revokeObjectURL(ms.metadata.artwork[0].src);
+        URL.revokeObjectURL(ms.metadata.artwork[0].src)
       }
-      ms.metadata = null;
+      ms.metadata = null
     }
   }, [playerState])
 
@@ -190,5 +250,5 @@ export const AudioPlayer = () => {
     <audio ref={audioRef}>
       <source ref={sourceRef} />
     </audio>
-  );
+  )
 }

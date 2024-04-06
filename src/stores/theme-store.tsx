@@ -82,7 +82,7 @@ export const ThemeStoreProvider = ({ children }: { children: React.ReactNode }) 
     },
   });
 
-  console.log(theme);
+  // console.log(theme);
 
   return (
     <ThemeProvider theme={theme}>
