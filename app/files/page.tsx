@@ -5,9 +5,8 @@ import { enqueueSnackbar } from 'notistack';
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { FileList } from '@/src/components/file-list';
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AppBar, Box, IconButton, Toolbar, Typography, alpha, useScrollTrigger } from '@mui/material';
+import { AppBar, Box, IconButton, Toolbar, Typography, alpha, useScrollTrigger, useTheme } from '@mui/material';
 import { ArrowBack } from '@mui/icons-material';
-import { useTheme } from '@emotion/react';
 import { useThemeStore } from '@/src/stores/theme-store';
 import { MaterialDynamicColors, hexFromArgb } from '@material/material-color-utilities';
 
