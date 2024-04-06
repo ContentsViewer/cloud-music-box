@@ -5,11 +5,134 @@ import { usePlayerStore, AudioTrack } from "../stores/player-store"
 import { enqueueSnackbar } from "notistack"
 import { useFileStore } from "../stores/file-store"
 import * as mm from "music-metadata-browser"
+import assert, { AssertionError } from "assert"
+import { useDynamicThemeStore } from "../stores/dynamic-theme-store"
+
+const makeAudioAnalyser = () => {
+  let audioContext: OfflineAudioContext
+  let sourceNode: AudioBufferSourceNode
+  let audioBuffer: AudioBuffer
+  let isAnalyzing = false
+  let pitch: number = -1
+
+  const ensureAudioContext = (reload: boolean= false) => {
+    if (audioContext && !reload) return;
+
+    audioContext = new OfflineAudioContext({
+      numberOfChannels: 2,
+      length: 2048,
+      sampleRate: 44100,
+    })
+  }
+
+
+  const autoCorrelate = (buf: Float32Array, sampleRate: number) => {
+    let rms = 0
+    let nBuf = buf.length
+    for (let i = 0; i < nBuf; i++) {
+      const val = buf[i]
+      rms += val * val
+    }
+    rms = Math.sqrt(rms / nBuf)
+    if (rms < 0.01) return -1
+
+    let r1 = 0
+    let r2 = nBuf - 1
+    let threshold = 0.2
+    for (let i = 0; i < nBuf/2; i++) {
+      if (Math.abs(buf[i]) < threshold) {
+        r1 = i
+        break
+      }
+    }
+    for (let i = 1; i < nBuf / 2; i++) {
+      if (Math.abs(buf[nBuf - i]) < threshold) {
+        r2 = nBuf - i
+        break
+      }
+    }
+    
+    buf = buf.slice(r1, r2)
+    nBuf = buf.length
+
+    let c = new Array(nBuf).fill(0)
+    for (let i = 0; i < nBuf; i++) {
+      for (let j = 0; j < nBuf - i; j++) {
+        c[i] += buf[j] * buf[j + i]
+      }
+    }
+
+    let d = 0;
+    while (c[d] > c[d + 1]) d++;
+    let maxVal = -1
+    let maxPos = -1
+    for (let i = d; i < nBuf; i++) {
+      if (c[i] > maxVal) {
+        maxVal = c[i]
+        maxPos = i
+      }
+    }
+    let t0 = maxPos
+    let x1 = c[t0 - 1]
+    let x2 = c[t0]
+    let x3 = c[t0 + 1]
+    let a = (x1 + x3 - 2 * x2) / 2
+    let b = (x3 - x1) / 2
+    if (a) t0 = t0 - b / (2 * a)
+
+    return sampleRate / t0
+  }
+
+  return {
+    setBuffer: async (blob: Blob) => {
+      ensureAudioContext()
+      audioBuffer = await audioContext.decodeAudioData(await blob.arrayBuffer())
+    },
+
+    requestAnalyze: async (start: number) => {
+      if (!audioBuffer) return
+      if (isAnalyzing) return
+
+      if (sourceNode) {
+        sourceNode.stop()
+        sourceNode.disconnect()
+      }
+
+      ensureAudioContext(true);
+
+      sourceNode = audioContext.createBufferSource()
+      sourceNode.buffer = audioBuffer
+      sourceNode.connect(audioContext.destination)
+      sourceNode.start(0, start, 1)
+
+      audioContext
+        .startRendering()
+        .then(renderedBuffer => {
+          const data0 = renderedBuffer.getChannelData(0)
+          const data1 = renderedBuffer.getChannelData(1)
+          const pitch0 = autoCorrelate(data0, renderedBuffer.sampleRate)
+          const pitch1 = autoCorrelate(data1, renderedBuffer.sampleRate)
+          pitch = Math.max(pitch0, pitch1)
+          // console.log("Pitch", pitch0, pitch1)
+        })
+        .catch(error => {
+          console.error(error)
+        })
+    },
+    get pitch() {
+      return pitch
+    },
+  }
+}
+
 
 export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore()
   const playerActionsRef = useRef(playerActions)
   playerActionsRef.current = playerActions
+
+  const [, dynamicThemeActions] = useDynamicThemeStore()
+  const dynamicThemeActionsRef = useRef(dynamicThemeActions)
 
   const fileStore = useFileStore()
   const fileStoreRef = useRef(fileStore)
@@ -17,38 +140,8 @@ export const AudioPlayer = () => {
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const sourceRef = useRef<HTMLSourceElement>(null)
-  
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const timeDomainDataRef = useRef<Float32Array | null>(null)
-  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
 
-  const makeAudioContext = () => {
-    if (audioContextRef.current) return
-
-    const audio = audioRef.current
-    if (!audio) return
-
-    const audioContext = new AudioContext()
-
-    const analyser = new AnalyserNode(audioContext, {
-      fftSize: 2048,
-    })
-    analyserRef.current = analyser
-    const timeDomainData = new Float32Array(analyser.fftSize)
-    timeDomainDataRef.current = timeDomainData
-
-    const sourceNode = audioContext.createMediaElementSource(audio)
-    sourceNodeRef.current = sourceNode
-
-    analyser.connect(audioContext.destination)
-    sourceNode.connect(analyser)
-
-    audioContextRef.current = audioContext
-    audioContextRef.current = audioContext
-    analyserRef.current = analyser
-    timeDomainDataRef.current = timeDomainData
-  }
+  const audioAnalyserRef = useRef(makeAudioAnalyser())
 
   useEffect(() => {
     // if (configured.current) return
@@ -70,17 +163,10 @@ export const AudioPlayer = () => {
 
     const onDurationChange = () => {}
     const onTimeUpdate = () => {
-      const analyser = analyserRef.current
-      const timeDomainData = timeDomainDataRef.current
-      if (!analyser || !timeDomainData) return
-      analyser.getFloatTimeDomainData(timeDomainData)
-      console.log(
-        "Time update",
-        audioRef.current?.currentTime,
-        timeDomainData[0],
-        analyser.fftSize,
-        analyser.frequencyBinCount
-      )
+      const analyser = audioAnalyserRef.current
+      if (!analyser) return
+      analyser.requestAnalyze(audio.currentTime)
+      dynamicThemeActionsRef.current.setPitch(analyser.pitch)
     }
     const onPlay = () => {
       console.log("Track started playing")
@@ -132,11 +218,10 @@ export const AudioPlayer = () => {
       return
     }
 
-    makeAudioContext();
-
     if (playerState.isActiveTrackLoading) {
       return
     }
+    assert(playerState.activeTrack?.blob)
 
     if (source.src) {
       const previousSrc = source.src
@@ -146,27 +231,22 @@ export const AudioPlayer = () => {
     }
 
     if (playerState.activeTrack) {
-      const src = playerState.activeTrack.blob
-        ? URL.createObjectURL(playerState.activeTrack.blob)
-        : undefined
+      const src = URL.createObjectURL(playerState.activeTrack.blob)
 
-      if (src) {
-        source.src = src
-        // safari(iOS) cannot detect the mime type(especially flac) from the binary.
-        source.type = playerState.activeTrack.file.mimeType
-        console.log("Setting source", src, source.type)
-      }
+      source.src = src
+      // safari(iOS) cannot detect the mime type(especially flac) from the binary.
+      source.type = playerState.activeTrack.file.mimeType
+      console.log("Setting source", src, source.type)
+      audioAnalyserRef.current.setBuffer(playerState.activeTrack.blob)
 
       audio.load()
-
-      console.log(audioContextRef.current)
-
       audio.play().catch(error => {
         playerActionsRef.current.pause()
 
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
+
       enqueueSnackbar("Playing", { variant: "info" })
     }
   }, [playerState])
