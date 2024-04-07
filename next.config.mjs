@@ -3,6 +3,9 @@
 
 import withPWA from "next-pwa";
 
+const isProd = process.env.NODE_ENV === "production";
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 // import runtimeCaching from 'next-pwa/cache.js'
 const runtimeCaching = [
   {
@@ -235,7 +238,7 @@ export default withPWA({
   //   },
   // ],
 })({
-  // basePath: "/cloud-music-client",
+  basePath: basePath,
   reactStrictMode: true,
   output: "export"
 });
