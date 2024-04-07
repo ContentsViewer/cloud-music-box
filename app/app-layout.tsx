@@ -57,7 +57,6 @@ const DynamicBackground = () => {
   useEffect(() => {
     if (pitch === -1) return
     const note = noteFromPitch(pitch)
-    console.log(note % 12)
     setPitchColor(`hsl(${(note % 12) * 30}, 100%, 50%)`)
   }, [pitch])
   return (

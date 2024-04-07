@@ -1,9 +1,11 @@
 'use client'
 
 import { PlayArrow, PlayCircleFilled, SkipNext, SkipPrevious, Stop } from "@mui/icons-material"
-import { Box, Card, Fab, Icon, IconButton, SxProps, Theme } from "@mui/material"
+import { Box, Card, Fab, Icon, IconButton, SxProps, Theme, alpha } from "@mui/material"
 import { usePlayerStore } from "../stores/player-store"
 import { useFileStore } from "../stores/file-store"
+import { useThemeStore } from "../stores/theme-store"
+import { MaterialDynamicColors, hexFromArgb } from "@material/material-color-utilities"
 
 interface MiniPlayerProps {
   sx?: SxProps<Theme>
@@ -12,6 +14,7 @@ interface MiniPlayerProps {
 export const MiniPlayer = (props: MiniPlayerProps) => {
   const [playerState, playerActions] = usePlayerStore();
   const fileStore = useFileStore();
+  const [themeStoreState] = useThemeStore();
 
   const activeTrack = playerState.activeTrack;
 
@@ -24,7 +27,9 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
       // width: "100%",
       // height: 52,
       backdropFilter: 'blur(10px)',
-      backgroundColor: 'transparent',
+      backgroundColor: alpha(
+        hexFromArgb(MaterialDynamicColors.surfaceContainerHigh.getArgb(themeStoreState.scheme)), 0.1
+      ),
       display: 'flex',
       p: 2,
       m: 1
@@ -35,7 +40,16 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
       <IconButton>
         <SkipPrevious />
       </IconButton>
-      <IconButton onClick={() => {
+      <IconButton
+        sx={{
+          backgroundColor: hexFromArgb(
+            MaterialDynamicColors.tertiaryContainer.getArgb(themeStoreState.scheme)),
+          "&:hover": {
+            backgroundColor: hexFromArgb(
+              MaterialDynamicColors.tertiaryContainer.getArgb(themeStoreState.scheme))
+          },
+        }}
+        onClick={() => {
         if (playerState.isPlaying) {
           playerActions.pause();
         } else {

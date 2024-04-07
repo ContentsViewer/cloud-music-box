@@ -15,8 +15,8 @@ const makeAudioAnalyser = () => {
   let isAnalyzing = false
   let pitch: number = -1
 
-  const ensureAudioContext = (reload: boolean= false) => {
-    if (audioContext && !reload) return;
+  const ensureAudioContext = (reload: boolean = false) => {
+    if (audioContext && !reload) return
 
     audioContext = new OfflineAudioContext({
       numberOfChannels: 2,
@@ -24,7 +24,6 @@ const makeAudioAnalyser = () => {
       sampleRate: 44100,
     })
   }
-
 
   const autoCorrelate = (buf: Float32Array, sampleRate: number) => {
     let rms = 0
@@ -39,7 +38,7 @@ const makeAudioAnalyser = () => {
     let r1 = 0
     let r2 = nBuf - 1
     let threshold = 0.2
-    for (let i = 0; i < nBuf/2; i++) {
+    for (let i = 0; i < nBuf / 2; i++) {
       if (Math.abs(buf[i]) < threshold) {
         r1 = i
         break
@@ -51,7 +50,7 @@ const makeAudioAnalyser = () => {
         break
       }
     }
-    
+
     buf = buf.slice(r1, r2)
     nBuf = buf.length
 
@@ -62,8 +61,8 @@ const makeAudioAnalyser = () => {
       }
     }
 
-    let d = 0;
-    while (c[d] > c[d + 1]) d++;
+    let d = 0
+    while (c[d] > c[d + 1]) d++
     let maxVal = -1
     let maxPos = -1
     for (let i = d; i < nBuf; i++) {
@@ -98,7 +97,7 @@ const makeAudioAnalyser = () => {
         sourceNode.disconnect()
       }
 
-      ensureAudioContext(true);
+      ensureAudioContext(true)
 
       sourceNode = audioContext.createBufferSource()
       sourceNode.buffer = audioBuffer
@@ -124,7 +123,6 @@ const makeAudioAnalyser = () => {
     },
   }
 }
-
 
 export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore()
@@ -236,16 +234,24 @@ export const AudioPlayer = () => {
       source.src = src
       // safari(iOS) cannot detect the mime type(especially flac) from the binary.
       source.type = playerState.activeTrack.file.mimeType
+
       console.log("Setting source", src, source.type)
-      audioAnalyserRef.current.setBuffer(playerState.activeTrack.blob)
-
       audio.load()
-      audio.play().catch(error => {
-        playerActionsRef.current.pause()
+      audio
+        .play()
+        .then(() => {
+          console.log("Played")
+          const blob = playerState.activeTrack?.blob
+          if (!blob) return
+          audioAnalyserRef.current.setBuffer(blob)
+        })
+        .catch(error => {
+          playerActionsRef.current.pause()
 
-        console.error(error)
-        enqueueSnackbar(`${error}`, { variant: "error" })
-      })
+          console.error(error)
+          enqueueSnackbar(`${error}`, { variant: "error" })
+        })
+      console.log("To Playing")
 
       enqueueSnackbar("Playing", { variant: "info" })
     }
@@ -254,10 +260,24 @@ export const AudioPlayer = () => {
   useEffect(() => {
     const ms = window.navigator.mediaSession
     if (!ms) {
+      console.error("Media session not available")
       return
     }
 
-    console.log("Setting media session handlers")
+    const audio = audioRef.current
+    if (!audio) {
+      console.log("Audio not initialized")
+      return
+    }
+
+    // For Safari, we need to pause&load to register 
+    // playing action handlers(seekbackward, nexttrack, ...).
+    // Or these handlers will not be registered and unexpected...
+    audio.pause()
+    audio.load()
+
+    ms.playbackState = "paused"
+    console.log("Setting media session handlersA", ms)
 
     ms.setActionHandler("play", () => {
       console.log("Play")
@@ -267,15 +287,28 @@ export const AudioPlayer = () => {
       console.log("Pause")
       playerActionsRef.current.pause()
     })
+
     ms.setActionHandler("previoustrack", () => {
-      // playPreviousTrack();
+      console.log("Click previous track")
     })
     ms.setActionHandler("nexttrack", () => {
       console.log("Click next track")
       playerActionsRef.current.playNextTrack()
     })
+    // ms.setActionHandler("previoustrack", null)
+    // ms.setActionHandler("nexttrack", null)
+
     ms.setActionHandler("seekbackward", null)
     ms.setActionHandler("seekforward", null)
+
+    // ms.setActionHandler("seekbackward", () => {
+    //   console.log("Seek backward")
+    // })
+    // ms.setActionHandler("seekforward", () => {
+    //   console.log("Seek forward")
+
+    //   playerActionsRef.current.playNextTrack()
+    // })
 
     return () => {
       ms.setActionHandler("play", null)
