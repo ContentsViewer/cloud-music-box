@@ -5,6 +5,7 @@ import { StatusBar } from "@/src/components/status-bar"
 import { MiniPlayer } from "@/src/components/mini-player"
 import { FileStoreProvider } from "@/src/stores/file-store"
 import { PlayerStoreProvider, usePlayerStore } from "@/src/stores/player-store"
+import { DynamicBackground } from "@/src/components/dynamic-background"
 import { Box } from "@mui/material"
 import { SnackbarProvider } from "notistack"
 import { NetworkMonitorProvider } from "@/src/stores/network-monitor"
@@ -41,45 +42,6 @@ const ThemeChanger = () => {
   }, [playerState.activeTrack, playerState.isActiveTrackLoading])
 
   return null
-}
-
-const DynamicBackground = () => {
-  const [dynamicThemeState] = useDynamicThemeStore()
-  const [pitchColor, setPitchColor] = useState("transparent")
-
-  const pitch = dynamicThemeState.pitch
-
-  const noteFromPitch = (frequency: number) => {
-    const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
-    return Math.round(noteNum) + 69
-  }
-
-  useEffect(() => {
-    if (pitch === -1) return
-    const note = noteFromPitch(pitch)
-    setPitchColor(`hsl(${(note % 12) * 30}, 100%, 50%)`)
-  }, [pitch])
-  return (
-    <div
-      style={{
-        // backgroundColor: `hsl(0 100% 50%)`,
-        backgroundColor: pitchColor,
-        width: "30vmax",
-        height: "30vmax",
-        borderRadius: "50%",
-        mixBlendMode: 'screen',
-        filter: "blur(30vmax)",
-        transition: "background-color 1.0s",
-        position: "fixed",
-        // left: "80%",
-        // top: "15%",
-        top: 0,
-        right: 0,
-        opacity: 0.5,
-        // transform: "translate(-50%, -50%)",
-      }}
-    ></div>
-  )
 }
 
 export function AppLayout({ children }: { children: React.ReactNode }) {

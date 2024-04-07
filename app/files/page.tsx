@@ -23,6 +23,7 @@ function ElevationAppBar(props: { children: React.ReactElement }) {
   return (
     <AppBar sx={{
       backdropFilter: 'blur(16px)',
+      WebkitBackdropFilter: 'blur(16px)',
       backgroundColor: alpha(
         hexFromArgb(MaterialDynamicColors.surfaceContainer.getArgb(themeStoreState.scheme)), trigger ? 0.8 : 0),
       transition: theme.transitions.create(['background-color', 'backdrop-filter']),
