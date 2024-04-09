@@ -8,6 +8,7 @@ import { InsertDriveFileOutlined, AudioFileOutlined } from "@mui/icons-material"
 import FolderIcon from '@mui/icons-material/Folder';
 import { useNetworkMonitor } from "../stores/network-monitor";
 import { List, ListItemIcon, SxProps } from "@mui/material";
+import { useEffect } from "react";
 
 export interface FileListProps {
   files: BaseFileItem[] | undefined;
@@ -18,7 +19,11 @@ export function FileList(props: FileListProps) {
   const router = useRouter();
   const [playerState, playerActions] = usePlayerStore();
   const networkMonitor = useNetworkMonitor();
-  const fileStore = useFileStore();
+  const [ fileStoreState, fileStoreActions ] = useFileStore();
+
+  useEffect(() => { 
+    console.log('syncingTrackFiles', fileStoreState.syncingTrackFiles);
+  }, [fileStoreState.syncingTrackFiles])
 
   return (
     <List sx={props.sx}>

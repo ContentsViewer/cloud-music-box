@@ -16,7 +16,8 @@ import {
 } from "react"
 import { useNetworkMonitor } from "./network-monitor"
 import * as mm from "music-metadata-browser"
-import { root } from "postcss"
+import assert from "assert"
+import { request } from "http"
 
 export interface BaseFileItem {
   name: string
@@ -46,6 +47,12 @@ interface FileStoreStateProps {
   pca: PublicClientApplication | undefined
   rootFiles: BaseFileItem[] | undefined
   configured: boolean
+
+  syncingTrackFiles: { [key: string]: boolean }
+  syncProcess: Promise<{
+    file: AudioTrackFileItem | undefined
+    blob: Blob | undefined
+  }>
 }
 
 export const FileStoreStateContext = createContext<FileStoreStateProps>({
@@ -54,6 +61,8 @@ export const FileStoreStateContext = createContext<FileStoreStateProps>({
   pca: undefined,
   rootFiles: undefined,
   configured: false,
+  syncingTrackFiles: {},
+  syncProcess: Promise.resolve({ file: undefined, blob: undefined }),
 })
 
 type FileStoreAction =
@@ -62,6 +71,20 @@ type FileStoreAction =
   | { type: "setPca"; payload: PublicClientApplication }
   | { type: "setRootFiles"; payload: BaseFileItem[] }
   | { type: "setConfigured"; payload: boolean }
+  | {
+      type: "appendSyncProcess"
+      payload: {
+        id: string
+        resolve: ({
+          file,
+          blob,
+        }: {
+          file: AudioTrackFileItem | undefined
+          blob: Blob | undefined
+        }) => void
+      }
+    }
+  | { type: "completeSyncProcess"; payload: { id: string } }
 
 export const FileStoreDispatchContext = createContext<
   React.Dispatch<FileStoreAction>
@@ -70,6 +93,43 @@ export const FileStoreDispatchContext = createContext<
 export const useFileStore = () => {
   const state = useContext(FileStoreStateContext)
   const dispatch = useContext(FileStoreDispatchContext)
+  // const [ test, setTest ] = useState<string>("test")
+  // console.log("!!!", state.syncProcess)
+
+  const requestSyncTrack = (
+    id: string,
+    resolve: ({
+      file,
+      blob,
+    }: {
+      file: AudioTrackFileItem | undefined
+      blob: Blob | undefined
+    }) => void
+  ) => {
+    if (!state.configured) {
+      throw new Error("File store not configured")
+    }
+
+    const {
+      syncProcess,
+      fileDb,
+      driveClient,
+      syncingTrackFiles: syncingTracks,
+    } = state
+
+    if (!fileDb) throw new Error("File database not initialized")
+    if (!driveClient) throw new Error("Drive client not connected")
+
+    let trackFile: AudioTrackFileItem | undefined
+    let loadedBlob: Blob | undefined
+
+    if (syncingTracks[id]) return resolve({ file: trackFile, blob: loadedBlob })
+
+    dispatch({
+      type: "appendSyncProcess",
+      payload: { id, resolve },
+    })
+  }
 
   const actions = {
     getFileById: async (id: string) => {
@@ -155,69 +215,6 @@ export const useFileStore = () => {
         return children.filter(child => child !== undefined) as BaseFileItem[]
       }
     },
-
-    getTrackContent: async (id: string) => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      if (!state.fileDb) {
-        throw new Error("File database not initialized")
-      }
-
-      const track = (await getFileItemFromIdb(
-        state.fileDb,
-        id
-      )) as AudioTrackFileItem
-      if (track.type !== "audio-track") {
-        throw new Error("Item is not a track")
-      }
-
-      {
-        const blob = await getIdbRequest(
-          state.fileDb
-            .transaction("blobs", "readonly")
-            .objectStore("blobs")
-            .get(id)
-        )
-        if (blob)
-          return {
-            blob,
-            metadata: track.metadata,
-          }
-      }
-
-      if (!state.driveClient) return undefined
-
-      let downloadUrl: string
-      {
-        const response = await state.driveClient
-          .api(`/me/drive/items/${id}?select=id,@microsoft.graph.downloadUrl`)
-          .get()
-        downloadUrl = response["@microsoft.graph.downloadUrl"]
-      }
-
-      let blob: Blob
-      let metadata: mm.IAudioMetadata
-
-      {
-        const response = await fetch(downloadUrl)
-        blob = await response.blob()
-        metadata = await mm.parseBlob(blob)
-        track.metadata = metadata
-      }
-
-      state.fileDb
-        .transaction("files", "readwrite")
-        .objectStore("files")
-        .put(track)
-      state.fileDb
-        .transaction("blobs", "readwrite")
-        .objectStore("blobs")
-        .put(blob, id)
-
-      return { blob, metadata }
-    },
-
     hasTrackBlobInLocal: async (id: string) => {
       if (!state.configured) {
         throw new Error("File store not configured")
@@ -230,6 +227,37 @@ export const useFileStore = () => {
         state.fileDb.transaction("blobs").objectStore("blobs").count(id)
       )
       return count > 0
+    },
+    getTrackContent: async (id: string) => {
+      if (!state.configured) {
+        throw new Error("File store not configured")
+      }
+      const { fileDb } = state
+      if (!fileDb) {
+        throw new Error("File database not initialized")
+      }
+
+      {
+        const track = (await getFileItemFromIdb(
+          fileDb,
+          id
+        )) as AudioTrackFileItem
+        if (track.type !== "audio-track") {
+          throw new Error("Item is not a track")
+        }
+        const blob = (await getIdbRequest(
+          fileDb.transaction("blobs", "readonly").objectStore("blobs").get(id)
+        )) as Blob | undefined
+        if (blob) return { blob, track }
+      }
+
+      const { file, blob } = await new Promise<{
+        file: AudioTrackFileItem | undefined
+        blob: Blob | undefined
+      }>(resolve => {
+        requestSyncTrack(id, resolve)
+      })
+      return { blob, file }
     },
   }
 
@@ -390,6 +418,72 @@ const reducer = (
       return { ...state, rootFiles: action.payload }
     case "setConfigured":
       return { ...state, configured: action.payload }
+    case "appendSyncProcess": {
+      const { id, resolve } = action.payload
+      const { fileDb, driveClient } = state
+      if (!fileDb) throw new Error("File database not initialized")
+      if (!driveClient) throw new Error("Drive client not connected")
+
+      let trackFile: AudioTrackFileItem | undefined
+      let loadedBlob: Blob | undefined
+
+      const nextProcess = state.syncProcess
+        .then(() => getFileItemFromIdb(fileDb, id))
+        .then(item => {
+          if (!item) throw new Error("Item not found")
+          trackFile = item as AudioTrackFileItem
+
+          console.log("START", id)
+
+          return driveClient
+            .api(`/me/drive/items/${id}?select=id,@microsoft.graph.downloadUrl`)
+            .get()
+        })
+        .then(response => {
+          const downloadUrl = response["@microsoft.graph.downloadUrl"]
+          return fetch(downloadUrl)
+        })
+        .then(response => response.blob())
+        .then(blob => {
+          loadedBlob = blob
+          return mm.parseBlob(blob)
+        })
+        .then(metadata => {
+          assert(trackFile !== undefined)
+          trackFile.metadata = metadata
+          fileDb
+            .transaction("files", "readwrite")
+            .objectStore("files")
+            .put(trackFile)
+          fileDb
+            .transaction("blobs", "readwrite")
+            .objectStore("blobs")
+            .put(loadedBlob, id)
+        })
+        .catch(error => {
+          console.error(error)
+          enqueueSnackbar(`${error}`, { variant: "error" })
+        })
+        .then(() => {
+          console.log("END", loadedBlob)
+          resolve({ file: trackFile, blob: loadedBlob })
+          return { file: trackFile, blob: loadedBlob }
+        })
+      return {
+        ...state,
+        syncingTrackFiles: { ...state.syncingTrackFiles, [id]: true },
+        syncProcess: nextProcess,
+      }
+    }
+    case "completeSyncProcess": {
+      const { id } = action.payload
+      const { [id]: _, ...syncingTracks } = state.syncingTrackFiles
+      return {
+        ...state,
+        syncingTrackFiles: syncingTracks,
+      }
+    }
+
     default:
       return state
   }
@@ -406,6 +500,8 @@ export const FileStoreProvider = ({
     pca: undefined,
     rootFiles: undefined,
     configured: false,
+    syncingTrackFiles: {},
+    syncProcess: Promise.resolve({ file: undefined, blob: undefined }),
   })
 
   const networkMonitor = useNetworkMonitor()
@@ -417,13 +513,12 @@ export const FileStoreProvider = ({
     }
 
     const init = async () => {
-      console.log(window.location.origin)
-      console.log(process.env.NEXT_PUBLIC_BASE_PATH)
-
       const pca = new PublicClientApplication({
         auth: {
           clientId: "28af6fb9-c605-4ad3-8039-3e90df0933cb",
-          redirectUri: `${window.location.origin}${(process.env.NEXT_PUBLIC_BASE_PATH || "")}`,
+          redirectUri: `${window.location.origin}${
+            process.env.NEXT_PUBLIC_BASE_PATH || ""
+          }`,
         },
         cache: {
           cacheLocation: "localStorage",

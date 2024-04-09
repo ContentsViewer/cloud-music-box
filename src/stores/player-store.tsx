@@ -92,37 +92,37 @@ export const usePlayerStore = () => {
 const cacheBlobs = (
   currentIndex: number, tracks: AudioTrack[], fileStoreActions: ReturnType<typeof useFileStore>[1],
   dispatch: React.Dispatch<Action>) => {
+  
+  [currentIndex, currentIndex + 1, currentIndex + 2].forEach((index) => {
+    if (index >= tracks.length) {
+      return;
+    }
 
-  [currentIndex, currentIndex + 1, currentIndex + 2].reduce((promiseChain, index) => {
-    return promiseChain.then(() => {
-      if (index >= tracks.length) {
-        return Promise.resolve();
-      }
+    const track = tracks[index];
+    if (track.blob) {
+      return;
+    }
 
-      const track = tracks[index];
-      if (track.blob) {
-        return Promise.resolve();
-      }
-
-      return fileStoreActions.getTrackContent(track.file.id).then(
-        (result) => {
-          if (!result) {
-            return Promise.reject("No content");
-          }
-          return result;
+    fileStoreActions.getTrackContent(track.file.id).then(
+      (result) => {
+        if (!result) {
+          return Promise.reject("No content");
         }
-      ).then(({ blob, metadata }) => {
-        track.blob = blob;
-        track.file.metadata = metadata;
-        if (index === currentIndex) {
-          dispatch({ type: "activeTrackLoaded" })
-        }
-      }).catch((error) => {
-        console.error(error);
-        enqueueSnackbar(`${error}`, { variant: "error" });
-      });
+        return result;
+      }
+    ).then(({ blob, file }) => {
+      track.blob = blob;
+      if (file) {
+        track.file = file;
+      }
+      if (index === currentIndex) {
+        dispatch({ type: "activeTrackLoaded" })
+      }
+    }).catch((error) => {
+      console.error(error);
+      enqueueSnackbar(`${error}`, { variant: "error" });
     });
-  }, Promise.resolve());
+  });
 }
 
 
