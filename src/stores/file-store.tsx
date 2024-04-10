@@ -17,7 +17,6 @@ import {
 import { useNetworkMonitor } from "./network-monitor"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
-import { request } from "http"
 
 export interface BaseFileItem {
   name: string
@@ -49,10 +48,11 @@ interface FileStoreStateProps {
   configured: boolean
 
   syncingTrackFiles: { [key: string]: boolean }
-  syncProcess: Promise<{
-    file: AudioTrackFileItem | undefined
-    blob: Blob | undefined
-  }>
+  syncQueue: [
+    () => Promise<{ file: AudioTrackFileItem; blob: Blob }>,
+    ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
+    (error: any) => void
+  ][]
 }
 
 export const FileStoreStateContext = createContext<FileStoreStateProps>({
@@ -62,7 +62,7 @@ export const FileStoreStateContext = createContext<FileStoreStateProps>({
   rootFiles: undefined,
   configured: false,
   syncingTrackFiles: {},
-  syncProcess: Promise.resolve({ file: undefined, blob: undefined }),
+  syncQueue: [],
 })
 
 type FileStoreAction =
@@ -72,19 +72,13 @@ type FileStoreAction =
   | { type: "setRootFiles"; payload: BaseFileItem[] }
   | { type: "setConfigured"; payload: boolean }
   | {
-      type: "appendSyncProcess"
-      payload: {
-        id: string
-        resolve: ({
-          file,
-          blob,
-        }: {
-          file: AudioTrackFileItem | undefined
-          blob: Blob | undefined
-        }) => void
-      }
+      type: "setSyncQueue"
+      payload: [
+        () => Promise<{ file: AudioTrackFileItem; blob: Blob }>,
+        ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
+        (error: any) => void
+      ][]
     }
-  | { type: "completeSyncProcess"; payload: { id: string } }
 
 export const FileStoreDispatchContext = createContext<
   React.Dispatch<FileStoreAction>
@@ -93,43 +87,6 @@ export const FileStoreDispatchContext = createContext<
 export const useFileStore = () => {
   const state = useContext(FileStoreStateContext)
   const dispatch = useContext(FileStoreDispatchContext)
-  // const [ test, setTest ] = useState<string>("test")
-  // console.log("!!!", state.syncProcess)
-
-  const requestSyncTrack = (
-    id: string,
-    resolve: ({
-      file,
-      blob,
-    }: {
-      file: AudioTrackFileItem | undefined
-      blob: Blob | undefined
-    }) => void
-  ) => {
-    if (!state.configured) {
-      throw new Error("File store not configured")
-    }
-
-    const {
-      syncProcess,
-      fileDb,
-      driveClient,
-      syncingTrackFiles: syncingTracks,
-    } = state
-
-    if (!fileDb) throw new Error("File database not initialized")
-    if (!driveClient) throw new Error("Drive client not connected")
-
-    let trackFile: AudioTrackFileItem | undefined
-    let loadedBlob: Blob | undefined
-
-    if (syncingTracks[id]) return resolve({ file: trackFile, blob: loadedBlob })
-
-    dispatch({
-      type: "appendSyncProcess",
-      payload: { id, resolve },
-    })
-  }
 
   const actions = {
     getFileById: async (id: string) => {
@@ -251,12 +208,86 @@ export const useFileStore = () => {
         if (blob) return { blob, track }
       }
 
-      const { file, blob } = await new Promise<{
-        file: AudioTrackFileItem | undefined
-        blob: Blob | undefined
-      }>(resolve => {
-        requestSyncTrack(id, resolve)
-      })
+      const promise = new Promise<{ blob: Blob; file: AudioTrackFileItem }>(
+        (resolve, reject) => {
+          const task = [
+            () => {
+              const {
+                fileDb,
+                driveClient,
+                syncingTrackFiles: syncingTracks,
+              } = state
+
+              if (!fileDb) throw new Error("File database not initialized")
+              if (!driveClient) throw new Error("Drive client not connected")
+              let trackFile: AudioTrackFileItem | undefined
+              let loadedBlob: Blob | undefined
+              console.log("!!!!")
+
+              return Promise.resolve()
+                .then(() => getFileItemFromIdb(fileDb, id))
+                .then(item => {
+                  if (!item) throw new Error("Item not found")
+                  trackFile = item as AudioTrackFileItem
+
+                  console.log("START", id)
+
+                  return driveClient
+                    .api(
+                      `/me/drive/items/${id}?select=id,@microsoft.graph.downloadUrl`
+                    )
+                    .get()
+                })
+                .then(response => {
+                  const downloadUrl = response["@microsoft.graph.downloadUrl"]
+                  return fetch(downloadUrl)
+                })
+                .then(response => response.blob())
+                .then(blob => {
+                  loadedBlob = blob
+                  return mm.parseBlob(blob)
+                })
+                .then(metadata => {
+                  assert(trackFile !== undefined)
+                  trackFile.metadata = metadata
+                  fileDb
+                    .transaction("files", "readwrite")
+                    .objectStore("files")
+                    .put(trackFile)
+                  fileDb
+                    .transaction("blobs", "readwrite")
+                    .objectStore("blobs")
+                    .put(loadedBlob, id)
+                })
+                .catch(error => {
+                  console.error(error)
+                  enqueueSnackbar(`${error}`, { variant: "error" })
+                })
+                .then(() => {
+                  console.log("END", loadedBlob)
+                  return {
+                    file: trackFile as AudioTrackFileItem,
+                    blob: loadedBlob as Blob,
+                  }
+                })
+            },
+            resolve,
+            reject,
+          ] as [
+            () => Promise<{ file: AudioTrackFileItem; blob: Blob }>,
+            ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
+            (error: any) => void
+          ]
+          console.log("PUSH", state.syncQueue)
+
+          dispatch({
+            type: "setSyncQueue",
+            payload: [...state.syncQueue, task],
+          })
+        }
+      )
+
+      const { file, blob } = await promise
       return { blob, file }
     },
   }
@@ -418,74 +449,12 @@ const reducer = (
       return { ...state, rootFiles: action.payload }
     case "setConfigured":
       return { ...state, configured: action.payload }
-    case "appendSyncProcess": {
-      const { id, resolve } = action.payload
-      const { fileDb, driveClient } = state
-      if (!fileDb) throw new Error("File database not initialized")
-      if (!driveClient) throw new Error("Drive client not connected")
-
-      let trackFile: AudioTrackFileItem | undefined
-      let loadedBlob: Blob | undefined
-
-      const nextProcess = state.syncProcess
-        .then(() => getFileItemFromIdb(fileDb, id))
-        .then(item => {
-          if (!item) throw new Error("Item not found")
-          trackFile = item as AudioTrackFileItem
-
-          console.log("START", id)
-
-          return driveClient
-            .api(`/me/drive/items/${id}?select=id,@microsoft.graph.downloadUrl`)
-            .get()
-        })
-        .then(response => {
-          const downloadUrl = response["@microsoft.graph.downloadUrl"]
-          return fetch(downloadUrl)
-        })
-        .then(response => response.blob())
-        .then(blob => {
-          loadedBlob = blob
-          return mm.parseBlob(blob)
-        })
-        .then(metadata => {
-          assert(trackFile !== undefined)
-          trackFile.metadata = metadata
-          fileDb
-            .transaction("files", "readwrite")
-            .objectStore("files")
-            .put(trackFile)
-          fileDb
-            .transaction("blobs", "readwrite")
-            .objectStore("blobs")
-            .put(loadedBlob, id)
-        })
-        .catch(error => {
-          console.error(error)
-          enqueueSnackbar(`${error}`, { variant: "error" })
-        })
-        .then(() => {
-          console.log("END", loadedBlob)
-          resolve({ file: trackFile, blob: loadedBlob })
-          return { file: trackFile, blob: loadedBlob }
-        })
-      return {
-        ...state,
-        syncingTrackFiles: { ...state.syncingTrackFiles, [id]: true },
-        syncProcess: nextProcess,
-      }
+    case "setSyncQueue": {
+      console.log("SET", action.payload)
+      return { ...state, syncQueue: action.payload }
     }
-    case "completeSyncProcess": {
-      const { id } = action.payload
-      const { [id]: _, ...syncingTracks } = state.syncingTrackFiles
-      return {
-        ...state,
-        syncingTrackFiles: syncingTracks,
-      }
-    }
-
     default:
-      return state
+      throw new Error("Invalid action")
   }
 }
 
@@ -501,8 +470,10 @@ export const FileStoreProvider = ({
     rootFiles: undefined,
     configured: false,
     syncingTrackFiles: {},
-    syncProcess: Promise.resolve({ file: undefined, blob: undefined }),
+    syncQueue: [],
   })
+
+  const syncPromiseRef = useRef<Promise<void>>(Promise.resolve())
 
   const networkMonitor = useNetworkMonitor()
   const initialized = useRef(false)
@@ -635,6 +606,38 @@ export const FileStoreProvider = ({
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
   }, [state.driveClient, state.fileDb])
+
+  useEffect(() => {
+    const syncQueue = state.syncQueue
+
+    console.log("RUN", syncQueue)
+    if (syncQueue.length === 0) return
+
+    const syncPromise = syncPromiseRef.current
+    assert(syncPromise !== undefined)
+
+    syncPromiseRef.current = syncQueue.reduce(
+      (chain, [task, resolve, reject]) => {
+        return chain
+          .then(() => {
+            console.log("CHAIN")
+            return task()
+          })
+          .then(result => {
+            resolve(result)
+          })
+          .catch(error => {
+            reject(error)
+          })
+          .then(() => {
+            console.log("NEXT")
+          })
+      },
+      syncPromise
+    )
+
+    dispatch({ type: "setSyncQueue", payload: [] })
+  }, [state.syncQueue])
 
   return (
     <FileStoreStateContext.Provider value={state}>
