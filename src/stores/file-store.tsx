@@ -49,6 +49,7 @@ interface FileStoreStateProps {
 
   syncingTrackFiles: { [key: string]: boolean }
   syncQueue: [
+    string,
     () => Promise<{ file: AudioTrackFileItem; blob: Blob }>,
     ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
     (error: any) => void
@@ -74,10 +75,18 @@ type FileStoreAction =
   | {
       type: "setSyncQueue"
       payload: [
+        string,
         () => Promise<{ file: AudioTrackFileItem; blob: Blob }>,
         ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
         (error: any) => void
       ][]
+    }
+  | {
+      type: "setSyncingTrackFile"
+      payload: {
+        id: string
+        syncing: boolean
+      }
     }
 
 export const FileStoreDispatchContext = createContext<
@@ -211,12 +220,9 @@ export const useFileStore = () => {
       const promise = new Promise<{ blob: Blob; file: AudioTrackFileItem }>(
         (resolve, reject) => {
           const task = [
+            id,
             () => {
-              const {
-                fileDb,
-                driveClient,
-                syncingTrackFiles: syncingTracks,
-              } = state
+              const { fileDb, driveClient } = state
 
               if (!fileDb) throw new Error("File database not initialized")
               if (!driveClient) throw new Error("Drive client not connected")
@@ -274,11 +280,20 @@ export const useFileStore = () => {
             resolve,
             reject,
           ] as [
+            string,
             () => Promise<{ file: AudioTrackFileItem; blob: Blob }>,
             ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
             (error: any) => void
           ]
           console.log("PUSH", state.syncQueue)
+
+          dispatch({
+            type: "setSyncingTrackFile",
+            payload: {
+              id,
+              syncing: true,
+            },
+          })
 
           dispatch({
             type: "setSyncQueue",
@@ -453,6 +468,16 @@ const reducer = (
       console.log("SET", action.payload)
       return { ...state, syncQueue: action.payload }
     }
+    case "setSyncingTrackFile": {
+      const { id, syncing } = action.payload
+      const syncingTrackFiles = { ...state.syncingTrackFiles }
+      if (syncing) {
+        syncingTrackFiles[id] = true
+      } else {
+        delete syncingTrackFiles[id]
+      }
+      return { ...state, syncingTrackFiles }
+    }
     default:
       throw new Error("Invalid action")
   }
@@ -617,7 +642,7 @@ export const FileStoreProvider = ({
     assert(syncPromise !== undefined)
 
     syncPromiseRef.current = syncQueue.reduce(
-      (chain, [task, resolve, reject]) => {
+      (chain, [fileId, task, resolve, reject]) => {
         return chain
           .then(() => {
             console.log("CHAIN")
@@ -631,6 +656,13 @@ export const FileStoreProvider = ({
           })
           .then(() => {
             console.log("NEXT")
+            dispatch({
+              type: "setSyncingTrackFile",
+              payload: {
+                id: fileId,
+                syncing: false,
+              },
+            })
           })
       },
       syncPromise

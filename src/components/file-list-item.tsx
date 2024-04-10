@@ -2,6 +2,9 @@
 
 import {
   Avatar,
+  Box,
+  CircularProgress,
+  LinearProgress,
   ListItemAvatar,
   ListItemButton,
   ListItemIcon,
@@ -9,6 +12,7 @@ import {
 } from "@mui/material"
 import FolderIcon from "@mui/icons-material/Folder"
 import {
+  ArrowDownward,
   AudioFileOutlined,
   Audiotrack,
   CloudOff,
@@ -29,8 +33,9 @@ interface FileListItemBasicProps {
   icon: React.ReactElement
   onClick?: (event: any) => void
   disabled?: boolean
-  fileStatus: "online" | "offline" | "local"
+  fileStatus: "online" | "offline" | "local" | "downloading"
   selected?: boolean
+  children?: React.ReactNode
 }
 
 export function FileListItemBasic({
@@ -41,6 +46,7 @@ export function FileListItemBasic({
   disabled,
   fileStatus,
   selected,
+  children,
 }: FileListItemBasicProps) {
   return (
     <ListItemButton onClick={onClick} disabled={disabled} selected={selected}>
@@ -62,7 +68,31 @@ export function FileListItemBasic({
         <CloudOff fontSize="small" color="disabled" />
       ) : fileStatus === "local" ? (
         <Inventory fontSize="small" color="disabled" />
+      ) : fileStatus === "downloading" ? (
+        // <CircularProgress size={16} />
+        <Box
+          sx={{
+            width: "20px",
+            height: "20px",
+                  // clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
+            clipPath: "inset(0 0 0 0)",
+          }}
+        >
+          <ArrowDownward
+            fontSize="small"
+            color="disabled"
+            sx={{
+              animation: "down 2s linear infinite",
+              "@keyframes down": {
+                "0%": { transform: "translateY(-20px)" },
+                "50%": { transform: "translateY(0)" },
+                "100%": { transform: "translateY(20px)" },
+              },
+            }}
+          />
+        </Box>
       ) : null}
+      {children}
     </ListItemButton>
   )
 }
@@ -114,6 +144,10 @@ export function FileListItemAudioTrack({
       })
   }, [networkMonitor.isOnline, file])
 
+  const isSyncing = fileStoreState.syncingTrackFiles[file.id]
+
+  const disabled = fileStatus === "offline" || isSyncing
+
   return (
     <FileListItemBasic
       name={title}
@@ -124,9 +158,10 @@ export function FileListItemAudioTrack({
           </Avatar>
         </ListItemAvatar>
       }
-      fileStatus={fileStatus}
+      fileStatus={isSyncing ? "downloading" : fileStatus}
+      // fileStatus="downloading"
       selected={playerState.activeTrack?.file.id === file.id}
-      disabled={fileStatus === "offline"}
+      disabled={disabled}
       onClick={onClick}
       secondaryText={file.metadata?.common.artists?.join(", ") || ""}
     />
