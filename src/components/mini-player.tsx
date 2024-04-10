@@ -12,8 +12,6 @@ import {
   Avatar,
   Box,
   Card,
-  Fab,
-  Icon,
   IconButton,
   SxProps,
   Theme,
@@ -27,17 +25,27 @@ import {
   MaterialDynamicColors,
   hexFromArgb,
 } from "@material/material-color-utilities"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import * as mm from "music-metadata-browser"
+import { Variant } from "@mui/material/styles/createTypography"
+
 interface MiniPlayerProps {
   sx?: SxProps<Theme>
 }
 
-const MarqueeText = ({ text }: { text: string }) => {
+const MarqueeText = ({
+  text,
+  variant,
+  color,
+}: {
+  text: string
+  variant?: Variant
+  color?: string
+}) => {
   const textRef = useRef<HTMLSpanElement>(null)
   const [scrollAmount, setScrollAmount] = useState(0)
   const updateScrollAmount = () => {
-    // console.log("XXXX")
+    console.log("XXXX")
     const offsetWidth = textRef.current?.offsetWidth
     const scrollWidth = textRef.current?.scrollWidth
     if (offsetWidth && scrollWidth) {
@@ -81,7 +89,8 @@ const MarqueeText = ({ text }: { text: string }) => {
     >
       <Typography
         ref={textRef}
-        variant="body1"
+        color={color}
+        variant={variant}
         sx={{
           position: "relative",
           // position: "absolute",
@@ -105,9 +114,7 @@ const MarqueeText = ({ text }: { text: string }) => {
 
 export const MiniPlayer = (props: MiniPlayerProps) => {
   const [playerState, playerActions] = usePlayerStore()
-  const fileStore = useFileStore()
   const [themeStoreState] = useThemeStore()
-
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
 
   const activeTrack = playerState.activeTrack
@@ -118,13 +125,21 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
     "No track playing"
 
   useEffect(() => {
+    if (coverUrl) {
+      URL.revokeObjectURL(coverUrl)
+    }
+
     const cover = mm.selectCover(activeTrack?.file.metadata?.common.picture)
+    let url: string | undefined
     if (cover) {
-      const url = URL.createObjectURL(
-        new Blob([cover.data], { type: cover.format })
-      )
-      setCoverUrl(url)
-      return () => URL.revokeObjectURL(url)
+      url = URL.createObjectURL(new Blob([cover.data], { type: cover.format }))
+    }
+    setCoverUrl(url)
+
+    return () => {
+      if (coverUrl) {
+        URL.revokeObjectURL(coverUrl)
+      }
     }
   }, [activeTrack?.file.metadata?.common.picture])
 
@@ -157,7 +172,20 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
         {coverUrl ? null : <Audiotrack />}
       </Avatar>
       <Box sx={{ flexGrow: 1, minWidth: "0" }}>
-        <MarqueeText text={title} />
+        <MarqueeText
+          text={title}
+          color={hexFromArgb(
+            MaterialDynamicColors.onSurface.getArgb(themeStoreState.scheme)
+          )}
+        />
+        <MarqueeText
+          text={activeTrack?.file.metadata?.common.artist || ""}
+          color={hexFromArgb(
+            MaterialDynamicColors.onSurfaceVariant.getArgb(
+              themeStoreState.scheme
+            )
+          )}
+        />
       </Box>
       <IconButton>
         <SkipPrevious />
