@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react"
 import { useDynamicThemeStore } from "../stores/dynamic-theme-store"
 import { Box, styled } from "@mui/material"
+import { useThemeStore } from "../stores/theme-store"
+import { MaterialDynamicColors, hexFromArgb } from "@material/material-color-utilities"
 
 export const DynamicBackground = () => {
   const [dynamicThemeState] = useDynamicThemeStore()
+  const [themeStoreState] = useThemeStore()
   const [pitchColor, setPitchColor] = useState("transparent")
 
   const pitch = dynamicThemeState.pitch
@@ -19,21 +22,40 @@ export const DynamicBackground = () => {
     setPitchColor(`hsl(${(note % 12) * 30}, 100%, 50%)`)
   }, [pitch])
 
+  const primaryColor = hexFromArgb(
+            MaterialDynamicColors.primary.getArgb(
+              themeStoreState.scheme
+    ))
+
   return (
-    <Box
-      style={{ backgroundColor: pitchColor }}
-      sx={{
-        width: "30vmax",
-        height: "30vmax",
-        position: "fixed",
-        borderRadius: "50%",
-        mixBlendMode: "screen",
-        filter: "blur(30vmax)",
-        transition: "background-color 1s",
-        top: 0,
-        right: 0,
-        // opacity: 0.5,
-      }}
-    />
+    <Box>
+      <Box
+        sx={{
+          position: "fixed",
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          background: `linear-gradient(transparent, ${primaryColor})`,
+          opacity: 0.1,
+        }}
+      />
+      <Box
+        style={{ backgroundColor: pitchColor }}
+        sx={{
+          width: "30vw",
+          height: "30vh",
+          position: "fixed",
+          borderRadius: "50%",
+          mixBlendMode: "screen",
+          // mixBlendMode: "saturate",
+          filter: "blur(30vmin)",
+          transition: "background-color 1s",
+          top: 0,
+          right: 0,
+          opacity: 0.80,
+        }}
+      />
+    </Box>
   )
 }

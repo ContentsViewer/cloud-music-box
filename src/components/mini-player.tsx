@@ -12,7 +12,9 @@ import {
   Avatar,
   Box,
   Card,
+  Fade,
   IconButton,
+  LinearProgress,
   SxProps,
   Theme,
   Typography,
@@ -45,7 +47,6 @@ const MarqueeText = ({
   const textRef = useRef<HTMLSpanElement>(null)
   const [scrollAmount, setScrollAmount] = useState(0)
   const updateScrollAmount = () => {
-    console.log("XXXX")
     const offsetWidth = textRef.current?.offsetWidth
     const scrollWidth = textRef.current?.scrollWidth
     if (offsetWidth && scrollWidth) {
@@ -79,7 +80,6 @@ const MarqueeText = ({
     if (!style) return
     style.left = `${scrollAmount}px`
     style.animation = `marquee 10s ease-in-out infinite alternate`
-    // console.log("scrollAmount", scrollAmount)
   }, [scrollAmount])
 
   return (
@@ -154,74 +154,90 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
               themeStoreState.scheme
             )
           ),
-          0.1
+          0.5
         ),
         display: "flex",
-        p: 2,
         m: 1,
         alignItems: "center",
+        flexDirection: "column",
       }}
     >
-      <Avatar
-        src={coverUrl}
-        variant="rounded"
-        sx={{
-          mr: 2,
-        }}
-      >
-        {coverUrl ? null : <Audiotrack />}
-      </Avatar>
-      <Box sx={{ flexGrow: 1, minWidth: "0" }}>
-        <MarqueeText
-          text={title}
-          color={hexFromArgb(
-            MaterialDynamicColors.onSurface.getArgb(themeStoreState.scheme)
-          )}
-        />
-        <MarqueeText
-          text={activeTrack?.file.metadata?.common.artist || ""}
-          color={hexFromArgb(
-            MaterialDynamicColors.onSurfaceVariant.getArgb(
-              themeStoreState.scheme
-            )
-          )}
-        />
-      </Box>
-      <IconButton>
-        <SkipPrevious />
-      </IconButton>
-      <IconButton
-        sx={{
-          backgroundColor: hexFromArgb(
-            MaterialDynamicColors.tertiaryContainer.getArgb(
-              themeStoreState.scheme
-            )
-          ),
-          "&:hover": {
-            backgroundColor: hexFromArgb(
-              MaterialDynamicColors.tertiaryContainer.getArgb(
+      <Box sx={{ display: "flex", alignItems: "center", width: "100%", p: 2 }}>
+        <Avatar
+          src={coverUrl}
+          variant="rounded"
+          sx={{
+            mr: 2,
+          }}
+        >
+          {coverUrl ? null : <Audiotrack />}
+        </Avatar>
+        <Box sx={{ flexGrow: 1, minWidth: "0" }}>
+          <MarqueeText
+            text={title}
+            color={hexFromArgb(
+              MaterialDynamicColors.onSurface.getArgb(themeStoreState.scheme)
+            )}
+          />
+          <MarqueeText
+            text={activeTrack?.file.metadata?.common.artist || ""}
+            color={hexFromArgb(
+              MaterialDynamicColors.onSurfaceVariant.getArgb(
                 themeStoreState.scheme
               )
+            )}
+          />
+        </Box>
+        <IconButton>
+          <SkipPrevious />
+        </IconButton>
+        <IconButton
+          size="large"
+          sx={{
+            backgroundColor: hexFromArgb(
+              MaterialDynamicColors.tertiary.getArgb(themeStoreState.scheme)
             ),
-          },
-        }}
-        onClick={() => {
-          if (playerState.isPlaying) {
-            playerActions.pause()
-          } else {
-            playerActions.play()
-          }
-        }}
-      >
-        {playerState.isPlaying ? <Stop /> : <PlayArrow />}
-      </IconButton>
-      <IconButton
-        onClick={() => {
-          playerActions.playNextTrack()
-        }}
-      >
-        <SkipNext />
-      </IconButton>
+            color: hexFromArgb(
+              MaterialDynamicColors.onTertiary.getArgb(themeStoreState.scheme)
+            ),
+            "&:hover": {
+              backgroundColor: hexFromArgb(
+                MaterialDynamicColors.tertiary.getArgb(themeStoreState.scheme)
+              ),
+            },
+          }}
+          onClick={() => {
+            if (playerState.isPlaying) {
+              playerActions.pause()
+            } else {
+              playerActions.play()
+            }
+          }}
+        >
+          {playerState.isPlaying ? (
+            <Stop fontSize="inherit" />
+          ) : (
+            <PlayArrow fontSize="inherit" />
+          )}
+        </IconButton>
+        <IconButton
+          onClick={() => {
+            playerActions.playNextTrack()
+          }}
+        >
+          <SkipNext />
+        </IconButton>
+      </Box>
+      <Box sx={{ position: "absolute", bottom: 0, left: 0, right: 0 }}>
+        <Fade
+          in={playerState.isActiveTrackLoading}
+          style={{
+            transitionDelay: playerState.isActiveTrackLoading ? "800ms" : "0ms",
+          }}
+        >
+          <LinearProgress sx={{ width: "100%" }} />
+        </Fade>
+      </Box>
     </Card>
   )
 }
