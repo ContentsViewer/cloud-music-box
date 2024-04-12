@@ -32,7 +32,7 @@ export const DynamicBackground = () => {
         transition: "background-color 1s",
         top: 0,
         right: 0,
-        opacity: 0.5,
+        // opacity: 0.5,
       }}
     />
   )
