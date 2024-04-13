@@ -228,7 +228,6 @@ export const useFileStore = () => {
               if (!driveClient) throw new Error("Drive client not connected")
               let trackFile: AudioTrackFileItem | undefined
               let loadedBlob: Blob | undefined
-              console.log("!!!!")
 
               return Promise.resolve()
                 .then(() => getFileItemFromIdb(fileDb, id))
@@ -236,7 +235,7 @@ export const useFileStore = () => {
                   if (!item) throw new Error("Item not found")
                   trackFile = item as AudioTrackFileItem
 
-                  console.log("START", id)
+                  // console.log("START", id)
 
                   return driveClient
                     .api(
@@ -270,7 +269,7 @@ export const useFileStore = () => {
                   enqueueSnackbar(`${error}`, { variant: "error" })
                 })
                 .then(() => {
-                  console.log("END", loadedBlob)
+                  // console.log("END", loadedBlob)
                   return {
                     file: trackFile as AudioTrackFileItem,
                     blob: loadedBlob as Blob,
@@ -285,7 +284,7 @@ export const useFileStore = () => {
             ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
             (error: any) => void
           ]
-          console.log("PUSH", state.syncQueue)
+          // console.log("PUSH", state.syncQueue)
 
           dispatch({
             type: "setSyncingTrackFile",

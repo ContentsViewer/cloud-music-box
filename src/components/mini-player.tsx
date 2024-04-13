@@ -83,14 +83,12 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
   })()
 
   const primaryBackgroundColor = (() => {
-    let hct = MaterialDynamicColors.primaryContainer.getHct(
+    const hct = Hct.fromInt(MaterialDynamicColors.primaryContainer.getHct(
       themeStoreState.scheme
-    )
-    console.log(hct.tone)
-    hct.tone = 30
-    console.log(hexFromArgb(hct.toInt()))
+    ).toInt())
 
-    console.log(hct.toInt())
+    hct.tone /= 2
+    hct.chroma /= 2
     return hexFromArgb(hct.toInt())
   })()
 
@@ -100,14 +98,6 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
         ...props.sx,
         backdropFilter: "blur(16px)",
         backgroundColor:  alpha(primaryBackgroundColor, 0.5),
-        // backgroundColor: alpha(
-        //   hexFromArgb(
-        //     MaterialDynamicColors.primaryContainer.getArgb(
-        //       themeStoreState.scheme
-        //     )
-        //   ),
-        //   1
-        // ),
         display: "flex",
         m: 1,
         alignItems: "center",
@@ -170,14 +160,14 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
           size="large"
           sx={{
             backgroundColor: hexFromArgb(
-              MaterialDynamicColors.tertiary.getArgb(themeStoreState.scheme)
+              MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
             ),
             color: hexFromArgb(
-              MaterialDynamicColors.onTertiary.getArgb(themeStoreState.scheme)
+              MaterialDynamicColors.onPrimary.getArgb(themeStoreState.scheme)
             ),
             "&:hover": {
               backgroundColor: hexFromArgb(
-                MaterialDynamicColors.tertiary.getArgb(themeStoreState.scheme)
+                MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
               ),
             },
           }}

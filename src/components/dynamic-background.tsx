@@ -36,7 +36,8 @@ export const DynamicBackground = () => {
 
   const primaryColor = (() => {
     const sourceColor = Hct.fromInt(themeStoreState.sourceColor)
-    sourceColor.tone = 30
+    sourceColor.tone /= 2
+    sourceColor.chroma /= 2
     return hexFromArgb(
       // MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
       sourceColor.toInt()
@@ -54,7 +55,7 @@ export const DynamicBackground = () => {
           bottom: 0,
           left: 0,
           background: `linear-gradient(transparent, ${primaryColor})`,
-          opacity: 0.1,
+          opacity: 0.2,
         }}
       />
       <Box
