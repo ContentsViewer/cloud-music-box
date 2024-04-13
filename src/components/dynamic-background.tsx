@@ -28,7 +28,7 @@ export const DynamicBackground = () => {
     ))
 
   return (
-    <Box>
+    <div>
       <Box
         sx={{
           position: "fixed",
@@ -56,6 +56,6 @@ export const DynamicBackground = () => {
           opacity: 0.80,
         }}
       />
-    </Box>
+    </div>
   )
 }
