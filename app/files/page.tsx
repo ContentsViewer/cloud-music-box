@@ -8,12 +8,7 @@ import {
 import { enqueueSnackbar } from "notistack"
 import { Suspense, useEffect, useRef, useState } from "react"
 import { FileList } from "@/src/components/file-list"
-import {
-  useParams,
-  usePathname,
-  useRouter,
-  useSearchParams,
-} from "next/navigation"
+import { useParams } from "next/navigation"
 import {
   AppBar,
   Backdrop,
@@ -41,6 +36,7 @@ import {
   CloudDownload,
   CloudOff,
 } from "@mui/icons-material"
+import { useRouter } from "@/src/router"
 import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
@@ -84,8 +80,6 @@ function ElevationAppBar(props: { children: React.ReactElement }) {
 }
 
 export default function Page() {
-  const router = useRouter()
-
   const [fileStoreState, fileStoreActions] = useFileStore()
   const fileStoreActionsRef = useRef(fileStoreActions)
   fileStoreActionsRef.current = fileStoreActions
@@ -97,12 +91,18 @@ export default function Page() {
   const [folderId, setFolderId] = useState<string | null>(null)
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
 
-  const params = useParams()
   const theme = useTheme()
 
+  const [routerState, routerActions] = useRouter()
+  const routerActionsRef = useRef(routerActions)
+  routerActionsRef.current = routerActions
+
   useEffect(() => {
-    setFolderId(window.location.hash.slice(1))
-  }, [params])
+    routerActionsRef.current.goFile(window.location.hash.slice(1))
+  }, [])
+  useEffect(() => {
+    setFolderId(routerState.currentFileId)
+  }, [routerState.currentFileId])
 
   useEffect(() => {
     if (!fileStoreState.configured) {
@@ -166,7 +166,7 @@ export default function Page() {
               if (!parentId) {
                 return
               }
-              router.push(`/files#${currentFile?.parentId}`)
+              routerActions.goFile(parentId)
             }}
           >
             <ArrowBack />
@@ -181,6 +181,9 @@ export default function Page() {
             }}
             text={currentFile?.name || "Files"}
           />
+          {Object.keys(fileStoreState.syncingTrackFiles).length > 0 ? (
+            <CircularProgress size={24} />
+          ) : null}
           <div>
             <IconButton
               color="inherit"

@@ -7,6 +7,7 @@ import {
   SkipNext,
   SkipPrevious,
   Stop,
+  Undo,
 } from "@mui/icons-material"
 import {
   Avatar,
@@ -31,6 +32,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import * as mm from "music-metadata-browser"
 import { Variant } from "@mui/material/styles/createTypography"
 import { MarqueeText } from "./marquee-text"
+import { useRouter } from "../router"
 
 interface MiniPlayerProps {
   sx?: SxProps<Theme>
@@ -40,6 +42,7 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
   const [playerState, playerActions] = usePlayerStore()
   const [themeStoreState] = useThemeStore()
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
+  const [routerState, routerActions] = useRouter()
 
   const activeTrack = playerState.activeTrack
 
@@ -67,6 +70,13 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
     }
   }, [activeTrack?.file.metadata?.common.picture])
 
+  const goBackEnabled = (() => {
+    const parentId = activeTrack?.file.parentId
+    if (!parentId) return false
+    if (routerState.currentFileId === parentId) return false
+    return true
+  })()
+
   return (
     <Card
       sx={{
@@ -86,6 +96,26 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
         flexDirection: "column",
       }}
     >
+      <Box sx={{ position: "absolute", top: 0, left: 0, right: 0 }}>
+        {goBackEnabled ? (
+          <IconButton
+            size="small"
+            onClick={() => {
+              const parentId = activeTrack?.file.parentId
+              if (!parentId) return
+
+              routerActions.goFile(parentId)
+            }}
+            sx={{
+              color: hexFromArgb(
+                MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+              ),
+            }}
+          >
+            <Undo fontSize="inherit" />
+          </IconButton>
+        ) : null}
+      </Box>
       <Box sx={{ display: "flex", alignItems: "center", width: "100%", p: 2 }}>
         <Avatar
           src={coverUrl}
