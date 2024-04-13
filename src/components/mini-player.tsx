@@ -73,7 +73,7 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
   const goBackEnabled = (() => {
     const parentId = activeTrack?.file.parentId
     if (!parentId) return false
-    if (routerState.currentFileId === parentId) return false
+    if (`${routerState.pathname}${routerState.hash}` === `/files#${parentId}`) return false
     return true
   })()
 

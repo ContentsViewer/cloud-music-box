@@ -1,17 +1,22 @@
 "use client"
 
-import React, { createContext, useContext, useReducer } from "react"
+import React, { createContext, useContext, useEffect, useReducer } from "react"
 import * as NextNavigation from "next/navigation"
 
 interface RouterStateProps {
-  currentFileId: string | null
+  pathname: string
+  hash: string
 }
 
 export const RouterStateContext = createContext<RouterStateProps>({
-  currentFileId: null,
+  pathname: "",
+  hash: "",
 })
 
-type Action = { type: "setFileId"; payload: { fileId: string } }
+type Action = {
+  type: "setLocation"
+  payload: { pathname: string; hash: string }
+}
 
 export const RouterDispatchContext = createContext<(action: Action) => void>(
   () => {}
@@ -24,7 +29,6 @@ export const useRouter = () => {
 
   const actions = {
     goFile: (fileId: string) => {
-      dispatch({ type: "setFileId", payload: { fileId } })
       router.push(`/files#${fileId}`)
     },
   }
@@ -34,8 +38,11 @@ export const useRouter = () => {
 
 const reducer = (state: RouterStateProps, action: Action): RouterStateProps => {
   switch (action.type) {
-    case "setFileId":
-      return { ...state, currentFileId: action.payload.fileId }
+    case "setLocation": {
+      const { pathname, hash } = action.payload
+
+      return { ...state, pathname, hash }
+    }
     default:
       throw new Error("Invalid action")
   }
@@ -43,8 +50,21 @@ const reducer = (state: RouterStateProps, action: Action): RouterStateProps => {
 
 export const RouterProvider = ({ children }: { children: React.ReactNode }) => {
   const [state, dispatch] = useReducer(reducer, {
-    currentFileId: null,
+    pathname: "",
+    hash: "",
   })
+
+  const params = NextNavigation.useParams()
+  const pathname = NextNavigation.usePathname()
+  useEffect(() => {
+    dispatch({
+      type: "setLocation",
+      payload: {
+        pathname: pathname,
+        hash: window.location.hash,
+      },
+    })
+  }, [params, pathname])
 
   return (
     <RouterStateContext.Provider value={state}>

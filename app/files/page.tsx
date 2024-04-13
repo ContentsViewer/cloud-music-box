@@ -12,6 +12,7 @@ import { useParams } from "next/navigation"
 import {
   AppBar,
   Backdrop,
+  Badge,
   Box,
   CircularProgress,
   IconButton,
@@ -35,6 +36,7 @@ import {
   FileDownload,
   CloudDownload,
   CloudOff,
+  ArrowDownward,
 } from "@mui/icons-material"
 import { useRouter } from "@/src/router"
 import { useThemeStore } from "@/src/stores/theme-store"
@@ -91,18 +93,21 @@ export default function Page() {
   const [folderId, setFolderId] = useState<string | null>(null)
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
 
-  const theme = useTheme()
+  const [themeStoreState] = useThemeStore()
+  const params = useParams()
 
   const [routerState, routerActions] = useRouter()
   const routerActionsRef = useRef(routerActions)
   routerActionsRef.current = routerActions
 
   useEffect(() => {
-    routerActionsRef.current.goFile(window.location.hash.slice(1))
-  }, [])
-  useEffect(() => {
-    setFolderId(routerState.currentFileId)
-  }, [routerState.currentFileId])
+    setFolderId(routerState.hash.slice(1))
+  }, [routerState.hash])
+
+  // useEffect(() => {
+  //   console.log("AAAA")
+  //   setFolderId(routerState.currentFileId)
+  // }, [routerState.currentFileId])
 
   useEffect(() => {
     if (!fileStoreState.configured) {
@@ -148,7 +153,6 @@ export default function Page() {
         enqueueSnackbar(`${error}`, { variant: "error" })
       }
     })
-    // fileStoreAction.getTrackContent()
   }
 
   return (
@@ -182,7 +186,72 @@ export default function Page() {
             text={currentFile?.name || "Files"}
           />
           {Object.keys(fileStoreState.syncingTrackFiles).length > 0 ? (
-            <CircularProgress size={24} />
+            <Box sx={{ position: "relative", mr: 1 }}>
+              <Badge
+                badgeContent={
+                  <span
+                    style={{
+                      color: hexFromArgb(
+                        MaterialDynamicColors.onSurfaceVariant.getArgb(
+                          themeStoreState.scheme
+                        )
+                      ),
+                    }}
+                  >
+                    {Object.keys(fileStoreState.syncingTrackFiles).length}
+                  </span>
+                }
+              >
+                <Box
+                  sx={{
+                    width: "20px",
+                    height: "20px",
+                    // clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
+                    clipPath: "inset(0 0 0 0)",
+                  }}
+                >
+                  <ArrowDownward
+                    fontSize="small"
+                    color="disabled"
+                    sx={{
+                      animation: "down 2s linear infinite",
+                      "@keyframes down": {
+                        "0%": { transform: "translateY(-20px)" },
+                        "50%": { transform: "translateY(0)" },
+                        "100%": { transform: "translateY(20px)" },
+                      },
+                    }}
+                  />
+                </Box>
+                {/*                 
+                <CloudDownload
+                  fontSize="small"
+                  sx={{
+                    color: hexFromArgb(
+                      MaterialDynamicColors.onSurfaceVariant.getArgb(
+                        themeStoreState.scheme
+                      )
+                    ),
+                  }}
+                /> */}
+              </Badge>
+              {/* <CircularProgress
+                sx={{
+                  position: "absolute",
+                  top: "50%",
+                  left: "50%",
+                  marginTop: "-16px",
+                  marginLeft: "-16px",
+
+                  color: hexFromArgb(
+                    MaterialDynamicColors.onSurfaceVariant.getArgb(
+                      themeStoreState.scheme
+                    )
+                  ),
+                }}
+                size={32}
+              /> */}
+            </Box>
           ) : null}
           <div>
             <IconButton
