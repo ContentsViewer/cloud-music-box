@@ -20,6 +20,8 @@ import {
   Theme,
   Typography,
   alpha,
+  rgbToHex,
+  useTheme,
 } from "@mui/material"
 import { usePlayerStore } from "../stores/player-store"
 import { useFileStore } from "../stores/file-store"
@@ -27,6 +29,7 @@ import { useThemeStore } from "../stores/theme-store"
 import {
   MaterialDynamicColors,
   hexFromArgb,
+  Hct,
 } from "@material/material-color-utilities"
 import { useEffect, useMemo, useRef, useState } from "react"
 import * as mm from "music-metadata-browser"
@@ -43,6 +46,7 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
   const [themeStoreState] = useThemeStore()
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
   const [routerState, routerActions] = useRouter()
+  const theme = useTheme()
 
   const activeTrack = playerState.activeTrack
 
@@ -73,27 +77,42 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
   const goBackEnabled = (() => {
     const parentId = activeTrack?.file.parentId
     if (!parentId) return false
-    if (`${routerState.pathname}${routerState.hash}` === `/files#${parentId}`) return false
+    if (`${routerState.pathname}${routerState.hash}` === `/files#${parentId}`)
+      return false
     return true
+  })()
+
+  const primaryBackgroundColor = (() => {
+    let hct = MaterialDynamicColors.primaryContainer.getHct(
+      themeStoreState.scheme
+    )
+    console.log(hct.tone)
+    hct.tone = 30
+    console.log(hexFromArgb(hct.toInt()))
+
+    console.log(hct.toInt())
+    return hexFromArgb(hct.toInt())
   })()
 
   return (
     <Card
       sx={{
         ...props.sx,
-        backdropFilter: "blur(10px)",
-        backgroundColor: alpha(
-          hexFromArgb(
-            MaterialDynamicColors.surfaceContainerHigh.getArgb(
-              themeStoreState.scheme
-            )
-          ),
-          0.5
-        ),
+        backdropFilter: "blur(16px)",
+        backgroundColor:  alpha(primaryBackgroundColor, 0.5),
+        // backgroundColor: alpha(
+        //   hexFromArgb(
+        //     MaterialDynamicColors.primaryContainer.getArgb(
+        //       themeStoreState.scheme
+        //     )
+        //   ),
+        //   1
+        // ),
         display: "flex",
         m: 1,
         alignItems: "center",
         flexDirection: "column",
+        borderRadius: 4,
       }}
     >
       <Box sx={{ position: "absolute", top: 0, left: 0, right: 0 }}>
@@ -108,7 +127,9 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
             }}
             sx={{
               color: hexFromArgb(
-                MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+                MaterialDynamicColors.onSurfaceVariant.getArgb(
+                  themeStoreState.scheme
+                )
               ),
             }}
           >

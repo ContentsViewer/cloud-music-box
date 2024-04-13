@@ -2,14 +2,17 @@ import { useEffect, useState } from "react"
 import { useDynamicThemeStore } from "../stores/dynamic-theme-store"
 import { Box, styled } from "@mui/material"
 import { useThemeStore } from "../stores/theme-store"
-import { MaterialDynamicColors, hexFromArgb } from "@material/material-color-utilities"
+import {
+  MaterialDynamicColors,
+  hexFromArgb,
+  Blend,
+  Hct,
+} from "@material/material-color-utilities"
 
 export const DynamicBackground = () => {
   const [dynamicThemeState] = useDynamicThemeStore()
   const [themeStoreState] = useThemeStore()
   const [pitchColor, setPitchColor] = useState("transparent")
-
-  const pitch = dynamicThemeState.pitch
 
   const noteFromPitch = (frequency: number) => {
     const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
@@ -17,15 +20,29 @@ export const DynamicBackground = () => {
   }
 
   useEffect(() => {
+    const pitch = dynamicThemeState.pitch
     if (pitch === -1) return
-    const note = noteFromPitch(pitch)
-    setPitchColor(`hsl(${(note % 12) * 30}, 100%, 50%)`)
-  }, [pitch])
 
-  const primaryColor = hexFromArgb(
-            MaterialDynamicColors.primary.getArgb(
-              themeStoreState.scheme
-    ))
+    const note = noteFromPitch(pitch)
+    const noteColor = Hct.from((note % 12) * 30, 100, 50)
+    const primaryColor = MaterialDynamicColors.primaryContainer.getHct(
+      themeStoreState.scheme
+    )
+    const pitchColor = Blend.harmonize(noteColor.toInt(), primaryColor.toInt())
+
+    setPitchColor(hexFromArgb(pitchColor))
+  }, [dynamicThemeState.pitch, themeStoreState.scheme])
+  
+
+  const primaryColor = (() => {
+    const sourceColor = Hct.fromInt(themeStoreState.sourceColor)
+    sourceColor.tone = 30
+    return hexFromArgb(
+      // MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
+      sourceColor.toInt()
+    )
+  })()
+  // console.log(primaryColor)
 
   return (
     <div>
@@ -48,7 +65,6 @@ export const DynamicBackground = () => {
           position: "fixed",
           borderRadius: "50%",
           mixBlendMode: "screen",
-          // mixBlendMode: "saturate",
           filter: "blur(30vmin)",
           transition: "background-color 1s",
           top: 0,
