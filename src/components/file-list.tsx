@@ -1,7 +1,7 @@
 'use client'
 
 import { AudioTrackFileItem, BaseFileItem, FolderItem, useFileStore } from "../stores/file-store";
-import { useRouter } from 'next/navigation';
+import { useRouter } from '../router';
 import { FileListItemAudioTrack, FileListItemBasic } from "./file-list-item";
 import { usePlayerStore } from "../stores/player-store";
 import { InsertDriveFileOutlined, AudioFileOutlined } from "@mui/icons-material";
@@ -16,7 +16,7 @@ export interface FileListProps {
 }
 
 export function FileList(props: FileListProps) {
-  const router = useRouter();
+  const [routerState, routerActions] = useRouter();
   const [playerState, playerActions] = usePlayerStore();
   const networkMonitor = useNetworkMonitor();
   const [ fileStoreState, fileStoreActions ] = useFileStore();
@@ -44,7 +44,7 @@ export function FileList(props: FileListProps) {
             }
             fileStatus={fileStatus}
             onClick={(event) => {
-              router.push(`/files#${file.id}`);
+              routerActions.goFile(file.id);
             }} />
         }
         if (file.type === 'audio-track') {

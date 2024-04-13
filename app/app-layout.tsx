@@ -1,7 +1,6 @@
 "use client"
 
 import { AudioPlayer } from "@/src/audio/audio-player"
-import { StatusBar } from "@/src/components/status-bar"
 import { MiniPlayer } from "@/src/components/mini-player"
 import { FileStoreProvider } from "@/src/stores/file-store"
 import { PlayerStoreProvider, usePlayerStore } from "@/src/stores/player-store"
@@ -9,6 +8,7 @@ import { DynamicBackground } from "@/src/components/dynamic-background"
 import { Box } from "@mui/material"
 import { SnackbarProvider } from "notistack"
 import { NetworkMonitorProvider } from "@/src/stores/network-monitor"
+import { RouterProvider } from "@/src/router"
 import { useEffect, useRef, useState } from "react"
 import { useThemeStore } from "@/src/stores/theme-store"
 import * as mm from "music-metadata-browser"
@@ -70,32 +70,34 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         containerAnchorOriginBottomLeft: "snackbar-container",
       }}
     >
-      <NetworkMonitorProvider>
-        <FileStoreProvider>
-          <PlayerStoreProvider>
-            <DynamicThemeStoreProvider>
-              <ThemeChanger />
-              <DynamicBackground />
-              <AudioPlayer />
-              {/* <StatusBar /> */}
-              <Box
-                sx={{
-                  flexGrow: 1,
-                  overflowY: "auto",
-                  overflowX: "hidden",
-                  mt: 4,
-                  mb: 10,
-                }}
-              >
-                {children}
-              </Box>
-              <MiniPlayer
-                sx={{ position: "fixed", bottom: 0, left: 0, right: 0 }}
-              />
-            </DynamicThemeStoreProvider>
-          </PlayerStoreProvider>
-        </FileStoreProvider>
-      </NetworkMonitorProvider>
+      <RouterProvider>
+        <NetworkMonitorProvider>
+          <FileStoreProvider>
+            <PlayerStoreProvider>
+              <DynamicThemeStoreProvider>
+                <ThemeChanger />
+                <DynamicBackground />
+                <AudioPlayer />
+                {/* <StatusBar /> */}
+                <Box
+                  sx={{
+                    flexGrow: 1,
+                    overflowY: "auto",
+                    overflowX: "hidden",
+                    mt: 4,
+                    mb: 10,
+                  }}
+                >
+                  {children}
+                </Box>
+                <MiniPlayer
+                  sx={{ position: "fixed", bottom: 0, left: 0, right: 0 }}
+                />
+              </DynamicThemeStoreProvider>
+            </PlayerStoreProvider>
+          </FileStoreProvider>
+        </NetworkMonitorProvider>
+      </RouterProvider>
     </SnackbarProvider>
   )
 }

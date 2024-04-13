@@ -465,7 +465,7 @@ const reducer = (
     case "setConfigured":
       return { ...state, configured: action.payload }
     case "setSyncQueue": {
-      console.log("SET", action.payload)
+      // console.log("SET", action.payload)
       return { ...state, syncQueue: action.payload }
     }
     case "setSyncingTrackFile": {
@@ -635,7 +635,7 @@ export const FileStoreProvider = ({
   useEffect(() => {
     const syncQueue = state.syncQueue
 
-    console.log("RUN", syncQueue)
+    // console.log("RUN", syncQueue)
     if (syncQueue.length === 0) return
 
     const syncPromise = syncPromiseRef.current
@@ -645,7 +645,7 @@ export const FileStoreProvider = ({
       (chain, [fileId, task, resolve, reject]) => {
         return chain
           .then(() => {
-            console.log("CHAIN")
+            // console.log("CHAIN")
             return task()
           })
           .then(result => {
@@ -655,7 +655,7 @@ export const FileStoreProvider = ({
             reject(error)
           })
           .then(() => {
-            console.log("NEXT")
+            // console.log("NEXT")
             dispatch({
               type: "setSyncingTrackFile",
               payload: {
