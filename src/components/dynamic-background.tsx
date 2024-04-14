@@ -32,7 +32,6 @@ export const DynamicBackground = () => {
 
     setPitchColor(hexFromArgb(pitchColor))
   }, [dynamicThemeState.pitch, themeStoreState.scheme])
-  
 
   const primaryColor = (() => {
     const sourceColor = Hct.fromInt(themeStoreState.sourceColor)
@@ -43,10 +42,32 @@ export const DynamicBackground = () => {
       sourceColor.toInt()
     )
   })()
+  const backgroundColor = (() => {
+    const color = MaterialDynamicColors.background.getArgb(
+      themeStoreState.scheme
+    )
+    return hexFromArgb(color)
+  })()
+
   // console.log(primaryColor)
 
   return (
     <div>
+      <Box
+        style={{ backgroundColor: pitchColor }}
+        sx={{
+          position: "fixed",
+          mixBlendMode: "screen",
+          transition: "background-color 1s",
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          opacity: 0.25,
+          // backgroundImage: `radical-gradient(transparent, ${backgroundColor})`,
+          background: `radial-gradient(circle at 76% 26%, transparent, ${backgroundColor})`,
+        }}
+      />
       <Box
         sx={{
           position: "fixed",
@@ -56,21 +77,6 @@ export const DynamicBackground = () => {
           left: 0,
           background: `linear-gradient(transparent, ${primaryColor})`,
           opacity: 0.2,
-        }}
-      />
-      <Box
-        style={{ backgroundColor: pitchColor }}
-        sx={{
-          width: "30vw",
-          height: "30vh",
-          position: "fixed",
-          borderRadius: "50%",
-          mixBlendMode: "screen",
-          filter: "blur(30vmin)",
-          transition: "background-color 1s",
-          top: 0,
-          right: 0,
-          opacity: 0.80,
         }}
       />
     </div>
