@@ -6,7 +6,7 @@ import {
   useFileStore,
 } from "@/src/stores/file-store"
 import { enqueueSnackbar } from "notistack"
-import { Suspense, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FileList } from "@/src/components/file-list"
 import { useParams } from "next/navigation"
 import {
@@ -103,7 +103,6 @@ export default function Page() {
     setFolderId(routerState.hash.slice(1))
   }, [routerState.hash])
 
-
   useEffect(() => {
     if (!fileStoreState.configured) {
       return
@@ -169,9 +168,11 @@ export default function Page() {
             <ArrowBack />
           </IconButton>
 
-          <IconButton onClick={() => { 
-            routerActions.goHome()
-          }}>
+          <IconButton
+            onClick={() => {
+              routerActions.goHome()
+            }}
+          >
             <Home />
           </IconButton>
           <Typography

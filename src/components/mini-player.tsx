@@ -3,7 +3,6 @@
 import {
   Audiotrack,
   PlayArrow,
-  PlayCircleFilled,
   SkipNext,
   SkipPrevious,
   Stop,
@@ -14,6 +13,7 @@ import {
   Box,
   Card,
   Fade,
+  Grow,
   IconButton,
   LinearProgress,
   SxProps,
@@ -83,9 +83,11 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
   })()
 
   const primaryBackgroundColor = (() => {
-    const hct = Hct.fromInt(MaterialDynamicColors.primaryContainer.getHct(
-      themeStoreState.scheme
-    ).toInt())
+    const hct = Hct.fromInt(
+      MaterialDynamicColors.primaryContainer
+        .getHct(themeStoreState.scheme)
+        .toInt()
+    )
 
     hct.tone /= 2
     hct.chroma /= 2
@@ -97,7 +99,7 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
       sx={{
         ...props.sx,
         backdropFilter: "blur(16px)",
-        backgroundColor:  alpha(primaryBackgroundColor, 0.5),
+        backgroundColor: alpha(primaryBackgroundColor, 0.5),
         display: "flex",
         m: 1,
         alignItems: "center",
@@ -153,7 +155,11 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
             )}
           />
         </Box>
-        <IconButton>
+        <IconButton
+          onClick={() => {
+            playerActions.playPreviousTrack()
+          }}
+        >
           <SkipPrevious />
         </IconButton>
         <IconButton
@@ -179,11 +185,23 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
             }
           }}
         >
-          {playerState.isPlaying ? (
-            <Stop fontSize="inherit" />
-          ) : (
-            <PlayArrow fontSize="inherit" />
-          )}
+          <Box
+            sx={{
+              position: "relative",
+              width: "32px",
+              height: "32px",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <Grow in={playerState.isPlaying} timeout={500} appear={false}>
+              <Stop sx={{ fontSize: 32, position: "absolute" }} />
+            </Grow>
+            <Grow in={!playerState.isPlaying} timeout={500} appear={false}>
+              <PlayArrow sx={{ fontSize: 32, position: "absolute" }} />
+            </Grow>
+          </Box>
         </IconButton>
         <IconButton
           onClick={() => {

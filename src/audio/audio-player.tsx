@@ -332,6 +332,7 @@ export const AudioPlayer = () => {
 
     ms.setActionHandler("previoustrack", () => {
       console.log("Click previous track")
+      playerActionsRef.current.playPreviousTrack()
     })
     ms.setActionHandler("nexttrack", () => {
       console.log("Click next track")

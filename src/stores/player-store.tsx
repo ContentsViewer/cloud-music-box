@@ -83,6 +83,20 @@ export const usePlayerStore = () => {
 
       const newIndex = isTheLastTrack ? 0 : state.activeTrackIndex + 1;
       return playTrack(newIndex);
+    },
+    playPreviousTrack: () => {
+      if (state.tracks.length === 0) {
+        return;
+      }
+
+      if (state.activeTrackIndex === -1) {
+        return playTrack(0);
+      }
+
+      const isTheFirstTrack = state.activeTrackIndex === 0;
+
+      const newIndex = isTheFirstTrack ? state.tracks.length - 1 : state.activeTrackIndex - 1;
+      return playTrack(newIndex);
     }
   }
 
@@ -93,7 +107,7 @@ const cacheBlobs = (
   currentIndex: number, tracks: AudioTrack[], fileStoreActions: ReturnType<typeof useFileStore>[1],
   dispatch: React.Dispatch<Action>) => {
   
-  [currentIndex, currentIndex + 1, currentIndex + 2].forEach((index) => {
+  [currentIndex, currentIndex + 1].forEach((index) => {
     if (index >= tracks.length) {
       return;
     }
