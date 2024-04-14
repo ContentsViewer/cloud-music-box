@@ -41,24 +41,22 @@ export interface AudioTrackFileItem extends BaseFileItem {
   metadata?: mm.IAudioMetadata
 }
 
+interface SyncTask {
+  fileId: string
+  resolve: ({}: { file?: AudioTrackFileItem; blob?: Blob }) => void
+  reject: (error: any) => void
+}
+
 interface FileStoreStateProps {
   fileDb: IDBDatabase | undefined
   driveClient: Client | undefined
   pca: PublicClientApplication | undefined
   rootFiles: BaseFileItem[] | undefined
   configured: boolean
-  driveConfigureStatus:
-    | "not-configured"
-    | "no-account"
-    | "configured"
+  driveConfigureStatus: "not-configured" | "no-account" | "configured"
 
   syncingTrackFiles: { [key: string]: boolean }
-  syncQueue: [
-    string,
-    () => Promise<{ file: AudioTrackFileItem; blob: Blob }>,
-    ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
-    (error: any) => void
-  ][]
+  syncQueue: SyncTask[]
 }
 
 export const FileStoreStateContext = createContext<FileStoreStateProps>({
@@ -79,13 +77,12 @@ type FileStoreAction =
   | { type: "setRootFiles"; payload: BaseFileItem[] }
   | { type: "setConfigured"; payload: boolean }
   | {
-      type: "setSyncQueue"
-      payload: [
-        string,
-        () => Promise<{ file: AudioTrackFileItem; blob: Blob }>,
-        ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
-        (error: any) => void
-      ][]
+      type: "pushSyncTask"
+      payload: SyncTask[]
+    }
+  | {
+      type: "popSyncTask"
+      payload: SyncTask[]
     }
   | {
       type: "setSyncingTrackFile"
@@ -204,6 +201,48 @@ export const useFileStore = () => {
       )
       return count > 0
     },
+    requestDownloadTrack: async (id: string) => {
+      if (!state.configured) {
+        throw new Error("File store not configured")
+      }
+      const { fileDb, driveClient } = state
+      if (!fileDb) {
+        throw new Error("File database not initialized")
+      }
+      const count = await getIdbRequest(
+        fileDb.transaction("blobs").objectStore("blobs").count(id)
+      )
+      if (count > 0) return
+
+      const promise = new Promise<void>((resolve, reject) => {
+        const task: SyncTask = {
+          fileId: id,
+          resolve: () => {
+            resolve()
+          },
+          reject: error => {
+            reject(error)
+          },
+        }
+
+        console.log("PUSH(req)", id)
+
+        dispatch({
+          type: "setSyncingTrackFile",
+          payload: {
+            id,
+            syncing: true,
+          },
+        })
+
+        dispatch({
+          type: "pushSyncTask",
+          payload: [task],
+        })
+      })
+      await promise
+      return
+    },
     getTrackContent: async (id: string) => {
       if (!state.configured) {
         throw new Error("File store not configured")
@@ -224,77 +263,18 @@ export const useFileStore = () => {
         const blob = (await getIdbRequest(
           fileDb.transaction("blobs", "readonly").objectStore("blobs").get(id)
         )) as Blob | undefined
-        if (blob) return { blob, track }
+        if (blob) return { blob, file: track }
       }
 
-      const promise = new Promise<{ blob: Blob; file: AudioTrackFileItem }>(
+      const promise = new Promise<{ blob?: Blob; file?: AudioTrackFileItem }>(
         (resolve, reject) => {
-          const task = [
-            id,
-            () => {
-              const { fileDb, driveClient } = state
-
-              if (!fileDb) throw new Error("File database not initialized")
-              if (!driveClient) throw new Error("Drive client not connected")
-              let trackFile: AudioTrackFileItem | undefined
-              let loadedBlob: Blob | undefined
-
-              return Promise.resolve()
-                .then(() => getFileItemFromIdb(fileDb, id))
-                .then(item => {
-                  if (!item) throw new Error("Item not found")
-                  trackFile = item as AudioTrackFileItem
-
-                  // console.log("START", id)
-
-                  return driveClient
-                    .api(
-                      `/me/drive/items/${id}?select=id,@microsoft.graph.downloadUrl`
-                    )
-                    .get()
-                })
-                .then(response => {
-                  const downloadUrl = response["@microsoft.graph.downloadUrl"]
-                  return fetch(downloadUrl)
-                })
-                .then(response => response.blob())
-                .then(blob => {
-                  loadedBlob = blob
-                  return mm.parseBlob(blob)
-                })
-                .then(metadata => {
-                  assert(trackFile !== undefined)
-                  trackFile.metadata = metadata
-                  fileDb
-                    .transaction("files", "readwrite")
-                    .objectStore("files")
-                    .put(trackFile)
-                  fileDb
-                    .transaction("blobs", "readwrite")
-                    .objectStore("blobs")
-                    .put(loadedBlob, id)
-                })
-                .catch(error => {
-                  console.error(error)
-                  enqueueSnackbar(`${error}`, { variant: "error" })
-                })
-                .then(() => {
-                  // console.log("END", loadedBlob)
-                  return {
-                    file: trackFile as AudioTrackFileItem,
-                    blob: loadedBlob as Blob,
-                  }
-                })
-            },
+          const task: SyncTask = {
+            fileId: id,
             resolve,
             reject,
-          ] as [
-            string,
-            () => Promise<{ file: AudioTrackFileItem; blob: Blob }>,
-            ({}: { file: AudioTrackFileItem; blob: Blob }) => void,
-            (error: any) => void
-          ]
-          // console.log("PUSH", state.syncQueue)
+          }
+
+          console.log("PUSH", id)
 
           dispatch({
             type: "setSyncingTrackFile",
@@ -305,13 +285,16 @@ export const useFileStore = () => {
           })
 
           dispatch({
-            type: "setSyncQueue",
-            payload: [...state.syncQueue, task],
+            type: "pushSyncTask",
+            payload: [task],
           })
         }
       )
 
       const { file, blob } = await promise
+      if (!file || !blob) {
+        throw new Error("File or blob not found")
+      }
       return { blob, file }
     },
   }
@@ -473,9 +456,10 @@ const reducer = (
       return { ...state, rootFiles: action.payload }
     case "setConfigured":
       return { ...state, configured: action.payload }
-    case "setSyncQueue": {
-      // console.log("SET", action.payload)
-      return { ...state, syncQueue: action.payload }
+    case "pushSyncTask": {
+      const syncQueue = [...state.syncQueue, ...action.payload]
+      console.log("ACCEPT PUSH", syncQueue)
+      return { ...state, syncQueue }
     }
     case "setSyncingTrackFile": {
       const { id, syncing } = action.payload
@@ -486,6 +470,14 @@ const reducer = (
         delete syncingTrackFiles[id]
       }
       return { ...state, syncingTrackFiles }
+    }
+    case "popSyncTask": {
+      const popped = action.payload
+      console.log("ACCEPT POP", state.syncQueue, popped)
+      const syncQueue = state.syncQueue.filter(
+        task => !popped.some(p => p.fileId === task.fileId)
+      )
+      return { ...state, syncQueue }
     }
     case "setDriveConfigureStatus": {
       return { ...state, driveConfigureStatus: action.payload }
@@ -658,10 +650,13 @@ export const FileStoreProvider = ({
         console.log("Silent")
         return pca.acquireTokenSilent(silentRequest)
       })
-      .then(response => { 
+      .then(response => {
         if (!response) return
         accessToken = response.accessToken
-        window.localStorage.setItem("drive-account", JSON.stringify(response.account))
+        window.localStorage.setItem(
+          "drive-account",
+          JSON.stringify(response.account)
+        )
       })
       .catch(error => {
         console.error(error)
@@ -671,7 +666,7 @@ export const FileStoreProvider = ({
         }
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
-      .then(() => { 
+      .then(() => {
         if (accessToken === null) return
         dispatch({ type: "setDriveConfigureStatus", payload: "configured" })
         const client = Client.init({
@@ -682,7 +677,7 @@ export const FileStoreProvider = ({
         dispatch({ type: "setDriveClient", payload: client })
         enqueueSnackbar("Drive Client Connected", { variant: "success" })
       })
-      .catch(error => { 
+      .catch(error => {
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
@@ -704,41 +699,79 @@ export const FileStoreProvider = ({
   useEffect(() => {
     const syncQueue = state.syncQueue
 
-    // console.log("RUN", syncQueue)
+    console.log("POP", syncQueue)
     if (syncQueue.length === 0) return
 
     const syncPromise = syncPromiseRef.current
     assert(syncPromise !== undefined)
 
-    syncPromiseRef.current = syncQueue.reduce(
-      (chain, [fileId, task, resolve, reject]) => {
-        return chain
-          .then(() => {
-            // console.log("CHAIN")
-            return task()
-          })
-          .then(result => {
-            resolve(result)
-          })
-          .catch(error => {
-            reject(error)
-          })
-          .then(() => {
-            // console.log("NEXT")
-            dispatch({
-              type: "setSyncingTrackFile",
-              payload: {
-                id: fileId,
-                syncing: false,
-              },
-            })
-          })
-      },
-      syncPromise
-    )
+    syncPromiseRef.current = syncQueue.reduce((chain, task) => {
+      const { fileId, resolve, reject } = task
+      const fileDb = state.fileDb
+      const driveClient = state.driveClient
 
-    dispatch({ type: "setSyncQueue", payload: [] })
-  }, [state.syncQueue])
+      return chain
+        .then(() => {
+          console.log("START", fileId)
+          if (!driveClient) throw new Error("Drive client not connected")
+
+          return driveClient
+            .api(
+              `/me/drive/items/${fileId}?select=id,@microsoft.graph.downloadUrl`
+            )
+            .get()
+        })
+        .then(response => {
+          const downloadUrl = response["@microsoft.graph.downloadUrl"]
+          return fetch(downloadUrl)
+        })
+        .then(response => response.blob())
+        .then(blob => {
+          return mm.parseBlob(blob).then(metadata => {
+            return { blob, metadata }
+          })
+        })
+        .then(({ blob, metadata }) => {
+          if (!fileDb) throw new Error("File database not initialized")
+
+          return getFileItemFromIdb(fileDb, fileId).then(item => {
+            if (!item) throw new Error("Item not found")
+            if (item.type !== "audio-track")
+              throw new Error("Item is not a track")
+
+            const trackFile = item as AudioTrackFileItem
+            trackFile.metadata = metadata
+            fileDb
+              .transaction("files", "readwrite")
+              .objectStore("files")
+              .put(trackFile)
+            fileDb
+              .transaction("blobs", "readwrite")
+              .objectStore("blobs")
+              .put(blob, fileId)
+            return { file: trackFile, blob }
+          })
+        })
+        .then(result => {
+          resolve(result)
+        })
+        .catch(error => {
+          reject(error)
+        })
+        .then(() => {
+          console.log("END", fileId)
+          dispatch({
+            type: "setSyncingTrackFile",
+            payload: {
+              id: fileId,
+              syncing: false,
+            },
+          })
+        })
+    }, syncPromise)
+
+    dispatch({ type: "popSyncTask", payload: syncQueue })
+  }, [state.syncQueue, state.fileDb, state.driveClient])
 
   return (
     <FileStoreStateContext.Provider value={state}>
