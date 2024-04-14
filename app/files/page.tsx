@@ -11,10 +11,8 @@ import { FileList } from "@/src/components/file-list"
 import { useParams } from "next/navigation"
 import {
   AppBar,
-  Backdrop,
   Badge,
   Box,
-  CircularProgress,
   IconButton,
   ListItemIcon,
   ListItemText,
@@ -37,6 +35,7 @@ import {
   CloudDownload,
   CloudOff,
   ArrowDownward,
+  Home,
 } from "@mui/icons-material"
 import { useRouter } from "@/src/router"
 import { useThemeStore } from "@/src/stores/theme-store"
@@ -163,8 +162,6 @@ export default function Page() {
             size="large"
             edge="start"
             color="inherit"
-            aria-label="menu"
-            sx={{ mr: 2 }}
             onClick={() => {
               const parentId = currentFile?.parentId
               if (!parentId) {
@@ -175,6 +172,24 @@ export default function Page() {
           >
             <ArrowBack />
           </IconButton>
+
+          <IconButton onClick={() => { 
+            routerActions.goHome()
+          }}>
+            <Home />
+          </IconButton>
+          <Typography
+            sx={{
+              mx: 1,
+              color: hexFromArgb(
+                MaterialDynamicColors.onSurfaceVariant.getArgb(
+                  themeStoreState.scheme
+                )
+              ),
+            }}
+          >
+            /
+          </Typography>
           <MarqueeText
             variant="h6"
             sx={{
