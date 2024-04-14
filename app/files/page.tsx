@@ -147,7 +147,7 @@ export default function Page() {
     ) as AudioTrackFileItem[]
     audioFiles.forEach(async file => {
       try {
-        await fileStoreAction.getTrackContent(file.id)
+        await fileStoreAction.requestDownloadTrack(file.id)
       } catch (error) {
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
