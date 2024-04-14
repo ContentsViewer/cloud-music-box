@@ -103,10 +103,6 @@ export default function Page() {
     setFolderId(routerState.hash.slice(1))
   }, [routerState.hash])
 
-  // useEffect(() => {
-  //   console.log("AAAA")
-  //   setFolderId(routerState.currentFileId)
-  // }, [routerState.currentFileId])
 
   useEffect(() => {
     if (!fileStoreState.configured) {
