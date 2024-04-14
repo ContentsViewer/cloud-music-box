@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  AccountInfo,
   InteractionRequiredAuthError,
   PublicClientApplication,
 } from "@azure/msal-browser"
@@ -46,6 +47,10 @@ interface FileStoreStateProps {
   pca: PublicClientApplication | undefined
   rootFiles: BaseFileItem[] | undefined
   configured: boolean
+  driveConfigureStatus:
+    | "not-configured"
+    | "no-account"
+    | "configured"
 
   syncingTrackFiles: { [key: string]: boolean }
   syncQueue: [
@@ -64,6 +69,7 @@ export const FileStoreStateContext = createContext<FileStoreStateProps>({
   configured: false,
   syncingTrackFiles: {},
   syncQueue: [],
+  driveConfigureStatus: "not-configured",
 })
 
 type FileStoreAction =
@@ -87,6 +93,10 @@ type FileStoreAction =
         id: string
         syncing: boolean
       }
+    }
+  | {
+      type: "setDriveConfigureStatus"
+      payload: "not-configured" | "no-account" | "configured"
     }
 
 export const FileStoreDispatchContext = createContext<
@@ -379,43 +389,43 @@ async function makeFileItemFromResponseAndSync(
   return dbItem as BaseFileItem
 }
 
-const acquireAccessToken = async (pca: PublicClientApplication) => {
-  try {
-    const redirectResponse = await pca.handleRedirectPromise()
-    if (redirectResponse) {
-      return redirectResponse.accessToken
-    }
-  } catch (error) {
-    console.error(error)
-    enqueueSnackbar(`${error}`, { variant: "error" })
-  }
+// const acquireAccessToken = async (pca: PublicClientApplication, account: AccountInfo) => {
+//   try {
+//     const redirectResponse = await pca.handleRedirectPromise()
+//     if (redirectResponse) {
+//       return redirectResponse.accessToken
+//     }
+//   } catch (error) {
+//     console.error(error)
+//     enqueueSnackbar(`${error}`, { variant: "error" })
+//   }
 
-  const loginRequest = {
-    scopes: ["Files.Read", "Sites.Read.All"],
-  }
+//   // const loginRequest = {
+//   //   scopes: ["Files.Read", "Sites.Read.All"],
+//   // }
 
-  const accounts = pca.getAllAccounts()
-  if (accounts.length === 0) {
-    pca.loginRedirect(loginRequest)
-    return ""
-  }
+//   // const accounts = pca.getAllAccounts()
+//   // if (accounts.length === 0) {
+//   //   pca.loginRedirect(loginRequest)
+//   //   return ""
+//   // }
 
-  const silentRequest = {
-    scopes: ["Files.Read", "Sites.Read.All"],
-    account: accounts[0],
-  }
+//   const silentRequest = {
+//     scopes: ["Files.Read", "Sites.Read.All"],
+//     account: account,
+//   }
 
-  try {
-    const response = await pca.acquireTokenSilent(silentRequest)
-    return response.accessToken
-  } catch (error) {
-    if (error instanceof InteractionRequiredAuthError) {
-      pca.acquireTokenRedirect(loginRequest)
-      return ""
-    }
-    throw error
-  }
-}
+//   try {
+//     const response = await pca.acquireTokenSilent(silentRequest)
+//     return response.accessToken
+//   } catch (error) {
+//     if (error instanceof InteractionRequiredAuthError) {
+//       pca.acquireTokenRedirect(loginRequest)
+//       return ""
+//     }
+//     throw error
+//   }
+// }
 
 function getIdbRequest<T>(request: IDBRequest<T>) {
   return new Promise<T>((resolve, reject) => {
@@ -477,6 +487,9 @@ const reducer = (
       }
       return { ...state, syncingTrackFiles }
     }
+    case "setDriveConfigureStatus": {
+      return { ...state, driveConfigureStatus: action.payload }
+    }
     default:
       throw new Error("Invalid action")
   }
@@ -495,6 +508,7 @@ export const FileStoreProvider = ({
     configured: false,
     syncingTrackFiles: {},
     syncQueue: [],
+    driveConfigureStatus: "not-configured",
   })
 
   const syncPromiseRef = useRef<Promise<void>>(Promise.resolve())
@@ -576,6 +590,15 @@ export const FileStoreProvider = ({
         roots.sort((a, b) => a.name.localeCompare(b.name))
         dispatch({ type: "setRootFiles", payload: roots })
       }
+
+      {
+        const driveAccountJson = window.localStorage.getItem("drive-account")
+        if (driveAccountJson === null) {
+          dispatch({ type: "setDriveConfigureStatus", payload: "no-account" })
+        } else {
+          dispatch({ type: "setDriveConfigureStatus", payload: "configured" })
+        }
+      }
     }
 
     init()
@@ -599,11 +622,58 @@ export const FileStoreProvider = ({
       dispatch({ type: "setDriveClient", payload: undefined })
       return
     }
+    const pca = state.pca
 
-    if (!state.pca) return
+    if (!pca) return
 
-    acquireAccessToken(state.pca)
-      .then(accessToken => {
+    let accessToken: string | null = null
+
+    pca
+      .handleRedirectPromise()
+      .then(response => {
+        if (!response) return
+        window.localStorage.setItem(
+          "drive-account",
+          JSON.stringify(response.account)
+        )
+        accessToken = response.accessToken
+        console.log("Redirect")
+      })
+      .catch(error => {
+        console.error(error)
+        enqueueSnackbar(`${error}`, { variant: "error" })
+      })
+      .then(() => {
+        if (accessToken !== null) return
+        const activeAccountJson = window.localStorage.getItem("drive-account")
+        if (activeAccountJson === null) {
+          return
+        }
+        const account = JSON.parse(activeAccountJson) as AccountInfo
+
+        const silentRequest = {
+          scopes: ["Files.Read", "Sites.Read.All"],
+          account: account,
+        }
+        console.log("Silent")
+        return pca.acquireTokenSilent(silentRequest)
+      })
+      .then(response => { 
+        if (!response) return
+        accessToken = response.accessToken
+        window.localStorage.setItem("drive-account", JSON.stringify(response.account))
+      })
+      .catch(error => {
+        console.error(error)
+        if (error instanceof InteractionRequiredAuthError) {
+          // pca.acquireTokenRedirect({ scopes: ["Files.Read", "Sites.Read.All"] })
+          // return
+        }
+        enqueueSnackbar(`${error}`, { variant: "error" })
+      })
+      .then(() => { 
+        if (accessToken === null) return
+        dispatch({ type: "setDriveConfigureStatus", payload: "configured" })
         const client = Client.init({
           authProvider: done => {
             done(null, accessToken)
@@ -612,7 +682,7 @@ export const FileStoreProvider = ({
         dispatch({ type: "setDriveClient", payload: client })
         enqueueSnackbar("Drive Client Connected", { variant: "success" })
       })
-      .catch(error => {
+      .catch(error => { 
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
