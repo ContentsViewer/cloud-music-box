@@ -31,6 +31,9 @@ export const useRouter = () => {
     goFile: (fileId: string) => {
       router.push(`/files#${fileId}`)
     },
+    goHome: () => {
+      router.push("/")
+    }
   }
 
   return [state, actions] as const

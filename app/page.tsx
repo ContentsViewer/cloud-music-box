@@ -43,7 +43,13 @@ const LoginPage = () => {
         <Typography variant="h5">Sign in to OneDrive</Typography>
         <List>
           {accounts.map(account => (
-            <ListItemButton key={account.username} onClick={() => {}}>
+            <ListItemButton key={account.username} onClick={() => {
+              const loginRequest = {
+                scopes: ["Files.Read", "Sites.Read.All"],
+                account: account,
+              }
+              pca.acquireTokenRedirect(loginRequest)
+            }}>
               <ListItemAvatar>
                 <Avatar />
               </ListItemAvatar>
@@ -59,6 +65,7 @@ const LoginPage = () => {
               const loginRequest = {
                 scopes: ["Files.Read", "Sites.Read.All"],
               }
+              console.log(pca.getActiveAccount())
               pca.loginRedirect(loginRequest)
             }}
           >

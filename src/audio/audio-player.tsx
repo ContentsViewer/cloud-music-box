@@ -124,6 +124,39 @@ const makeAudioAnalyser = () => {
   }
 }
 
+const msSetPlaybackState = (state: "playing" | "paused") => {
+  console.log("msSetPlaybackState", state)
+  const ms = window.navigator.mediaSession
+  if (!ms) return
+  ms.playbackState = state
+}
+
+const msSetPlayingTrack = (track: AudioTrack) => {
+  console.log("msSetPlayingTrack", track.file.name)
+
+  const ms = window.navigator.mediaSession
+  if (!ms) return
+
+  if (ms.metadata && ms.metadata.artwork.length > 0) {
+    URL.revokeObjectURL(ms.metadata.artwork[0].src)
+  }
+
+  const cover = mm.selectCover(track.file.metadata?.common.picture)
+  const artwork = []
+  if (cover) {
+    const coverUrl = URL.createObjectURL(new Blob([cover.data], { type: cover.format }))
+    artwork.push({ src: coverUrl, sizes: "512x512", type: cover.format })
+  }
+
+  ms.metadata = new MediaMetadata({
+    title: track.file.metadata?.common.title || track.file.name,
+    artist: track.file.metadata?.common.artists?.join(", "),
+    album: track.file.metadata?.common.album,
+    artwork: artwork,
+  })
+  ms.playbackState = "playing"
+}
+
 export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore()
   const playerActionsRef = useRef(playerActions)
@@ -141,9 +174,11 @@ export const AudioPlayer = () => {
 
   const audioAnalyserRef = useRef(makeAudioAnalyser())
 
-  useEffect(() => {
-    // if (configured.current) return
+  const activeAudioTrackRef = useRef<AudioTrack | null>(
+    null
+  )
 
+  useEffect(() => {
     const audio = audioRef.current
     const source = sourceRef.current
 
@@ -195,8 +230,6 @@ export const AudioPlayer = () => {
       source.removeAttribute("type")
       audio.load()
       console.log("Audio player disposed")
-
-      // configured.current = true
     }
   }, [])
 
@@ -213,22 +246,29 @@ export const AudioPlayer = () => {
 
     if (!playerState.isPlaying) {
       audio.pause()
+      msSetPlaybackState("paused")
       return
     }
 
     if (playerState.isActiveTrackLoading) {
       return
     }
-    assert(playerState.activeTrack?.blob)
 
-    if (source.src) {
-      const previousSrc = source.src
-      source.src = ""
-      source.removeAttribute("src")
-      URL.revokeObjectURL(previousSrc)
-    }
+    if (
+      playerState.activeTrack &&
+      playerState.activeTrack.file.id !== activeAudioTrackRef.current?.file.id
+    ) {
+      activeAudioTrackRef.current = playerState.activeTrack
 
-    if (playerState.activeTrack) {
+      // Unload previous track
+      if (source.src) {
+        const previousSrc = source.src
+        source.src = ""
+        source.removeAttribute("src")
+        URL.revokeObjectURL(previousSrc)
+      }
+
+      assert(playerState.activeTrack?.blob)
       const src = URL.createObjectURL(playerState.activeTrack.blob)
 
       source.src = src
@@ -237,24 +277,26 @@ export const AudioPlayer = () => {
 
       console.log("Setting source", src, source.type)
       audio.load()
-      audio
-        .play()
-        .then(() => {
-          console.log("Played")
-          const blob = playerState.activeTrack?.blob
-          if (!blob) return
-          audioAnalyserRef.current.setBuffer(blob)
-        })
-        .catch(error => {
-          playerActionsRef.current.pause()
-
-          console.error(error)
-          enqueueSnackbar(`${error}`, { variant: "error" })
-        })
-      console.log("To Playing")
-
-      enqueueSnackbar("Playing", { variant: "info" })
+      msSetPlayingTrack(playerState.activeTrack)
     }
+
+    audio
+      .play()
+      .then(() => {
+        console.log("Played")
+        const blob = playerState.activeTrack?.blob
+        if (!blob) return
+        audioAnalyserRef.current.setBuffer(blob)
+      })
+      .catch(error => {
+        playerActionsRef.current.pause()
+
+        console.error(error)
+        enqueueSnackbar(`${error}`, { variant: "error" })
+      })
+    console.log("To Playing")
+
+    enqueueSnackbar("Playing", { variant: "info" })
   }, [playerState])
 
   useEffect(() => {
@@ -270,14 +312,14 @@ export const AudioPlayer = () => {
       return
     }
 
-    // For Safari, we need to pause&load to register 
+    // For Safari, we need to pause&load to register
     // playing action handlers(seekbackward, nexttrack, ...).
     // Or these handlers will not be registered and unexpected...
     audio.pause()
     audio.load()
 
     ms.playbackState = "paused"
-    console.log("Setting media session handlersA", ms)
+    console.log("Setting media session handlers", ms)
 
     ms.setActionHandler("play", () => {
       console.log("Play")
@@ -290,6 +332,7 @@ export const AudioPlayer = () => {
 
     ms.setActionHandler("previoustrack", () => {
       console.log("Click previous track")
+      playerActionsRef.current.playPreviousTrack()
     })
     ms.setActionHandler("nexttrack", () => {
       console.log("Click next track")
@@ -320,44 +363,6 @@ export const AudioPlayer = () => {
       console.log("Unsetting media session handlers")
     }
   }, [])
-
-  useEffect(() => {
-    const ms = window.navigator.mediaSession
-    if (!ms) return
-
-    if (playerState.activeTrack && !playerState.isActiveTrackLoading) {
-      console.log("Setting metadata", playerState.activeTrack.file.name)
-      const cover = mm.selectCover(
-        playerState.activeTrack.file.metadata?.common.picture
-      )
-      const artwork = []
-      if (cover) {
-        const coverUrl = URL.createObjectURL(
-          new Blob([cover.data], { type: cover.format })
-        )
-        artwork.push({ src: coverUrl, sizes: "512x512", type: cover.format })
-      }
-
-      ms.metadata = new MediaMetadata({
-        title:
-          playerState.activeTrack.file.metadata?.common.title ||
-          playerState.activeTrack.file.name,
-        artist:
-          playerState.activeTrack.file.metadata?.common.artists?.join(", "),
-        album: playerState.activeTrack.file.metadata?.common.album,
-        artwork: artwork,
-      })
-    }
-
-    ms.playbackState = playerState.isPlaying ? "playing" : "paused"
-
-    return () => {
-      if (ms.metadata && ms.metadata.artwork.length > 0) {
-        URL.revokeObjectURL(ms.metadata.artwork[0].src)
-      }
-      ms.metadata = null
-    }
-  }, [playerState])
 
   return (
     <audio ref={audioRef}>
