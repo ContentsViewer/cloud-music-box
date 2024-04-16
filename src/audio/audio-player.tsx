@@ -144,7 +144,9 @@ const msSetPlayingTrack = (track: AudioTrack) => {
   const cover = mm.selectCover(track.file.metadata?.common.picture)
   const artwork = []
   if (cover) {
-    const coverUrl = URL.createObjectURL(new Blob([cover.data], { type: cover.format }))
+    const coverUrl = URL.createObjectURL(
+      new Blob([cover.data], { type: cover.format })
+    )
     artwork.push({ src: coverUrl, sizes: "512x512", type: cover.format })
   }
 
@@ -174,9 +176,7 @@ export const AudioPlayer = () => {
 
   const audioAnalyserRef = useRef(makeAudioAnalyser())
 
-  const activeAudioTrackRef = useRef<AudioTrack | null>(
-    null
-  )
+  const activeAudioTrackRef = useRef<AudioTrack | null>(null)
 
   useEffect(() => {
     const audio = audioRef.current
@@ -194,8 +194,13 @@ export const AudioPlayer = () => {
       enqueueSnackbar(`${error}`, { variant: "error" })
     }
 
-    const onDurationChange = () => {}
+    const onDurationChange = () => {
+      playerActionsRef.current.setDuration(audio.duration)
+    }
+
     const onTimeUpdate = () => {
+      playerActionsRef.current.setCurrentTime(audio.currentTime)
+
       const analyser = audioAnalyserRef.current
       if (!analyser) return
       analyser.requestAnalyze(audio.currentTime)
@@ -234,6 +239,16 @@ export const AudioPlayer = () => {
   }, [])
 
   useEffect(() => {
+    if (!playerState.currentTimeChanged) return
+
+    const audio = audioRef.current
+    if (!audio) return
+
+    audio.currentTime = playerState.currentTime
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerState.currentTimeChanged])
+
+  useEffect(() => {
     const audio = audioRef.current
     const source = sourceRef.current
 
@@ -241,8 +256,6 @@ export const AudioPlayer = () => {
       console.error("Audio player not initialized")
       return
     }
-
-    console.log("Audio player effect", playerState)
 
     if (!playerState.isPlaying) {
       audio.pause()
@@ -297,7 +310,11 @@ export const AudioPlayer = () => {
     console.log("To Playing")
 
     enqueueSnackbar("Playing", { variant: "info" })
-  }, [playerState])
+  }, [
+    playerState.isActiveTrackLoading,
+    playerState.isPlaying,
+    playerState.activeTrack,
+  ])
 
   useEffect(() => {
     const ms = window.navigator.mediaSession
@@ -338,20 +355,16 @@ export const AudioPlayer = () => {
       console.log("Click next track")
       playerActionsRef.current.playNextTrack()
     })
-    // ms.setActionHandler("previoustrack", null)
-    // ms.setActionHandler("nexttrack", null)
 
     ms.setActionHandler("seekbackward", null)
     ms.setActionHandler("seekforward", null)
 
-    // ms.setActionHandler("seekbackward", () => {
-    //   console.log("Seek backward")
-    // })
-    // ms.setActionHandler("seekforward", () => {
-    //   console.log("Seek forward")
-
-    //   playerActionsRef.current.playNextTrack()
-    // })
+    ms.setActionHandler("seekto", details => {
+      console.log("Seek to", details)
+      if (details.fastSeek) return
+      if (details.seekTime === undefined) return
+      playerActionsRef.current.changeCurrentTime(details.seekTime)
+    })
 
     return () => {
       ms.setActionHandler("play", null)

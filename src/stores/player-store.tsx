@@ -19,6 +19,9 @@ interface PlayerStateProps {
   tracks: AudioTrack[];
   activeTrackIndex: number;
   isActiveTrackLoading: boolean;
+  currentTime: number;
+  currentTimeChanged: boolean;
+  duration: number;
 }
 
 export const PlayerStateContext = createContext<PlayerStateProps>({
@@ -27,6 +30,9 @@ export const PlayerStateContext = createContext<PlayerStateProps>({
   tracks: [],
   activeTrackIndex: -1,
   isActiveTrackLoading: false,
+  currentTime: 0,
+  currentTimeChanged: false,
+  duration: 0,
 });
 
 
@@ -35,6 +41,8 @@ type Action =
   | { type: "pause" }
   | { type: "playTrack", payload: { index: number, tracks: AudioTrack[], isActiveTrackLoading: boolean } }
   | { type: "activeTrackLoaded" }
+  | { type: "setCurrentTime", payload: { currentTime: number, changed: boolean } }
+  | { type: "setDuration", payload: { duration: number } };
 
 export const PlayerDispatchContext = createContext<Dispatch<Action>>(() => { });
 
@@ -89,15 +97,28 @@ export const usePlayerStore = () => {
         return;
       }
 
-      if (state.activeTrackIndex === -1) {
-        return playTrack(0);
+      let newIndex = state.activeTrackIndex
+
+      if (newIndex === -1) {
+        newIndex = 0;
       }
 
-      const isTheFirstTrack = state.activeTrackIndex === 0;
+      if (state.currentTime < 4) {
+        const isTheFirstTrack = state.activeTrackIndex === 0;
+        newIndex = isTheFirstTrack ? state.tracks.length - 1 : state.activeTrackIndex - 1;
+      }
 
-      const newIndex = isTheFirstTrack ? state.tracks.length - 1 : state.activeTrackIndex - 1;
       return playTrack(newIndex);
-    }
+    },
+    setCurrentTime: (currentTime: number) => {
+      dispatch({ type: "setCurrentTime", payload: { currentTime, changed: false } });
+    },
+    changeCurrentTime: (currentTime: number) => {
+      dispatch({ type: "setCurrentTime", payload: { currentTime, changed: true } });
+    },
+    setDuration: (duration: number) => {
+      dispatch({ type: "setDuration", payload: { duration } });
+    },
   }
 
   return [state, actions] as const;
@@ -106,12 +127,12 @@ export const usePlayerStore = () => {
 const cacheBlobs = (
   currentIndex: number, tracks: AudioTrack[], fileStoreActions: ReturnType<typeof useFileStore>[1],
   dispatch: React.Dispatch<Action>) => {
+  if (tracks.length === 0) return;
   
-  [currentIndex, currentIndex + 1].forEach((index) => {
-    if (index >= tracks.length) {
-      return;
-    }
-
+  const prevIndex = currentIndex - 1 < 0 ? tracks.length - 1 : currentIndex - 1;
+  const nextIndex = currentIndex + 1 >= tracks.length ? 0 : currentIndex + 1;
+  
+  [currentIndex, nextIndex, prevIndex].forEach((index) => {
     const track = tracks[index];
     if (track.blob) {
       return;
@@ -148,13 +169,22 @@ const reducer = (state: PlayerStateProps, action: Action) => {
     }
     case "playTrack": {
       const { index, tracks, isActiveTrackLoading } = action.payload;
-      return { ...state, isPlaying: true, activeTrack: tracks[index], activeTrackIndex: index, isActiveTrackLoading, tracks };
+      return {
+        ...state, isPlaying: true, activeTrack: tracks[index], activeTrackIndex: index, isActiveTrackLoading, tracks,
+        currentTime: 0, currentTimeChanged: true,
+       };
     }
     case "pause": {
       return { ...state, isPlaying: false };
     }
     case "activeTrackLoaded": {
       return { ...state, isActiveTrackLoading: false };
+    }
+    case "setCurrentTime": {
+      return { ...state, currentTime: action.payload.currentTime, currentTimeChanged: action.payload.changed };
+    }
+    case "setDuration": {
+      return { ...state, duration: action.payload.duration };
     }
     default: {
       throw new Error(`Unknown action: ${action}`);
@@ -169,6 +199,9 @@ export const PlayerStoreProvider = ({ children }: { children: React.ReactNode })
     tracks: [],
     activeTrackIndex: -1,
     isActiveTrackLoading: false,
+    currentTime: 0,
+    currentTimeChanged: false,
+    duration: 0,
   });
 
   return (
