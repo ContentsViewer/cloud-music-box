@@ -6,7 +6,7 @@ import {
   PublicClientApplication,
 } from "@azure/msal-browser"
 import { Client, ResponseType } from "@microsoft/microsoft-graph-client"
-import { enqueueSnackbar } from "notistack"
+import { SnackbarKey, closeSnackbar, enqueueSnackbar } from "notistack"
 import {
   createContext,
   useContext,
@@ -18,6 +18,8 @@ import {
 import { useNetworkMonitor } from "./network-monitor"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
+import { Button } from "@mui/material"
+import { useThemeStore } from "./theme-store"
 
 export interface BaseFileItem {
   name: string
@@ -619,6 +621,7 @@ export const FileStoreProvider = ({
     if (!pca) return
 
     let accessToken: string | null = null
+    let account: AccountInfo | null = null
 
     pca
       .handleRedirectPromise()
@@ -641,7 +644,7 @@ export const FileStoreProvider = ({
         if (activeAccountJson === null) {
           return
         }
-        const account = JSON.parse(activeAccountJson) as AccountInfo
+        account = JSON.parse(activeAccountJson) as AccountInfo
 
         const silentRequest = {
           scopes: ["Files.Read", "Sites.Read.All"],
@@ -664,7 +667,36 @@ export const FileStoreProvider = ({
           // pca.acquireTokenRedirect({ scopes: ["Files.Read", "Sites.Read.All"] })
           // return
         }
-        enqueueSnackbar(`${error}`, { variant: "error" })
+        const action = (snackbarId: SnackbarKey) => {
+          return (
+            <>
+              <Button color="error" onClick={() => {
+                if (!pca) return
+                if (!account) return
+                pca.acquireTokenRedirect({
+                  scopes: ["Files.Read", "Sites.Read.All"],
+                  account: account
+                })
+                closeSnackbar(snackbarId)
+              }}>
+                Log In Cloud
+              </Button>
+              <Button
+                color="error"
+                onClick={() => {
+                  closeSnackbar(snackbarId)
+                }}
+              >
+                Dismiss
+              </Button>
+            </>
+          )
+        }
+        enqueueSnackbar(`${error}`, {
+          variant: "error",
+          action,
+          persist: true,
+        })
       })
       .then(() => {
         if (accessToken === null) return

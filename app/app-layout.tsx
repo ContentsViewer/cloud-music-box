@@ -5,8 +5,8 @@ import { MiniPlayer } from "@/src/components/mini-player"
 import { FileStoreProvider } from "@/src/stores/file-store"
 import { PlayerStoreProvider, usePlayerStore } from "@/src/stores/player-store"
 import { DynamicBackground } from "@/src/components/dynamic-background"
-import { Box } from "@mui/material"
-import { SnackbarProvider } from "notistack"
+import { Box, styled } from "@mui/material"
+import { MaterialDesignContent, SnackbarProvider } from "notistack"
 import { NetworkMonitorProvider } from "@/src/stores/network-monitor"
 import { RouterProvider } from "@/src/router"
 import { useEffect, useRef, useState } from "react"
@@ -44,6 +44,15 @@ const ThemeChanger = () => {
   return null
 }
 
+// const StyledMaterialDesignContent = styled(MaterialDesignContent)(() => ({
+//   '&.notistack-MuiContent-success': {
+//     backgroundColor: '#2D7738',
+//   },
+//   '&.notistack-MuiContent-error': {
+//     backgroundColor: '#970C0C',
+//   },
+// }));
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -69,6 +78,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       classes={{
         containerAnchorOriginBottomLeft: "snackbar-container",
       }}
+      // Components={{
+      //   success: StyledMaterialDesignContent,
+      //   error: StyledMaterialDesignContent,
+      // }}
     >
       <RouterProvider>
         <NetworkMonitorProvider>
