@@ -241,8 +241,5 @@ export default withPWA({
   basePath: basePath,
   reactStrictMode: true,
   output: "export",
-  experimental: {
-    clientRouterFilter: false // HOOOOO
-  }
 });
 
