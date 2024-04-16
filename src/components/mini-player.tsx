@@ -3,9 +3,14 @@
 import {
   Audiotrack,
   PlayArrow,
+  PlayArrowRounded,
   SkipNext,
+  SkipNextOutlined,
+  SkipNextRounded,
   SkipPrevious,
+  SkipPreviousRounded,
   Stop,
+  StopRounded,
   Undo,
 } from "@mui/icons-material"
 import {
@@ -16,6 +21,7 @@ import {
   Grow,
   IconButton,
   LinearProgress,
+  Slider,
   SxProps,
   Theme,
   Typography,
@@ -37,8 +43,100 @@ import { Variant } from "@mui/material/styles/createTypography"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
 
+const getNumberWithLeadingZero = (n: number) => `${n < 10 ? "0" : ""}${n}`
+
+const formatTime = (ms: number) => {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) {
+    return "--:--"
+  }
+
+  const hours = Math.floor(ms / 60 / 60)
+  const minutes = Math.floor((ms % 3600) / 60)
+  const seconds = Math.floor((ms % 3600) % 60)
+  const time: (number | string)[] = [
+    getNumberWithLeadingZero(minutes),
+    getNumberWithLeadingZero(seconds),
+  ]
+
+  if (hours) {
+    time.unshift(hours)
+  }
+
+  return time.join(":")
+}
+
 interface MiniPlayerProps {
   sx?: SxProps<Theme>
+}
+
+const TimelineSlider = () => {
+  const [playerState] = usePlayerStore()
+  const [themeStoreState] = useThemeStore()
+
+  const duration = playerState.duration
+
+  const actualTime = playerState.currentTime
+
+  const [inputValue, setInputValue] = useState<number>(0)
+
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
+  useEffect(() => {
+    const time = actualTime
+
+    setInputValue(time ? (actualTime / duration) * 1000 : 0)
+  }, [actualTime, duration])
+
+  return (
+    <Box
+      sx={{
+        pt: 1,
+        mx: 4,
+        // display: "grid",
+        // gridTemplateColumns: "auto 1fr auto",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Slider
+        sx={{
+          height: 4,
+          // gridColumn: "1 / 4",
+          // mx: 4,
+          // px: 4,
+          // pt: 1,
+        }}
+        size="small"
+        value={inputValue}
+        max={1000}
+      />
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          mt: -1,
+        }}
+      >
+        <Typography variant="caption" color={colorOnSurfaceVariant} sx={{}}>
+          {formatTime(actualTime)}
+        </Typography>
+        <Typography
+          variant="caption"
+          sx={
+            {
+              // gridColumn: "3",
+            }
+          }
+          color={colorOnSurfaceVariant}
+        >
+          {formatTime(duration)}
+        </Typography>
+      </Box>
+    </Box>
+  )
 }
 
 export const MiniPlayer = (props: MiniPlayerProps) => {
@@ -94,6 +192,10 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
     return hexFromArgb(hct.toInt())
   })()
 
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
   return (
     <Card
       sx={{
@@ -102,7 +204,6 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
         backgroundColor: alpha(primaryBackgroundColor, 0.5),
         display: "flex",
         m: 1,
-        alignItems: "center",
         flexDirection: "column",
         borderRadius: 4,
       }}
@@ -118,18 +219,23 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
               routerActions.goFile(parentId)
             }}
             sx={{
-              color: hexFromArgb(
-                MaterialDynamicColors.onSurfaceVariant.getArgb(
-                  themeStoreState.scheme
-                )
-              ),
+              color: colorOnSurfaceVariant,
             }}
           >
             <Undo fontSize="inherit" />
           </IconButton>
         ) : null}
       </Box>
-      <Box sx={{ display: "flex", alignItems: "center", width: "100%", p: 2 }}>
+      <TimelineSlider />
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          width: "100%",
+          px: 2,
+          pb: 1,
+        }}
+      >
         <Avatar
           src={coverUrl}
           variant="rounded"
@@ -148,11 +254,7 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
           />
           <MarqueeText
             text={activeTrack?.file.metadata?.common.artist || ""}
-            color={hexFromArgb(
-              MaterialDynamicColors.onSurfaceVariant.getArgb(
-                themeStoreState.scheme
-              )
-            )}
+            color={colorOnSurfaceVariant}
           />
         </Box>
         <IconButton
@@ -160,7 +262,7 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
             playerActions.playPreviousTrack()
           }}
         >
-          <SkipPrevious />
+          <SkipPreviousRounded />
         </IconButton>
         <IconButton
           size="large"
@@ -196,10 +298,10 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
             }}
           >
             <Grow in={playerState.isPlaying} timeout={500} appear={false}>
-              <Stop sx={{ fontSize: 32, position: "absolute" }} />
+              <StopRounded sx={{ fontSize: 32, position: "absolute" }} />
             </Grow>
             <Grow in={!playerState.isPlaying} timeout={500} appear={false}>
-              <PlayArrow sx={{ fontSize: 32, position: "absolute" }} />
+              <PlayArrowRounded sx={{ fontSize: 32, position: "absolute" }} />
             </Grow>
           </Box>
         </IconButton>
@@ -208,7 +310,7 @@ export const MiniPlayer = (props: MiniPlayerProps) => {
             playerActions.playNextTrack()
           }}
         >
-          <SkipNext />
+          <SkipNextRounded />
         </IconButton>
       </Box>
       <Box sx={{ position: "absolute", bottom: 0, left: 0, right: 0 }}>
