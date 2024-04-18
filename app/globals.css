@@ -33,7 +33,11 @@ body {
 } */
 
 html, body {
-  min-height: 100vh;
+  /* min-height: 100vh; */
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0;
+  margin: 0;
 }
 
 .snackbar-container {

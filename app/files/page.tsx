@@ -293,7 +293,11 @@ export default function Page() {
           </div>
         </Toolbar>
       </ElevationAppBar>
-      <FileList sx={{ mt: 5 }} files={files} />
+      <FileList sx={{
+        mt: 8, 
+        pl: `env(safe-area-inset-left, 0)`,
+        pr: `env(safe-area-inset-right, 0)`,
+       }} files={files} />
     </Box>
   )
 }
