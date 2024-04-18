@@ -108,8 +108,6 @@ export default function Page() {
       return
     }
 
-    console.log("!!")
-
     const getFiles = async () => {
       if (!folderId) {
         return
