@@ -92,7 +92,7 @@ const TimelineSlider = () => {
   return (
     <Box
       sx={{
-        pt: 1,
+        my: 1,
         mx: 4,
         // display: "grid",
         // gridTemplateColumns: "auto 1fr auto",
@@ -117,7 +117,7 @@ const TimelineSlider = () => {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          mt: -1,
+          mt: -1.5,
         }}
       >
         <Typography variant="caption" color={colorOnSurfaceVariant} sx={{}}>

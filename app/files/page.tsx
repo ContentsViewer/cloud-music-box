@@ -125,7 +125,7 @@ export default function Page() {
       }
     }
     getFiles()
-  }, [fileStoreState, folderId])
+  }, [fileStoreState.configured, folderId])
 
   const handleMoreClose = () => {
     setAnchorEl(null)
