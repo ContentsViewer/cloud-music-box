@@ -521,7 +521,7 @@ export const FileStoreProvider = ({
           clientId: "28af6fb9-c605-4ad3-8039-3e90df0933cb",
           redirectUri: `${window.location.origin}${
             process.env.NEXT_PUBLIC_BASE_PATH || ""
-          }`,
+          }/redirect`,
         },
         cache: {
           cacheLocation: "localStorage",
@@ -670,15 +670,18 @@ export const FileStoreProvider = ({
         const action = (snackbarId: SnackbarKey) => {
           return (
             <>
-              <Button color="error" onClick={() => {
-                if (!pca) return
-                if (!account) return
-                pca.acquireTokenRedirect({
-                  scopes: ["Files.Read", "Sites.Read.All"],
-                  account: account
-                })
-                closeSnackbar(snackbarId)
-              }}>
+              <Button
+                color="error"
+                onClick={() => {
+                  if (!pca) return
+                  if (!account) return
+                  pca.acquireTokenRedirect({
+                    scopes: ["Files.Read", "Sites.Read.All"],
+                    account: account,
+                  })
+                  closeSnackbar(snackbarId)
+                }}
+              >
                 Log In Cloud
               </Button>
               <Button

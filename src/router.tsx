@@ -32,7 +32,7 @@ export const useRouter = () => {
       router.push(`/files#${fileId}`)
     },
     goHome: () => {
-      router.push("/")
+      router.push("/home")
     }
   }
 
