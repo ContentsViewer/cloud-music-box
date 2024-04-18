@@ -91,20 +91,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <ThemeChanger />
                 <DynamicBackground />
                 <AudioPlayer />
-                {/* <StatusBar /> */}
-                <Box
-                  sx={{
-                    flexGrow: 1,
-                    overflowY: "auto",
-                    overflowX: "hidden",
-                    mt: 4,
-                    mb: 10,
-                  }}
-                >
-                  {children}
-                </Box>
+                <Box sx={{
+                  pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+                }}>{children}</Box>
                 <MiniPlayer
-                  sx={{ position: "fixed", bottom: 0, left: 0, right: 0 }}
+                  sx={{
+                    position: "fixed",
+                    left: `env(safe-area-inset-left, 0)`,
+                    right: `env(safe-area-inset-right, 0)`,
+                    bottom: `env(safe-area-inset-bottom, 0)`,
+                  }}
                 />
               </DynamicThemeStoreProvider>
             </PlayerStoreProvider>

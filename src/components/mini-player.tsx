@@ -117,7 +117,7 @@ const TimelineSlider = () => {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          mt: -1.5,
+          mt: -2,
         }}
       >
         <Typography variant="caption" color={colorOnSurfaceVariant} sx={{}}>
