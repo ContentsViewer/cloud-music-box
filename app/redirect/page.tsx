@@ -40,7 +40,8 @@ export default function Page() {
           flexDirection: "column",
         }}
       >
-        <Box
+        <CircularProgress />
+        {/* <Box
           sx={{
             width: 100,
             height: 100,
@@ -78,7 +79,7 @@ export default function Page() {
             />
           )}
         </Box>
-        <Box>Connecting...</Box>
+        <Box>Connecting...</Box> */}
       </Backdrop>
     </Box>
   )
