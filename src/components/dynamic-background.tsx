@@ -63,7 +63,7 @@ export const DynamicBackground = () => {
           right: 0,
           bottom: 0,
           left: 0,
-          opacity: 0.25,
+          opacity: 1.0, 
           // backgroundImage: `radical-gradient(transparent, ${backgroundColor})`,
           background: `radial-gradient(circle at 76% 26%, transparent, ${backgroundColor})`,
         }}
@@ -76,7 +76,7 @@ export const DynamicBackground = () => {
           bottom: 0,
           left: 0,
           background: `linear-gradient(transparent, ${primaryColor})`,
-          opacity: 0.2,
+          opacity: 1.0,
         }}
       />
     </div>
