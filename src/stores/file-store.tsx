@@ -374,44 +374,6 @@ async function makeFileItemFromResponseAndSync(
   return dbItem as BaseFileItem
 }
 
-// const acquireAccessToken = async (pca: PublicClientApplication, account: AccountInfo) => {
-//   try {
-//     const redirectResponse = await pca.handleRedirectPromise()
-//     if (redirectResponse) {
-//       return redirectResponse.accessToken
-//     }
-//   } catch (error) {
-//     console.error(error)
-//     enqueueSnackbar(`${error}`, { variant: "error" })
-//   }
-
-//   // const loginRequest = {
-//   //   scopes: ["Files.Read", "Sites.Read.All"],
-//   // }
-
-//   // const accounts = pca.getAllAccounts()
-//   // if (accounts.length === 0) {
-//   //   pca.loginRedirect(loginRequest)
-//   //   return ""
-//   // }
-
-//   const silentRequest = {
-//     scopes: ["Files.Read", "Sites.Read.All"],
-//     account: account,
-//   }
-
-//   try {
-//     const response = await pca.acquireTokenSilent(silentRequest)
-//     return response.accessToken
-//   } catch (error) {
-//     if (error instanceof InteractionRequiredAuthError) {
-//       pca.acquireTokenRedirect(loginRequest)
-//       return ""
-//     }
-//     throw error
-//   }
-// }
-
 function getIdbRequest<T>(request: IDBRequest<T>) {
   return new Promise<T>((resolve, reject) => {
     request.onsuccess = event => {
@@ -619,6 +581,7 @@ export const FileStoreProvider = ({
     const pca = state.pca
 
     if (!pca) return
+    if (state.driveClient) return
 
     let accessToken: string | null = null
     let account: AccountInfo | null = null
@@ -716,7 +679,7 @@ export const FileStoreProvider = ({
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
-  }, [networkMonitor, state.configured, state.pca])
+  }, [networkMonitor, state.configured, state.pca, state.driveClient])
 
   useEffect(() => {
     if (state.driveClient === undefined) return
