@@ -217,9 +217,9 @@ export default withPWA({
   runtimeCaching,
   register: false,
   buildExcludes: [/app-build-manifest.json$/],
-  additionalManifestEntries: [
-    { url: "/index.html", revision: null }
-  ],
+  // additionalManifestEntries: [
+  //   { url: "/index.html", revision: null }
+  // ],
 })({
   basePath: basePath,
   reactStrictMode: true,

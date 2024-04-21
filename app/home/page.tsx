@@ -43,13 +43,16 @@ const LoginPage = () => {
         <Typography variant="h5">Sign in to OneDrive</Typography>
         <List>
           {accounts.map(account => (
-            <ListItemButton key={account.username} onClick={() => {
-              const loginRequest = {
-                scopes: ["Files.Read", "Sites.Read.All"],
-                account: account,
-              }
-              pca.acquireTokenRedirect(loginRequest)
-            }}>
+            <ListItemButton
+              key={account.username}
+              onClick={() => {
+                const loginRequest = {
+                  scopes: ["Files.Read", "Sites.Read.All"],
+                  account: account,
+                }
+                pca.acquireTokenRedirect(loginRequest)
+              }}
+            >
               <ListItemAvatar>
                 <Avatar />
               </ListItemAvatar>
@@ -93,10 +96,16 @@ export default function Page() {
 
   const driveConfigureStatus = fileStoreState.driveConfigureStatus
 
-  return driveConfigureStatus === "not-configured" ? null : driveConfigureStatus ===
-    "no-account" ? (
+  return driveConfigureStatus ===
+    "not-configured" ? null : driveConfigureStatus === "no-account" ? (
     <LoginPage />
   ) : (
-    <FileList files={fileStoreState.rootFiles} />
+    <FileList
+      files={fileStoreState.rootFiles}
+      sx={{
+        pl: `env(safe-area-inset-left, 0)`,
+        pr: `env(safe-area-inset-right, 0)`,
+      }}
+    />
   )
 }

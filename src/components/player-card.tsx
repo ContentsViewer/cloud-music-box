@@ -319,6 +319,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
           sx={{
             flexBasis: "50%",
             p: 5,
+            pl: "calc(env(safe-area-inset-left, 0) + 40px)",
             boxSizing: "border-box",
             // position: "relative"
             height: "50%",
@@ -342,19 +343,8 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
                 height: "auto",
               },
               boxShadow: "0 8px 32px rgba(0, 0, 0, 0.25)",
-              // width: "100%",
-              // height: "100%",
               aspectRatio: "1 / 1",
-              // width: "auto",
-              // height: "auto",
-              // width: "calc(50vmin - 80px)",
-              // height: "calc(50vmin - 80px)",
-              // flex: "1 1 auto",
               boxSizing: "border-box",
-              // m: "auto"
-              // maxWidth: "100%",
-              // maxHeight: "100%"
-              // objectFit: "contain"
             }}
             coverUrl={props.coverUrl}
           />
@@ -369,6 +359,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             minWidth: 0,
             width: "100%",
             p: 5,
+            pr: "calc(env(safe-area-inset-right, 0) + 40px)",
           }}
         >
           <MarqueeText text={props.title} variant="h5" />
