@@ -1,6 +1,6 @@
 "use client"
 
-import { Box, Slider, Typography } from "@mui/material"
+import { Box, Slider, SxProps, Theme, Typography } from "@mui/material"
 import { usePlayerStore } from "../stores/player-store"
 import { useThemeStore } from "../stores/theme-store"
 import { useEffect, useState } from "react"
@@ -31,7 +31,11 @@ const formatTime = (ms: number) => {
   return time.join(":")
 }
 
-export const TimelineSlider = () => {
+interface TimelineSliderProps {
+  sx?: SxProps<Theme>
+}
+
+export const TimelineSlider = (props: TimelineSliderProps) => {
   const [playerState] = usePlayerStore()
   const [themeStoreState] = useThemeStore()
 
@@ -54,12 +58,9 @@ export const TimelineSlider = () => {
   return (
     <Box
       sx={{
-        my: 1,
-        mx: 4,
-        // display: "grid",
-        // gridTemplateColumns: "auto 1fr auto",
         display: "flex",
         flexDirection: "column",
+        ...props.sx,
       }}
     >
       <Slider

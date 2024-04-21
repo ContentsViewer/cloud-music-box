@@ -40,17 +40,13 @@ import {
   hexFromArgb,
   Hct,
 } from "@material/material-color-utilities"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { MouseEventHandler, useEffect, useMemo, useRef, useState } from "react"
 import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
 import { transform } from "next/dist/build/swc"
 
-const TrackCover = (props: {
-  coverUrl?: string
-  sx?: SxProps<Theme>
-  ref?: React.RefObject<HTMLDivElement>
-}) => {
+const TrackCover = (props: { coverUrl?: string; sx?: SxProps<Theme> }) => {
   return (
     <Avatar
       src={props.coverUrl}
@@ -58,9 +54,9 @@ const TrackCover = (props: {
       sx={{
         width: 48,
         height: 48,
+        borderRadius: "10%",
         ...props.sx,
       }}
-      ref={props.ref}
     >
       {props.coverUrl ? null : <Audiotrack />}
     </Avatar>
@@ -72,14 +68,80 @@ const TrackCoverPlaceholder = styled(Box)(({ theme }) => ({
   height: 48,
 }))
 
+const SkipPreviousButton = ({
+  onClick,
+}: {
+  onClick?: MouseEventHandler<HTMLButtonElement>
+}) => {
+  return (
+    <IconButton onClick={onClick}>
+      <SkipPreviousRounded />
+    </IconButton>
+  )
+}
+
+const SkipNextButton = ({
+  onClick,
+}: {
+  onClick?: MouseEventHandler<HTMLButtonElement>
+}) => {
+  return (
+    <IconButton onClick={onClick}>
+      <SkipNextRounded />
+    </IconButton>
+  )
+}
+
+const PlayPauseButton = ({
+  onClick,
+  isPlaying,
+  primaryColor,
+  onPrimaryColor,
+}: {
+  onClick?: MouseEventHandler<HTMLButtonElement>
+  isPlaying: boolean
+  primaryColor: string
+  onPrimaryColor: string
+}) => {
+  return (
+    <IconButton
+      size="large"
+      sx={{
+        backgroundColor: primaryColor,
+        color: onPrimaryColor,
+        "&:hover": {
+          backgroundColor: primaryColor,
+        },
+      }}
+      onClick={onClick}
+    >
+      <Box
+        sx={{
+          position: "relative",
+          width: "32px",
+          height: "32px",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Grow in={isPlaying} timeout={500} appear={false}>
+          <StopRounded sx={{ fontSize: 32, position: "absolute" }} />
+        </Grow>
+        <Grow in={!isPlaying} timeout={500} appear={false}>
+          <PlayArrowRounded sx={{ fontSize: 32, position: "absolute" }} />
+        </Grow>
+      </Box>
+    </IconButton>
+  )
+}
+
 interface MiniPlayerContentProps {
   activeTrack: AudioTrack | null
   title: string
   coverUrl?: string
   onExpand?: () => void
   sx?: SxProps<Theme>
-  coverRef?: React.RefObject<HTMLDivElement>
-  onMount?: () => void
 }
 
 const MiniPlayerContent = (props: MiniPlayerContentProps) => {
@@ -94,12 +156,12 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
-
-  useEffect(() => {
-    if (props.onMount) {
-      props.onMount()
-    }
-  }, [])
+  const primaryColor = hexFromArgb(
+    MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
+  )
+  const onPrimaryColor = hexFromArgb(
+    MaterialDynamicColors.onPrimary.getArgb(themeStoreState.scheme)
+  )
 
   return (
     <Box sx={props.sx}>
@@ -118,7 +180,12 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
           </IconButton>
         ) : null}
       </Box>
-      <TimelineSlider />
+      <TimelineSlider
+        sx={{
+          my: 1,
+          mx: 4,
+        }}
+      />
       <Box
         sx={{
           display: "flex",
@@ -139,7 +206,7 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
             }
           }}
         >
-          <TrackCover coverUrl={coverUrl} ref={props.coverRef} />
+          <TrackCover coverUrl={coverUrl} />
         </ButtonBase>
         <Box sx={{ flexGrow: 1, minWidth: "0" }}>
           <MarqueeText
@@ -153,28 +220,12 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
             color={colorOnSurfaceVariant}
           />
         </Box>
-        <IconButton
+        <SkipPreviousButton
           onClick={() => {
             playerActions.playPreviousTrack()
           }}
-        >
-          <SkipPreviousRounded />
-        </IconButton>
-        <IconButton
-          size="large"
-          sx={{
-            backgroundColor: hexFromArgb(
-              MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
-            ),
-            color: hexFromArgb(
-              MaterialDynamicColors.onPrimary.getArgb(themeStoreState.scheme)
-            ),
-            "&:hover": {
-              backgroundColor: hexFromArgb(
-                MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
-              ),
-            },
-          }}
+        />
+        <PlayPauseButton
           onClick={() => {
             if (playerState.isPlaying) {
               playerActions.pause()
@@ -182,32 +233,15 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
               playerActions.play()
             }
           }}
-        >
-          <Box
-            sx={{
-              position: "relative",
-              width: "32px",
-              height: "32px",
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            <Grow in={playerState.isPlaying} timeout={500} appear={false}>
-              <StopRounded sx={{ fontSize: 32, position: "absolute" }} />
-            </Grow>
-            <Grow in={!playerState.isPlaying} timeout={500} appear={false}>
-              <PlayArrowRounded sx={{ fontSize: 32, position: "absolute" }} />
-            </Grow>
-          </Box>
-        </IconButton>
-        <IconButton
+          isPlaying={playerState.isPlaying}
+          primaryColor={primaryColor}
+          onPrimaryColor={onPrimaryColor}
+        />
+        <SkipNextButton
           onClick={() => {
             playerActions.playNextTrack()
           }}
-        >
-          <SkipNextRounded />
-        </IconButton>
+        />
       </Box>
       <Box sx={{ position: "absolute", bottom: 0, left: 0, right: 0 }}>
         <Fade
@@ -225,27 +259,26 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
 
 interface FullPlayerContentProps {
   onShrink?: () => void
+  title: string
+  activeTrack: AudioTrack | null
   coverRef?: React.RefObject<HTMLDivElement>
   coverUrl?: string
-  onMount?: () => void
 }
 
 const FullPlayerContent = (props: FullPlayerContentProps) => {
-  useEffect(() => {
-    if (props.onMount) {
-      props.onMount()
-    }
-  }, [])
+  const { activeTrack } = props
+
+  const [themeStoreState] = useThemeStore()
+  const [playerState, playerActions] = usePlayerStore()
+  const primaryColor = hexFromArgb(
+    MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
+  )
+  const onPrimaryColor = hexFromArgb(
+    MaterialDynamicColors.onPrimary.getArgb(themeStoreState.scheme)
+  )
 
   return (
-    <Box
-      sx={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
+    <Box sx={{ width: "100%", height: "100%" }}>
       <AppBar
         sx={{
           backgroundColor: "transparent",
@@ -267,14 +300,118 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
           </IconButton>
         </Toolbar>
       </AppBar>
-      <TrackCover
-        ref={props.coverRef}
+      <Box
         sx={{
-          width: 256,
-          height: 256,
+          display: "flex",
+          "@media (orientation: portrait)": {
+            flexDirection: "column",
+          },
+          "@media (orientation: landscape)": {
+            flexDirection: "row",
+          },
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          height: "100%",
         }}
-        coverUrl={props.coverUrl}
-      />
+      >
+        <Box
+          sx={{
+            flexBasis: "50%",
+            p: 5,
+            boxSizing: "border-box",
+            // position: "relative"
+            height: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <TrackCover
+            sx={{
+              // position: "absolute",
+              // top: 0,
+              // left: 0,
+              // width: "100%",
+              "@media (orientation: portrait)": {
+                height: "100%",
+                width: "auto",
+              },
+              "@media (orientation: landscape)": {
+                width: "100%",
+                height: "auto",
+              },
+              boxShadow: "0 8px 32px rgba(0, 0, 0, 0.25)",
+              // width: "100%",
+              // height: "100%",
+              aspectRatio: "1 / 1",
+              // width: "auto",
+              // height: "auto",
+              // width: "calc(50vmin - 80px)",
+              // height: "calc(50vmin - 80px)",
+              // flex: "1 1 auto",
+              boxSizing: "border-box",
+              // m: "auto"
+              // maxWidth: "100%",
+              // maxHeight: "100%"
+              // objectFit: "contain"
+            }}
+            coverUrl={props.coverUrl}
+          />
+        </Box>
+        <Box
+          sx={{
+            flexBasis: "50%",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            // alignItems: "center",
+            minWidth: 0,
+            width: "100%",
+            p: 5,
+          }}
+        >
+          <MarqueeText text={props.title} variant="h5" />
+
+          <MarqueeText
+            text={activeTrack?.file.metadata?.common.artist || ""}
+            variant="subtitle1"
+          />
+
+          <TimelineSlider sx={{ mt: 1 }} />
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <SkipPreviousButton
+              onClick={() => {
+                playerActions.playPreviousTrack()
+              }}
+            />
+            <PlayPauseButton
+              onClick={() => {
+                if (playerState.isPlaying) {
+                  playerActions.pause()
+                } else {
+                  playerActions.play()
+                }
+              }}
+              isPlaying={playerState.isPlaying}
+              primaryColor={primaryColor}
+              onPrimaryColor={onPrimaryColor}
+            />
+            <SkipNextButton
+              onClick={() => {
+                playerActions.playNextTrack()
+              }}
+            />
+          </Box>
+        </Box>
+      </Box>
     </Box>
   )
 }
@@ -380,7 +517,7 @@ export const PlayerCard = (props: PlayerCardProps) => {
               flexDirection: "column",
 
               backdropFilter: "blur(16px)",
-              maxWidth: 480,
+              maxWidth: 640,
               backgroundColor: alpha(primaryBackgroundColor, 0.5),
               borderRadius: 4,
               m: "auto",
@@ -393,7 +530,6 @@ export const PlayerCard = (props: PlayerCardProps) => {
               coverUrl={coverUrl}
               title={title}
               onExpand={props.onExpand}
-              coverRef={coverOnShrinkRef}
             />
           </Card>
         </Fade>
@@ -420,22 +556,24 @@ export const PlayerCard = (props: PlayerCardProps) => {
       >
         <Fade in={props.expand} timeout={1000} unmountOnExit>
           <Box
-            sx={
-              {
-                //position: "fixed",
-                //top: 0,
-                //left: 0,
-                //right: 0,
-                //bottom: 0,
-                //transformOrigin: "bottom",
+            sx={{
+              //position: "fixed",
+              //top: 0,
+              //left: 0,
+              //right: 0,
+              //bottom: 0,
+              //transformOrigin: "bottom",
+              width: "100%",
+              height: "100%",
               pointerEvents: "auto",
-              }
-            }
+            }}
           >
             <FullPlayerContent
               onShrink={props.onShrink}
               coverRef={coverOnExpandRef}
               coverUrl={coverUrl}
+              title={title}
+              activeTrack={activeTrack}
             />
           </Box>
         </Fade>
