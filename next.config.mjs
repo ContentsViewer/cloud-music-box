@@ -212,30 +212,13 @@ const runtimeCaching = [
   }
 ]
 
-
 export default withPWA({
   dest: "public",
   runtimeCaching,
   register: false,
-  buildExcludes: [/app-build-manifest.json$/]
-  // disable: false
-  // disable: process.env.NODE_ENV === "development",
-  // runtimeCaching: [
-  //   {
-  //     urlPattern: /^http:\/\/.*_rsc*/,
-  //     handler: 'NetworkFirst',
-  //     options: {
-  //       cacheName: 'files',
-  //       networkTimeoutSeconds: 15,
-  //       expiration: {
-  //         maxEntries: 150,
-  //         maxAgeSeconds: 30 * 24 * 60 * 60, // 1 month
-  //       },
-  //       cacheableResponse: {
-  //         statuses: [0, 200],
-  //       },
-  //     },
-  //   },
+  buildExcludes: [/app-build-manifest.json$/],
+  // additionalManifestEntries: [
+  //   { url: "/index.html", revision: null }
   // ],
 })({
   basePath: basePath,

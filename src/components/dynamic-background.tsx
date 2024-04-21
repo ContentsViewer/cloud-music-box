@@ -25,10 +25,13 @@ export const DynamicBackground = () => {
 
     const note = noteFromPitch(pitch)
     const noteColor = Hct.from((note % 12) * 30, 100, 50)
-    const primaryColor = MaterialDynamicColors.primaryContainer.getHct(
-      themeStoreState.scheme
-    )
-    const pitchColor = Blend.harmonize(noteColor.toInt(), primaryColor.toInt())
+    
+    const sourceColor = Hct.fromInt(themeStoreState.sourceColor)
+    // const primaryColor = MaterialDynamicColors.primaryContainer.getHct(
+    //   themeStoreState.scheme
+    // )
+    const pitchColor = Blend.harmonize(noteColor.toInt(), sourceColor.toInt())
+    // const pitchColor = sourceColor.toInt()
 
     setPitchColor(hexFromArgb(pitchColor))
   }, [dynamicThemeState.pitch, themeStoreState.scheme])
@@ -57,7 +60,7 @@ export const DynamicBackground = () => {
         style={{ backgroundColor: pitchColor }}
         sx={{
           position: "fixed",
-          mixBlendMode: "screen",
+          // mixBlendMode: "screen",
           transition: "background-color 1s",
           top: 0,
           right: 0,

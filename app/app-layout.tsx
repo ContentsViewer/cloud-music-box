@@ -1,11 +1,11 @@
 "use client"
 
 import { AudioPlayer } from "@/src/audio/audio-player"
-import { MiniPlayer } from "@/src/components/mini-player"
+import { PlayerCard } from "@/src/components/player-card"
 import { FileStoreProvider } from "@/src/stores/file-store"
 import { PlayerStoreProvider, usePlayerStore } from "@/src/stores/player-store"
 import { DynamicBackground } from "@/src/components/dynamic-background"
-import { Box, styled } from "@mui/material"
+import { Box, Fade, styled } from "@mui/material"
 import { MaterialDesignContent, SnackbarProvider } from "notistack"
 import { NetworkMonitorProvider } from "@/src/stores/network-monitor"
 import { RouterProvider } from "@/src/router"
@@ -68,6 +68,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       })
     }
   }, [])
+  const [playerCardExpanded, setPlayerCardExpanded] = useState<boolean>(false)
 
   return (
     <SnackbarProvider
@@ -91,15 +92,22 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <ThemeChanger />
                 <DynamicBackground />
                 <AudioPlayer />
-                <Box sx={{
-                  pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
-                }}>{children}</Box>
-                <MiniPlayer
-                  sx={{
-                    position: "fixed",
-                    left: `env(safe-area-inset-left, 0)`,
-                    right: `env(safe-area-inset-right, 0)`,
-                    bottom: `env(safe-area-inset-bottom, 0)`,
+                <Fade in={!playerCardExpanded} unmountOnExit>
+                  <Box
+                    sx={{
+                      pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+                    }}
+                  >
+                    {children}
+                  </Box>
+                </Fade>
+                <PlayerCard
+                  expand={playerCardExpanded}
+                  onShrink={() => {
+                    setPlayerCardExpanded(false)
+                  }}
+                  onExpand={() => {
+                    setPlayerCardExpanded(true)
                   }}
                 />
               </DynamicThemeStoreProvider>
