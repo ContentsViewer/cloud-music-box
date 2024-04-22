@@ -16,20 +16,14 @@ import {
   Fade,
   Grow,
   IconButton,
-  Button,
   LinearProgress,
-  Slider,
   SxProps,
   Theme,
-  Typography,
   alpha,
-  rgbToHex,
   useTheme,
   ButtonBase,
-  makeStyles,
   styled,
   AppBar,
-  Zoom,
 } from "@mui/material"
 import { AudioTrack, usePlayerStore } from "../stores/player-store"
 import { useFileStore } from "../stores/file-store"
@@ -164,7 +158,10 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
   )
 
   return (
-    <Box sx={props.sx}>
+    <Box sx={{
+      position: "relative",
+      ...props.sx
+    }}>
       <Box sx={{ position: "absolute", top: 0, left: 0, right: 0 }}>
         {parentId ? (
           <IconButton
