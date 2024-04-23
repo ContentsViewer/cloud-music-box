@@ -19,6 +19,9 @@
     "@mui/icons-material": "^5.15.14",
     "@mui/material": "^5.15.14",
     "@mui/material-nextjs": "^5.15.11",
+    "@serwist/next": "^9.0.0",
+    "@serwist/precaching": "^9.0.0",
+    "@serwist/sw": "^9.0.0",
     "framer-motion": "^11.1.7",
     "music-metadata-browser": "^2.5.10",
     "next": "14.1.4",
@@ -26,6 +29,7 @@
     "notistack": "^3.0.1",
     "react": "^18",
     "react-dom": "^18",
+    "react-fast-marquee": "^1.6.4",
     "react-router-dom": "^6.22.3",
     "styled-components": "^6.1.8"
   },

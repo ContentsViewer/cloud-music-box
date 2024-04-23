@@ -80,7 +80,7 @@ export const TimelineSlider = (props: TimelineSliderProps) => {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          mt: -2,
+          mt: -1.5,
         }}
       >
         <Typography variant="caption" color={colorOnSurfaceVariant} sx={{}}>
