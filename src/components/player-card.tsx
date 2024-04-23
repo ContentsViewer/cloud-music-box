@@ -38,7 +38,7 @@ import { MouseEventHandler, useEffect, useMemo, useRef, useState } from "react"
 import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
-import { transform } from "next/dist/build/swc"
+import Marquee from "react-fast-marquee"
 
 const TrackCover = (props: { coverUrl?: string; sx?: SxProps<Theme> }) => {
   return (
@@ -56,11 +56,6 @@ const TrackCover = (props: { coverUrl?: string; sx?: SxProps<Theme> }) => {
     </Avatar>
   )
 }
-
-const TrackCoverPlaceholder = styled(Box)(({ theme }) => ({
-  width: 48,
-  height: 48,
-}))
 
 const SkipPreviousButton = ({
   onClick,
@@ -158,10 +153,12 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
   )
 
   return (
-    <Box sx={{
-      position: "relative",
-      ...props.sx
-    }}>
+    <Box
+      sx={{
+        position: "relative",
+        ...props.sx,
+      }}
+    >
       <Box sx={{ position: "absolute", top: 0, left: 0, right: 0 }}>
         {parentId ? (
           <IconButton
@@ -360,7 +357,6 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
           }}
         >
           <MarqueeText text={props.title} variant="h5" />
-
           <MarqueeText
             text={activeTrack?.file.metadata?.common.artist || ""}
             variant="subtitle1"
@@ -373,6 +369,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",
+              gap: 5,
             }}
           >
             <SkipPreviousButton

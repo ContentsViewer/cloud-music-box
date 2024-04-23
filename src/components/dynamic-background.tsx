@@ -23,15 +23,17 @@ export const DynamicBackground = () => {
     const pitch = dynamicThemeState.pitch
     if (pitch === -1) return
 
-    const note = noteFromPitch(pitch)
-    const noteColor = Hct.from((note % 12) * 30, 100, 50)
-    
     const sourceColor = Hct.fromInt(themeStoreState.sourceColor)
+    // console.log(sourceColor.hue, sourceColor.chroma, sourceColor.tone)
+
+    const note = noteFromPitch(pitch)
+    const noteColor = Hct.from((note % 12) * 30, 50, 50)
+
     // const primaryColor = MaterialDynamicColors.primaryContainer.getHct(
     //   themeStoreState.scheme
     // )
-    const pitchColor = Blend.harmonize(noteColor.toInt(), sourceColor.toInt())
     // const pitchColor = sourceColor.toInt()
+    const pitchColor = Blend.harmonize(noteColor.toInt(), sourceColor.toInt())
 
     setPitchColor(hexFromArgb(pitchColor))
   }, [dynamicThemeState.pitch, themeStoreState.scheme])
@@ -66,7 +68,7 @@ export const DynamicBackground = () => {
           right: 0,
           bottom: 0,
           left: 0,
-          opacity: 1.0, 
+          opacity: 1.0,
           // backgroundImage: `radical-gradient(transparent, ${backgroundColor})`,
           background: `radial-gradient(circle at 76% 26%, transparent, ${backgroundColor})`,
         }}

@@ -12,26 +12,51 @@ interface MarqueeTextProps {
 }
 
 export const MarqueeText = ({ text, variant, color, sx }: MarqueeTextProps) => {
-  const textRef = useRef<HTMLSpanElement>(null)
-  const [scrollAmount, setScrollAmount] = useState(0)
-  const updateScrollAmount = () => {
-    const offsetWidth = textRef.current?.offsetWidth
-    const scrollWidth = textRef.current?.scrollWidth
-    if (offsetWidth && scrollWidth) {
-      setScrollAmount(offsetWidth - scrollWidth)
-    }
-  }
-  useEffect(() => {
-    const observer = new ResizeObserver(entries => {
-      for (let entry of entries) {
-        if (entry.target === textRef.current) {
-          updateScrollAmount()
+  const firstTextRef = useRef<HTMLSpanElement>(null)
+  const secondTextRef = useRef<HTMLSpanElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const updateScrollAnimation = () => {
+    if (!firstTextRef.current || !containerRef.current) return
+
+    const textWidth = firstTextRef.current.offsetWidth
+    const containerWidth = containerRef.current.offsetWidth
+
+    for (const ref of [firstTextRef, secondTextRef]) {
+      if (!ref.current) continue;
+
+      const style = ref.current.style;
+      if (textWidth <= containerWidth) {
+        style.animation = "none";
+        style.setProperty("--marquee-animation-play-state", "none");
+      }
+      if (textWidth > containerWidth) {
+        const playState = style.getPropertyValue("--marquee-animation-play-state");
+        if (playState === "none" || playState === "") {
+          style.animation = `marquee ${textWidth / 16}s linear infinite`;
+          style.setProperty("--marquee-animation-play-state", "running");
         }
       }
+    }
+
+    if (secondTextRef.current) {
+      const style = secondTextRef.current.style;
+      console.log(textWidth, containerWidth)
+      if (textWidth <= containerWidth) {
+        style.display = "none";
+      } else {
+        style.display = "block";
+      }
+    }
+  }
+
+  useEffect(() => {
+    const observer = new ResizeObserver(entries => {
+      updateScrollAnimation()
     })
 
-    if (textRef.current) {
-      observer.observe(textRef.current)
+    if (containerRef.current) {
+      observer.observe(containerRef.current)
     }
 
     return () => {
@@ -40,34 +65,45 @@ export const MarqueeText = ({ text, variant, color, sx }: MarqueeTextProps) => {
   }, [])
 
   useEffect(() => {
-    updateScrollAmount()
+    updateScrollAnimation()
   }, [text])
 
-  useEffect(() => {
-    const style = textRef.current?.style
-    if (!style) return
-    style.left = `${scrollAmount}px`
-    style.animation = `marquee 10s ease-in-out infinite alternate`
-  }, [scrollAmount])
-
   return (
-    <Box sx={{ ...sx, overflow: "hidden" }}>
+    <Box
+      sx={{
+        ...sx,
+        overflow: "hidden",
+        // width: "100%",
+        display: "flex",
+        flexDirection: "row",
+      }}
+      ref={containerRef}
+    >
       <Typography
-        ref={textRef}
+        ref={firstTextRef}
         color={color}
         variant={variant}
         sx={{
-          position: "relative",
-          // position: "absolute",
           whiteSpace: "nowrap",
-          // overflow: "hidden",
-          // textOverflow: "ellipsis",
-          // animation: `marquee 10s ease-in-out infinite alternate`,
           "@keyframes marquee": {
-            // "0%": { left: "0" },
-            from: { left: "0" },
-            // "0%": { transform: "translateX(0)" },
-            // "100%": { transform: `translateX(${scrollAmount}px)` },
+            "0%": { transform: "translateX(0%)" },
+            "100%": { transform: `translateX(calc(-100% - 80px))` },
+          },
+        }}
+      >
+        {text}
+      </Typography>
+      
+      <Typography
+        ref={secondTextRef}
+        color={color}
+        variant={variant}
+        sx={{
+          whiteSpace: "nowrap",
+          ml: 10,
+          "@keyframes marquee": {
+            "0%": { transform: "translateX(0%)" },
+            "100%": { transform: `translateX(calc(-100% - 80px))` },
           },
         }}
       >

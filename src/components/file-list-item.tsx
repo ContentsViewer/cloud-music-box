@@ -59,6 +59,13 @@ export function FileListItemBasic({
             textOverflow: "ellipsis",
           },
         }}
+        secondaryTypographyProps={{
+          style: {
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          },
+        }}
         primary={name}
         secondary={secondaryText}
       />
