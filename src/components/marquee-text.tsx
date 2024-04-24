@@ -9,9 +9,10 @@ interface MarqueeTextProps {
   variant?: Variant
   color?: string
   sx?: SxProps<Theme>
+  typographySx?: SxProps<Theme>
 }
 
-export const MarqueeText = ({ text, variant, color, sx }: MarqueeTextProps) => {
+export const MarqueeText = ({ text, variant, color, sx, typographySx }: MarqueeTextProps) => {
   const firstTextRef = useRef<HTMLSpanElement>(null)
   const secondTextRef = useRef<HTMLSpanElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -41,7 +42,6 @@ export const MarqueeText = ({ text, variant, color, sx }: MarqueeTextProps) => {
 
     if (secondTextRef.current) {
       const style = secondTextRef.current.style;
-      console.log(textWidth, containerWidth)
       if (textWidth <= containerWidth) {
         style.display = "none";
       } else {
@@ -73,7 +73,6 @@ export const MarqueeText = ({ text, variant, color, sx }: MarqueeTextProps) => {
       sx={{
         ...sx,
         overflow: "hidden",
-        // width: "100%",
         display: "flex",
         flexDirection: "row",
       }}
@@ -89,6 +88,7 @@ export const MarqueeText = ({ text, variant, color, sx }: MarqueeTextProps) => {
             "0%": { transform: "translateX(0%)" },
             "100%": { transform: `translateX(calc(-100% - 80px))` },
           },
+          ...typographySx,
         }}
       >
         {text}
@@ -105,6 +105,7 @@ export const MarqueeText = ({ text, variant, color, sx }: MarqueeTextProps) => {
             "0%": { transform: "translateX(0%)" },
             "100%": { transform: `translateX(calc(-100% - 80px))` },
           },
+          typographySx,
         }}
       >
         {text}

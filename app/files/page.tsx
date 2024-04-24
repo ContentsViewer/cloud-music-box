@@ -36,6 +36,7 @@ import {
   CloudOff,
   ArrowDownward,
   Home,
+  HomeRounded,
 } from "@mui/icons-material"
 import { useRouter } from "@/src/router"
 import { useThemeStore } from "@/src/stores/theme-store"
@@ -173,7 +174,7 @@ export default function Page() {
               routerActions.goHome()
             }}
           >
-            <Home />
+            <HomeRounded />
           </IconButton>
           <Typography
             sx={{
