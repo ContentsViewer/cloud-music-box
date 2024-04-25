@@ -26,7 +26,14 @@ const LoginPage = () => {
   const accounts = pca.getAllAccounts()
 
   return (
-    <Box>
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        mt: 8
+      }}
+    >
       <Paper
         sx={{
           maxWidth: 400,
@@ -41,9 +48,10 @@ const LoginPage = () => {
       >
         <Cloud sx={{ fontSize: 100 }} />
         <Typography variant="h5">Sign in to OneDrive</Typography>
-        <List>
+        <List sx={{ width: "100%" }}>
           {accounts.map(account => (
             <ListItemButton
+              sx={{ width: "100%" }}
               key={account.username}
               onClick={() => {
                 const loginRequest = {
@@ -56,7 +64,15 @@ const LoginPage = () => {
               <ListItemAvatar>
                 <Avatar />
               </ListItemAvatar>
-              <Typography variant="body1" sx={{ flexGrow: 1 }}>
+              <Typography
+                variant="body1"
+                sx={{
+                  flexGrow: 1,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
                 {account.username}
               </Typography>
               <Login sx={{ ml: 1 }} />

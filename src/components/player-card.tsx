@@ -312,11 +312,10 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
         <Box
           sx={{
             flexBasis: "50%",
+            height: "50%",
             p: 5,
             pl: "calc(env(safe-area-inset-left, 0) + 40px)",
             boxSizing: "border-box",
-            // position: "relative"
-            height: "50%",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -324,10 +323,6 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
         >
           <TrackCover
             sx={{
-              // position: "absolute",
-              // top: 0,
-              // left: 0,
-              // width: "100%",
               "@media (orientation: portrait)": {
                 height: "100%",
                 width: "auto",
@@ -349,14 +344,19 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
-            // alignItems: "center",
             minWidth: 0,
             width: "100%",
             p: 5,
             pr: "calc(env(safe-area-inset-right, 0) + 40px)",
           }}
         >
-          <MarqueeText text={props.title} variant="h5" />
+          <MarqueeText
+            text={props.title}
+            variant="h5"
+            typographySx={{
+              fontWeight: "bold",
+            }}
+          />
           <MarqueeText
             text={activeTrack?.file.metadata?.common.artist || ""}
             variant="subtitle1"

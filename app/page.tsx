@@ -9,7 +9,10 @@ export default function Page() {
   routerActionsRef.current = routerActions
 
   useEffect(() => {
-    routerActionsRef.current.goHome()
+    const lastHref = routerActionsRef.current.goLastHref()
+    if (!lastHref) {
+      routerActionsRef.current.goHome()
+    }
   }, [])
   return <></>
 }
