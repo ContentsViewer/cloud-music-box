@@ -105,7 +105,7 @@ export const MarqueeText = ({ text, variant, color, sx, typographySx }: MarqueeT
             "0%": { transform: "translateX(0%)" },
             "100%": { transform: `translateX(calc(-100% - 80px))` },
           },
-          typographySx,
+          ...typographySx,
         }}
       >
         {text}
