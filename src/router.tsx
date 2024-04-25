@@ -29,10 +29,21 @@ export const useRouter = () => {
 
   const actions = {
     goFile: (fileId: string) => {
-      router.push(`/files#${fileId}`, { scroll: false })
+      const href = `/files#${fileId}`
+      router.push(href, { scroll: false })
+      window.localStorage.setItem("lastHref", href)
     },
     goHome: () => {
-      router.push("/home", { scroll: false })
+      const href = "/home"
+      router.push(href, { scroll: false })
+      window.localStorage.setItem("lastHref", href)
+    },
+    goLastHref: () => {
+      const lastHref = window.localStorage.getItem("lastHref")
+      if (lastHref) {
+        router.push(lastHref, { scroll: false })
+      }
+      return lastHref
     },
   }
 
