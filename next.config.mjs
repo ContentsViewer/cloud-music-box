@@ -19,7 +19,9 @@ const withSerwist = withSerwistInit({
     { url: "index.html", revision: revision },
     { url: "index.txt", revision: revision },
     { url: "redirect.html", revision: revision },
-    { url: "redirect.txt", revision: revision }
+    { url: "redirect.txt", revision: revision },
+    { url: "settings.html", revision: revision },
+    { url: "settings.txt", revision: revision },
   ]
 });
 
