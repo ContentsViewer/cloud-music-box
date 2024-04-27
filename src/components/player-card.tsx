@@ -346,7 +346,12 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             justifyContent: "center",
             minWidth: 0,
             width: "100%",
-            p: 5,
+            "@media (orientation: portrait)": {
+              pl: 5,
+            },
+            "@media (orientation: landscape)": {
+              pl: 0
+            },
             pr: "calc(env(safe-area-inset-right, 0) + 40px)",
           }}
         >

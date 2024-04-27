@@ -13,6 +13,7 @@ import {
   AppBar,
   Badge,
   Box,
+  Divider,
   IconButton,
   ListItemIcon,
   ListItemText,
@@ -20,9 +21,6 @@ import {
   MenuItem,
   Toolbar,
   Typography,
-  alpha,
-  useScrollTrigger,
-  useTheme,
 } from "@mui/material"
 import {
   ArrowBack,
@@ -37,6 +35,8 @@ import {
   ArrowDownward,
   Home,
   HomeRounded,
+  Settings,
+  SettingsRounded,
 } from "@mui/icons-material"
 import { useRouter } from "@/src/router"
 import { useThemeStore } from "@/src/stores/theme-store"
@@ -46,40 +46,7 @@ import {
 } from "@material/material-color-utilities"
 import { useNetworkMonitor } from "@/src/stores/network-monitor"
 import { MarqueeText } from "@/src/components/marquee-text"
-
-function ElevationAppBar(props: { children: React.ReactElement }) {
-  const theme = useTheme()
-  const [themeStoreState] = useThemeStore()
-
-  const trigger = useScrollTrigger({
-    disableHysteresis: true,
-    threshold: 0,
-  })
-
-  return (
-    <AppBar
-      sx={{
-        backdropFilter: "blur(16px)",
-        WebkitBackdropFilter: "blur(16px)",
-        backgroundColor: alpha(
-          hexFromArgb(
-            MaterialDynamicColors.surfaceContainer.getArgb(
-              themeStoreState.scheme
-            )
-          ),
-          trigger ? 0.5 : 0
-        ),
-        transition: theme.transitions.create([
-          "background-color",
-          "backdrop-filter",
-        ]),
-      }}
-      elevation={0}
-    >
-      {props.children}
-    </AppBar>
-  )
-}
+import AppTopBar from "@/src/components/app-top-bar"
 
 export default function Page() {
   const [fileStoreState, fileStoreActions] = useFileStore()
@@ -94,7 +61,6 @@ export default function Page() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
 
   const [themeStoreState] = useThemeStore()
-  const params = useParams()
 
   const [routerState, routerActions] = useRouter()
   const routerActionsRef = useRef(routerActions)
@@ -152,7 +118,7 @@ export default function Page() {
 
   return (
     <Box>
-      <ElevationAppBar>
+      <AppTopBar>
         <Toolbar>
           <IconButton
             size="large"
@@ -236,34 +202,7 @@ export default function Page() {
                     }}
                   />
                 </Box>
-                {/*                 
-                <CloudDownload
-                  fontSize="small"
-                  sx={{
-                    color: hexFromArgb(
-                      MaterialDynamicColors.onSurfaceVariant.getArgb(
-                        themeStoreState.scheme
-                      )
-                    ),
-                  }}
-                /> */}
               </Badge>
-              {/* <CircularProgress
-                sx={{
-                  position: "absolute",
-                  top: "50%",
-                  left: "50%",
-                  marginTop: "-16px",
-                  marginLeft: "-16px",
-
-                  color: hexFromArgb(
-                    MaterialDynamicColors.onSurfaceVariant.getArgb(
-                      themeStoreState.scheme
-                    )
-                  ),
-                }}
-                size={32}
-              /> */}
             </Box>
           ) : null}
           <div>
@@ -290,15 +229,29 @@ export default function Page() {
                 </ListItemIcon>
                 <ListItemText>Download</ListItemText>
               </MenuItem>
+              {/* <Divider /> */}
+              <MenuItem
+                onClick={() => {
+                  routerActionsRef.current.goSettings()
+                }}
+              >
+                <ListItemIcon>
+                  <SettingsRounded />
+                </ListItemIcon>
+                <ListItemText>Settings</ListItemText>
+              </MenuItem>
             </Menu>
           </div>
         </Toolbar>
-      </ElevationAppBar>
-      <FileList sx={{
-        mt: 8, 
-        pl: `env(safe-area-inset-left, 0)`,
-        pr: `env(safe-area-inset-right, 0)`,
-       }} files={files} />
+      </AppTopBar>
+      <FileList
+        sx={{
+          mt: 8,
+          pl: `env(safe-area-inset-left, 0)`,
+          pr: `env(safe-area-inset-right, 0)`,
+        }}
+        files={files}
+      />
     </Box>
   )
 }

@@ -45,6 +45,13 @@ export const useRouter = () => {
       }
       return lastHref
     },
+    goSettings: () => { 
+      const href = "/settings"
+      router.push(href, { scroll: false })
+    },
+    goBack: () => { 
+      router.back()
+    }
   }
 
   return [state, actions] as const
