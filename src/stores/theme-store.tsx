@@ -96,7 +96,7 @@ export const ThemeStoreProvider = ({
         default: hexFromArgb(
           MaterialDynamicColors.surface.getArgb(state.scheme)
         ),
-        paper: hexFromArgb(MaterialDynamicColors.surface.getArgb(state.scheme)),
+        paper: hexFromArgb(MaterialDynamicColors.surfaceContainer.getArgb(state.scheme)),
       },
       error: {
         main: hexFromArgb(MaterialDynamicColors.error.getArgb(state.scheme)),

@@ -71,6 +71,7 @@ export const DynamicBackground = () => {
           opacity: 1.0,
           // backgroundImage: `radical-gradient(transparent, ${backgroundColor})`,
           background: `radial-gradient(circle at 76% 26%, transparent, ${backgroundColor})`,
+          zIndex: -1,
         }}
       />
       <Box
@@ -82,6 +83,7 @@ export const DynamicBackground = () => {
           left: 0,
           background: `linear-gradient(transparent, ${primaryColor})`,
           opacity: 1.0,
+          zIndex: -1,
         }}
       />
     </div>

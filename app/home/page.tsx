@@ -1,8 +1,17 @@
 "use client"
 
+import AppTopBar from "@/src/components/app-top-bar"
 import { FileList } from "@/src/components/file-list"
+import { useRouter } from "@/src/router"
 import { useFileStore } from "@/src/stores/file-store"
-import { Cloud, Login } from "@mui/icons-material"
+import {
+  Cloud,
+  HomeRounded,
+  Login,
+  MoreVert,
+  Settings,
+  SettingsRounded
+} from "@mui/icons-material"
 import {
   Avatar,
   Box,
@@ -14,8 +23,13 @@ import {
   ListItemIcon,
   Paper,
   Typography,
+  Toolbar,
+  IconButton,
+  Menu,
+  MenuItem,
+  ListItemText,
 } from "@mui/material"
-import { useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
 
 const LoginPage = () => {
   const [fileStoreState] = useFileStore()
@@ -31,7 +45,7 @@ const LoginPage = () => {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        mt: 8
+        mt: 8,
       }}
     >
       <Paper
@@ -105,6 +119,12 @@ const LoginPage = () => {
 export default function Page() {
   const [fileStoreState] = useFileStore()
 
+  const [routerState, routerActions] = useRouter()
+  const routerActionsRef = useRef(routerActions)
+  routerActionsRef.current = routerActions
+
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+
   useEffect(() => {
     if (fileStoreState.driveConfigureStatus !== "no-account") return
     console.log("no account")
@@ -112,16 +132,60 @@ export default function Page() {
 
   const driveConfigureStatus = fileStoreState.driveConfigureStatus
 
-  return driveConfigureStatus ===
-    "not-configured" ? null : driveConfigureStatus === "no-account" ? (
-    <LoginPage />
-  ) : (
-    <FileList
-      files={fileStoreState.rootFiles}
-      sx={{
-        pl: `env(safe-area-inset-left, 0)`,
-        pr: `env(safe-area-inset-right, 0)`,
-      }}
-    />
+  return (
+    <Box>
+      <AppTopBar>
+        <Toolbar>
+          <HomeRounded />
+          <Typography sx={{ mx: 1 }} variant="h6">
+            Home
+          </Typography>
+          <Box sx={{ flexGrow: 1 }}></Box>
+          <div>
+            <IconButton
+              color="inherit"
+              onClick={event => {
+                setAnchorEl(event.currentTarget)
+              }}
+            >
+              <MoreVert />
+            </IconButton>
+            <Menu
+              anchorEl={anchorEl}
+              keepMounted
+              open={Boolean(anchorEl)}
+              onClose={() => {
+                setAnchorEl(null)
+              }}
+            >
+              <MenuItem
+                onClick={() => {
+                  routerActionsRef.current.goSettings()
+                }}
+              >
+                <ListItemIcon>
+                  <SettingsRounded />
+                </ListItemIcon>
+                <ListItemText>Settings</ListItemText>
+              </MenuItem>
+            </Menu>
+          </div>
+        </Toolbar>
+      </AppTopBar>
+      <Box sx={{ mt: 8 }} />
+
+      {driveConfigureStatus ===
+      "not-configured" ? null : driveConfigureStatus === "no-account" ? (
+        <LoginPage />
+      ) : (
+        <FileList
+          files={fileStoreState.rootFiles}
+          sx={{
+            pl: `env(safe-area-inset-left, 0)`,
+            pr: `env(safe-area-inset-right, 0)`,
+          }}
+        />
+      )}
+    </Box>
   )
 }
