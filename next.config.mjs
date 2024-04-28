@@ -22,7 +22,8 @@ const withSerwist = withSerwistInit({
     { url: "redirect.txt", revision: revision },
     { url: "settings.html", revision: revision },
     { url: "settings.txt", revision: revision },
-  ]
+  ],
+  reloadOnOnline: false
 });
 
 export default withSerwist({
