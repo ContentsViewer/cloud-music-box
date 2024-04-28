@@ -1,12 +1,15 @@
 "use client"
 
 import { AppBar, alpha, useScrollTrigger, useTheme } from "@mui/material"
-import { ReactElement } from "react"
+import { ReactNode } from "react"
 import { useThemeStore } from "../stores/theme-store"
-import { MaterialDynamicColors, hexFromArgb } from "@material/material-color-utilities"
+import {
+  MaterialDynamicColors,
+  hexFromArgb,
+} from "@material/material-color-utilities"
 
 interface AppTopBarProps {
-  children: ReactElement[]
+  children: ReactNode
 }
 
 export default function AppTopBar(props: AppTopBarProps) {
@@ -17,7 +20,7 @@ export default function AppTopBar(props: AppTopBarProps) {
     disableHysteresis: true,
     threshold: 0,
   })
-  
+
   return (
     <AppBar
       sx={{
