@@ -1,7 +1,7 @@
 {
   "name": "Cloud Music Box",
   "short_name": "Cloud Music Box",
-  "description": "A simple music player that plays music from the your cloud.",
+  "description": "A pwa music player that plays music from your cloud storage.",
   "icons": [
     {
       "src": "icon-192x192.png",

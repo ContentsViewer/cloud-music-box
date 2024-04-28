@@ -21,10 +21,6 @@ export function FileList(props: FileListProps) {
   const networkMonitor = useNetworkMonitor();
   const [ fileStoreState, fileStoreActions ] = useFileStore();
 
-  useEffect(() => { 
-    console.log('syncingTrackFiles', fileStoreState.syncingTrackFiles);
-  }, [fileStoreState.syncingTrackFiles])
-
   return (
     <List sx={props.sx}>
       {props.files?.map((file) => {

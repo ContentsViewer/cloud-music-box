@@ -6,7 +6,7 @@ import { useThemeStore } from "../stores/theme-store"
 import { MaterialDynamicColors, hexFromArgb } from "@material/material-color-utilities"
 
 interface AppTopBarProps {
-  children: ReactElement
+  children: ReactElement[]
 }
 
 export default function AppTopBar(props: AppTopBarProps) {
