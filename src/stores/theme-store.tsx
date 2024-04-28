@@ -5,14 +5,10 @@ import { createTheme } from "@mui/material/styles"
 import { ThemeProvider } from "@mui/material/styles"
 import { useTheme } from "@mui/material/styles"
 import {
-  themeFromImage,
-  Theme,
-  themeFromSourceColor,
   hexFromArgb,
   SchemeContent,
   sourceColorFromImage,
   DynamicScheme,
-  argbFromHex,
   Hct,
   MaterialDynamicColors,
 } from "@material/material-color-utilities"

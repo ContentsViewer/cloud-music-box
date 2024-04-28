@@ -8,13 +8,13 @@ import {
 import { enqueueSnackbar } from "notistack"
 import { useEffect, useRef, useState } from "react"
 import { FileList } from "@/src/components/file-list"
-import { useParams } from "next/navigation"
 import {
-  AppBar,
   Badge,
   Box,
   Divider,
+  Fade,
   IconButton,
+  LinearProgress,
   ListItemIcon,
   ListItemText,
   Menu,
@@ -24,18 +24,11 @@ import {
 } from "@mui/material"
 import {
   ArrowBack,
-  DownloadForOffline,
-  DownloadForOfflineOutlined,
-  More,
   MoreVert,
-  Download,
-  FileDownload,
   CloudDownload,
   CloudOff,
   ArrowDownward,
-  Home,
   HomeRounded,
-  Settings,
   SettingsRounded,
 } from "@mui/icons-material"
 import { useRouter } from "@/src/router"
@@ -47,6 +40,7 @@ import {
 import { useNetworkMonitor } from "@/src/stores/network-monitor"
 import { MarqueeText } from "@/src/components/marquee-text"
 import AppTopBar from "@/src/components/app-top-bar"
+import { removeListener } from "process"
 
 export default function Page() {
   const [fileStoreState, fileStoreActions] = useFileStore()
@@ -56,9 +50,10 @@ export default function Page() {
   const networkMonitor = useNetworkMonitor()
 
   const [currentFile, setCurrentFile] = useState<BaseFileItem | null>(null)
-  const [files, setFiles] = useState<BaseFileItem[]>([])
+  const [files, setFiles] = useState<BaseFileItem[] | undefined>([])
   const [folderId, setFolderId] = useState<string | null>(null)
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+  const [remoteFetching, setRemoteFetching] = useState(false)
 
   const [themeStoreState] = useThemeStore()
 
@@ -68,12 +63,15 @@ export default function Page() {
 
   useEffect(() => {
     setFolderId(routerState.hash.slice(1))
+    setFiles(undefined)
   }, [routerState.hash])
 
   useEffect(() => {
     if (!fileStoreState.configured) {
       return
     }
+
+    let isCancelled = false
 
     const getFiles = async () => {
       if (!folderId) {
@@ -82,17 +80,59 @@ export default function Page() {
       const currentFile = await fileStoreActionsRef.current.getFileById(
         folderId
       )
+      if (isCancelled) return
       setCurrentFile(currentFile)
+
       try {
-        const files = await fileStoreActionsRef.current.getChildren(folderId)
-        setFiles(files)
+        const localFiles = await fileStoreActionsRef.current.getChildrenLocal(
+          folderId
+        )
+        if (isCancelled) return
+        // console.log("LOCAL")
+        if (localFiles) {
+          setFiles(localFiles)
+        }
       } catch (error) {
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
       }
     }
     getFiles()
+    return () => {
+      isCancelled = true
+    }
   }, [fileStoreState.configured, folderId])
+
+  useEffect(() => {
+    if (!fileStoreState.driveClient || !folderId) {
+      return
+    }
+
+    let isCancelled = false
+
+    const getFiles = async () => {
+      try {
+        setRemoteFetching(true)
+        const remoteFiles = await fileStoreActionsRef.current.getChildrenRemote(
+          folderId
+        )
+        if (isCancelled) return
+        // console.log("REMOTE")
+        if (remoteFiles) {
+          setFiles(remoteFiles)
+        }
+        setRemoteFetching(false)
+      } catch (error) {
+        console.error(error)
+        enqueueSnackbar(`${error}`, { variant: "error" })
+        setRemoteFetching(false)
+      }
+    }
+    getFiles()
+    return () => {
+      isCancelled = true
+    }
+  }, [fileStoreState.driveClient, folderId])
 
   const handleMoreClose = () => {
     setAnchorEl(null)
@@ -100,6 +140,7 @@ export default function Page() {
 
   const handleDownload = async () => {
     handleMoreClose()
+    if (!files) return
 
     const fileStoreAction = fileStoreActionsRef.current
 
@@ -243,6 +284,15 @@ export default function Page() {
             </Menu>
           </div>
         </Toolbar>
+        <Fade
+          in={remoteFetching}
+          style={{
+            transitionDelay: remoteFetching ? "800ms" : "0ms",
+          }}
+          unmountOnExit
+        >
+          <LinearProgress sx={{ width: "100%" }} />
+        </Fade>
       </AppTopBar>
       <FileList
         sx={{

@@ -38,7 +38,6 @@ import { MouseEventHandler, useEffect, useMemo, useRef, useState } from "react"
 import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
-import Marquee from "react-fast-marquee"
 
 const TrackCover = (props: { coverUrl?: string; sx?: SxProps<Theme> }) => {
   return (
@@ -59,24 +58,28 @@ const TrackCover = (props: { coverUrl?: string; sx?: SxProps<Theme> }) => {
 
 const SkipPreviousButton = ({
   onClick,
+  size = "medium",
 }: {
   onClick?: MouseEventHandler<HTMLButtonElement>
+  size?: "small" | "medium" | "large"
 }) => {
   return (
-    <IconButton onClick={onClick}>
-      <SkipPreviousRounded />
+    <IconButton onClick={onClick} size={size}>
+      <SkipPreviousRounded fontSize="inherit" />
     </IconButton>
   )
 }
 
 const SkipNextButton = ({
   onClick,
+  size = "medium",
 }: {
   onClick?: MouseEventHandler<HTMLButtonElement>
+  size?: "small" | "medium" | "large"
 }) => {
   return (
-    <IconButton onClick={onClick}>
-      <SkipNextRounded />
+    <IconButton onClick={onClick} size={size}>
+      <SkipNextRounded fontSize="inherit" />
     </IconButton>
   )
 }
@@ -243,6 +246,7 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
           style={{
             transitionDelay: playerState.isActiveTrackLoading ? "800ms" : "0ms",
           }}
+          unmountOnExit
         >
           <LinearProgress sx={{ width: "100%" }} />
         </Fade>
@@ -350,7 +354,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               pl: 5,
             },
             "@media (orientation: landscape)": {
-              pl: 0
+              pl: 0,
             },
             pr: "calc(env(safe-area-inset-right, 0) + 40px)",
           }}
@@ -381,6 +385,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               onClick={() => {
                 playerActions.playPreviousTrack()
               }}
+              size="large"
             />
             <PlayPauseButton
               onClick={() => {
@@ -398,6 +403,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               onClick={() => {
                 playerActions.playNextTrack()
               }}
+              size="large"
             />
           </Box>
         </Box>

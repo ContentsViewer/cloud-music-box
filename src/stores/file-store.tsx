@@ -129,7 +129,7 @@ export const useFileStore = () => {
       const item = await makeFileItemFromResponseAndSync(response, state.fileDb)
       return item
     },
-    getChildren: async (id: string) => {
+    getChildrenLocal: async (id: string) => {
       if (!state.configured) {
         throw new Error("File store not configured")
       }
@@ -145,50 +145,56 @@ export const useFileStore = () => {
         throw new Error("Item is not a folder")
       }
 
-      if (state.driveClient) {
-        try {
-          const response = await state.driveClient
-            .api(`/me/drive/items/${id}/children`)
-            .get()
-          const children: BaseFileItem[] = await Promise.all(
-            response.value.map((item: any) => {
-              if (!state.fileDb)
-                throw new Error("File database not initialized")
-              return makeFileItemFromResponseAndSync(item, state.fileDb)
-            })
-          )
-
-          const childrenIds = children.map(child => child.id)
-          currentFolder.childrenIds = childrenIds
-          state.fileDb
-            .transaction("files", "readwrite")
-            .objectStore("files")
-            .put(currentFolder)
-
-          return children
-        } catch (error) {
-          console.error(error)
-          enqueueSnackbar(`${error}`, { variant: "error" })
-          return []
-        }
-      } else {
-        const folderItem = (await getFileItemFromIdb(
-          state.fileDb,
-          id
-        )) as FolderItem
-        const childrenIds = folderItem.childrenIds
-        if (childrenIds === undefined) {
-          return []
-        }
-
+      const childrenIds = currentFolder.childrenIds
+      let children: BaseFileItem[] | undefined
+      if (childrenIds) {
         const childrenPromise: Promise<BaseFileItem | undefined>[] =
           childrenIds.map(childId => {
             if (!state.fileDb) throw new Error("File database not initialized")
             return getFileItemFromIdb(state.fileDb, childId)
           })
-        const children = await Promise.all(childrenPromise)
-        return children.filter(child => child !== undefined) as BaseFileItem[]
+        children = (await Promise.all(childrenPromise)).filter(
+          child => child !== undefined
+        ) as BaseFileItem[]
       }
+      return children
+    },
+    getChildrenRemote: async (id: string) => {
+      if (!state.configured) {
+        throw new Error("File store not configured")
+      }
+      if (!state.fileDb) {
+        throw new Error("File database not initialized")
+      }
+      if (!state.driveClient) {
+        throw new Error("Drive client not connected")
+      }
+      const currentFolder = (await getFileItemFromIdb(
+        state.fileDb,
+        id
+      )) as FolderItem
+      if (currentFolder.type !== "folder") {
+        throw new Error("Item is not a folder")
+      }
+
+      const response = await state.driveClient
+        .api(`/me/drive/items/${id}/children`)
+        .get()
+      const children: BaseFileItem[] = await Promise.all(
+        response.value.map((item: any) => {
+          if (!state.fileDb) throw new Error("File database not initialized")
+          return makeFileItemFromResponseAndSync(item, state.fileDb)
+        })
+      )
+
+      const childrenIds = children.map(child => child.id)
+      currentFolder.childrenIds = childrenIds
+      state.fileDb
+        .transaction("files", "readwrite")
+        .objectStore("files")
+        .put(currentFolder)
+
+      return children
     },
     hasTrackBlobInLocal: async (id: string) => {
       if (!state.configured) {
@@ -227,7 +233,7 @@ export const useFileStore = () => {
           },
         }
 
-        console.log("PUSH(req)", id)
+        // console.log("PUSH(req)", id)
 
         dispatch({
           type: "setSyncingTrackFile",
@@ -276,7 +282,7 @@ export const useFileStore = () => {
             reject,
           }
 
-          console.log("PUSH", id)
+          // console.log("PUSH", id)
 
           dispatch({
             type: "setSyncingTrackFile",
@@ -422,7 +428,7 @@ const reducer = (
       return { ...state, configured: action.payload }
     case "pushSyncTask": {
       const syncQueue = [...state.syncQueue, ...action.payload]
-      console.log("ACCEPT PUSH", syncQueue)
+      // console.log("ACCEPT PUSH", syncQueue)
       return { ...state, syncQueue }
     }
     case "setSyncingTrackFile": {
@@ -437,7 +443,7 @@ const reducer = (
     }
     case "popSyncTask": {
       const popped = action.payload
-      console.log("ACCEPT POP", state.syncQueue, popped)
+      // console.log("ACCEPT POP", state.syncQueue, popped)
       const syncQueue = state.syncQueue.filter(
         task => !popped.some(p => p.fileId === task.fileId)
       )
@@ -595,7 +601,7 @@ export const FileStoreProvider = ({
           JSON.stringify(response.account)
         )
         accessToken = response.accessToken
-        console.log("Redirect")
+        // console.log("Redirect")
       })
       .catch(error => {
         console.error(error)
@@ -613,7 +619,7 @@ export const FileStoreProvider = ({
           scopes: ["Files.Read", "Sites.Read.All"],
           account: account,
         }
-        console.log("Silent")
+        // console.log("Silent")
         return pca.acquireTokenSilent(silentRequest)
       })
       .then(response => {
@@ -697,7 +703,7 @@ export const FileStoreProvider = ({
   useEffect(() => {
     const syncQueue = state.syncQueue
 
-    console.log("POP", syncQueue)
+    // console.log("POP", syncQueue)
     if (syncQueue.length === 0) return
 
     const syncPromise = syncPromiseRef.current

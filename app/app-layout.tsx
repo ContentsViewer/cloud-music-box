@@ -30,6 +30,7 @@ const ThemeChanger = () => {
     const cover = mm.selectCover(
       playerState.activeTrack.file.metadata?.common.picture
     )
+    
     if (cover) {
       const url = URL.createObjectURL(
         new Blob([cover.data], { type: cover.format })
