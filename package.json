@@ -22,6 +22,7 @@
     "@serwist/next": "^9.0.0",
     "@serwist/precaching": "^9.0.0",
     "@serwist/sw": "^9.0.0",
+    "fft.js": "^4.0.4",
     "framer-motion": "^11.1.7",
     "music-metadata-browser": "^2.5.10",
     "nanoid": "^5.0.7",

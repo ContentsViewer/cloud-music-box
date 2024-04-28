@@ -36,6 +36,14 @@ export const PlayerStateContext = createContext<PlayerStateProps>({
 });
 
 
+interface DynamicPlayerStateProps {
+  currentTime: number;
+}
+
+export const DynamicPlayerStateContext = createContext<DynamicPlayerStateProps>({
+  currentTime: 0,
+});
+
 type Action =
   | { type: "play" }
   | { type: "pause" }
@@ -160,6 +168,9 @@ const cacheBlobs = (
   });
 }
 
+export const useDynamicPlayerStore = () => {
+  
+} 
 
 const reducer = (state: PlayerStateProps, action: Action) => {
   switch (action.type) {
