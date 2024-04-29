@@ -21,7 +21,10 @@ export const DynamicBackground = () => {
   }
 
   useEffect(() => {
-    if (dynamicThemeState.pitch !== -1) pitchRef.current = dynamicThemeState.pitch
+    if (dynamicThemeState.pitch !== -1) {
+      pitchRef.current = dynamicThemeState.pitch
+    }
+
     const pitch = pitchRef.current
     const rms = dynamicThemeState.rms
 
@@ -31,7 +34,10 @@ export const DynamicBackground = () => {
     // console.log(sourceColor.hue, sourceColor.chroma, sourceColor.tone)
 
     const note = noteFromPitch(pitch)
-    const tone = Math.min(150 * rms, 100);
+    // const tone = Math.min(10 + 150 * rms, 100);
+    // const tone = Math.min(10 + 150 * Math.log(rms + 1), 100);
+    const tone = Math.min(100 * Math.pow(rms, 1 / 2.2), 100)
+    // console.log(rms, tone)
     const noteColor = Hct.from((note % 12) * 30, 50, tone)
     // console.log("#", note % 12, pitch, rms * 200)
 
@@ -42,7 +48,11 @@ export const DynamicBackground = () => {
     const pitchColor = Blend.harmonize(noteColor.toInt(), sourceColor.toInt())
 
     setPitchColor(hexFromArgb(pitchColor))
-  }, [dynamicThemeState.pitch, dynamicThemeState.rms, themeStoreState.sourceColor])
+  }, [
+    dynamicThemeState.pitch,
+    dynamicThemeState.rms,
+    themeStoreState.sourceColor,
+  ])
 
   const primaryColor = (() => {
     const sourceColor = Hct.fromInt(themeStoreState.sourceColor)
@@ -69,7 +79,7 @@ export const DynamicBackground = () => {
         sx={{
           position: "fixed",
           // mixBlendMode: "screen",
-          transition: "background-color 1s",
+          transition: "background-color 800ms",
           top: 0,
           right: 0,
           bottom: 0,
