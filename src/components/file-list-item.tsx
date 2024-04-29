@@ -11,19 +11,17 @@ import {
 import FolderIcon from "@mui/icons-material/Folder"
 import {
   ArrowDownward,
-  AudioFileOutlined,
   Audiotrack,
   CloudOff,
   CloudQueue,
-  InsertDriveFileOutlined,
   Inventory,
 } from "@mui/icons-material"
 import { useNetworkMonitor } from "../stores/network-monitor"
 import { useEffect, useRef, useState } from "react"
 import { AudioTrackFileItem, useFileStore } from "../stores/file-store"
 import { enqueueSnackbar } from "notistack"
-import { usePlayerStore } from "../stores/player-store"
 import * as mm from "music-metadata-browser"
+import React from "react"
 
 interface FileListItemBasicProps {
   name: string
@@ -79,7 +77,7 @@ export function FileListItemBasic({
           sx={{
             width: "20px",
             height: "20px",
-                  // clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
+            // clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
             clipPath: "inset(0 0 0 0)",
           }}
         >
@@ -104,71 +102,73 @@ export function FileListItemBasic({
 
 interface FileListItemAudioTrackProps {
   file: AudioTrackFileItem
+  selected?: boolean
   onClick?: (event: any) => void
 }
 
-export function FileListItemAudioTrack({
-  file,
-  onClick,
-}: FileListItemAudioTrackProps) {
-  const [fileStatus, setFileStatus] = useState<"online" | "offline" | "local">(
-    "offline"
-  )
-  const networkMonitor = useNetworkMonitor()
-  const [fileStoreState, fileStoreActions] = useFileStore()
-  const fileStoreActionsRef = useRef(fileStoreActions)
-  fileStoreActionsRef.current = fileStoreActions
+export const FileListItemAudioTrack = React.memo(
+  function FileListItemAudioTrack({
+    file,
+    selected,
+    onClick,
+  }: FileListItemAudioTrackProps) {
+    const [fileStatus, setFileStatus] = useState<
+      "online" | "offline" | "local"
+    >("offline")
+    const networkMonitor = useNetworkMonitor()
+    const [fileStoreState, fileStoreActions] = useFileStore()
+    const fileStoreActionsRef = useRef(fileStoreActions)
+    fileStoreActionsRef.current = fileStoreActions
 
-  const [playerState] = usePlayerStore()
-  const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
+    const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
 
-  const title = file.metadata?.common.title || file.name
+    const title = file.metadata?.common.title || file.name
 
-  useEffect(() => {
-    const cover = mm.selectCover(file.metadata?.common.picture)
-    if (cover) {
-      const url = URL.createObjectURL(
-        new Blob([cover.data], { type: cover.format })
-      )
-      setCoverUrl(url)
-      return () => URL.revokeObjectURL(url)
-    }
-  }, [file.metadata?.common.picture])
-
-  useEffect(() => {
-    fileStoreActionsRef.current
-      .hasTrackBlobInLocal(file.id)
-      .then(hasBlob => {
-        setFileStatus(
-          hasBlob ? "local" : networkMonitor.isOnline ? "online" : "offline"
+    useEffect(() => {
+      const cover = mm.selectCover(file.metadata?.common.picture)
+      if (cover) {
+        const url = URL.createObjectURL(
+          new Blob([cover.data], { type: cover.format })
         )
-      })
-      .catch(error => {
-        console.error(error)
-        enqueueSnackbar(`${error}`, { variant: "error" })
-      })
-  }, [networkMonitor.isOnline, file])
-
-  const isSyncing = fileStoreState.syncingTrackFiles[file.id]
-
-  const disabled = fileStatus === "offline" || isSyncing
-
-  return (
-    <FileListItemBasic
-      name={title}
-      icon={
-        <ListItemAvatar>
-          <Avatar src={coverUrl} variant="rounded">
-            {coverUrl ? null : <Audiotrack />}
-          </Avatar>
-        </ListItemAvatar>
+        setCoverUrl(url)
+        return () => URL.revokeObjectURL(url)
       }
-      fileStatus={isSyncing ? "downloading" : fileStatus}
-      // fileStatus="downloading"
-      selected={playerState.activeTrack?.file.id === file.id}
-      disabled={disabled}
-      onClick={onClick}
-      secondaryText={file.metadata?.common.artists?.join(", ") || ""}
-    />
-  )
-}
+    }, [file.metadata?.common.picture])
+
+    useEffect(() => {
+      fileStoreActionsRef.current
+        .hasTrackBlobInLocal(file.id)
+        .then(hasBlob => {
+          setFileStatus(
+            hasBlob ? "local" : networkMonitor.isOnline ? "online" : "offline"
+          )
+        })
+        .catch(error => {
+          console.error(error)
+          enqueueSnackbar(`${error}`, { variant: "error" })
+        })
+    }, [networkMonitor.isOnline, file])
+
+    const isSyncing = fileStoreState.syncingTrackFiles[file.id]
+
+    const disabled = fileStatus === "offline" || isSyncing
+
+    return (
+      <FileListItemBasic
+        name={title}
+        icon={
+          <ListItemAvatar>
+            <Avatar src={coverUrl} variant="rounded">
+              {coverUrl ? null : <Audiotrack />}
+            </Avatar>
+          </ListItemAvatar>
+        }
+        fileStatus={isSyncing ? "downloading" : fileStatus}
+        selected={selected}
+        disabled={disabled}
+        onClick={onClick}
+        secondaryText={file.metadata?.common.artists?.join(", ") || ""}
+      />
+    )
+  }
+)

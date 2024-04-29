@@ -62,19 +62,8 @@ const makeAudioAnalyser = () => {
     for (let i = 0; i < r1; i++) buf[i] = 0
     for (let i = r2 + 1; i < buf.length; i++) buf[i] = 0
 
-    // buf = buf.slice(r1, r2)
-    // nBuf = buf.length
-
-    // let corr = new Array(nBuf).fill(0)
-    // for (let i = 0; i < nBuf; i++) {
-    //   for (let j = 0; j < nBuf - i; j++) {
-    //     corr[i] += buf[j] * buf[j + i]
-    //   }
-    // }
-
     fft.realTransform(spectrum, buf)
     fft.completeSpectrum(spectrum)
-    // console.log(r1, r2)
 
     for (let i = 0; i < bufferLength; i++) {
       powerSpectrum[i] =
@@ -84,7 +73,6 @@ const makeAudioAnalyser = () => {
 
     fft.realTransform(corr, powerSpectrum)
     fft.completeSpectrum(corr)
-    // console.log(corr)
 
     let d = 0
     while (corr[2 * d] > corr[2 * (d + 1)]) d++
@@ -96,7 +84,6 @@ const makeAudioAnalyser = () => {
         maxPos = i
       }
     }
-    // console.log("!!", d, maxPos)
 
     let t0 = maxPos
     let x1 = corr[2 * (t0 - 1)]
@@ -105,26 +92,6 @@ const makeAudioAnalyser = () => {
     let a = (x1 + x3 - 2 * x2) / 2
     let b = (x3 - x1) / 2
     if (a) t0 = t0 - b / (2 * a)
-
-    // let d = 0
-    // while (corr[d] > corr[d + 1]) d++
-    // let maxVal = -1
-    // let maxPos = -1
-    // for (let i = d; i < nBuf; i++) {
-    //   if (corr[i] > maxVal) {
-    //     maxVal = corr[i]
-    //     maxPos = i
-    //   }
-    // }
-    // console.log("!!", maxPos)
-
-    // let t0 = maxPos
-    // let x1 = corr[t0 - 1]
-    // let x2 = corr[t0]
-    // let x3 = corr[t0 + 1]
-    // let a = (x1 + x3 - 2 * x2) / 2
-    // let b = (x3 - x1) / 2
-    // if (a) t0 = t0 - b / (2 * a)
 
     return [sampleRate / t0, rms]
   }
