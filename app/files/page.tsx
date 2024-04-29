@@ -304,14 +304,15 @@ export default function Page() {
       <Box
         sx={{
           mt: 8,
-          pl: `env(safe-area-inset-left, 0)`,
-          pr: `env(safe-area-inset-right, 0)`,
+          ml: `env(safe-area-inset-left, 0)`,
+          mr: `env(safe-area-inset-right, 0)`,
         }}
-      ></Box>
-      <FileList
-        sx={{ maxWidth: "1040px", margin: "0 auto", width: "100%" }}
-        files={files}
-      />
+      >
+        <FileList
+          sx={{ maxWidth: "1040px", margin: "0 auto", width: "100%" }}
+          files={files}
+        />
+      </Box>
     </Box>
   )
 }
