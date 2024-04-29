@@ -36,6 +36,18 @@ export const PlayerStateContext = createContext<PlayerStateProps>({
 });
 
 
+// interface DynamicPlayerStateProps {
+//   currentTime: number;
+//   setCurrentTime: (currentTime: number) => void;
+//   changeCurrentTime: (currentTime: number) => void;
+// }
+
+// export const DynamicPlayerStateContext = createContext<DynamicPlayerStateProps>({
+//   currentTime: 0,
+//   setCurrentTime: () => { },
+//   changeCurrentTime: () => { },
+// });
+
 type Action =
   | { type: "play" }
   | { type: "pause" }
@@ -159,7 +171,6 @@ const cacheBlobs = (
     });
   });
 }
-
 
 const reducer = (state: PlayerStateProps, action: Action) => {
   switch (action.type) {

@@ -1,12 +1,13 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { usePlayerStore, AudioTrack } from "../stores/player-store"
 import { enqueueSnackbar } from "notistack"
 import { useFileStore } from "../stores/file-store"
 import * as mm from "music-metadata-browser"
-import assert, { AssertionError } from "assert"
+import assert from "assert"
 import { useDynamicThemeStore } from "../stores/dynamic-theme-store"
+import FFT from "fft.js"
 
 const makeAudioAnalyser = () => {
   let audioContext: OfflineAudioContext
@@ -14,17 +15,24 @@ const makeAudioAnalyser = () => {
   let audioBuffer: AudioBuffer
   let isAnalyzing = false
   let pitch: number = -1
+  let rms: number = 0
+  const bufferLength = 2048
+  const fft = new FFT(bufferLength)
+  const spectrum = fft.createComplexArray()
+  const powerSpectrum = new Float32Array(bufferLength)
+  const corr = fft.createComplexArray()
 
   const ensureAudioContext = (reload: boolean = false) => {
     if (audioContext && !reload) return
 
     audioContext = new OfflineAudioContext({
       numberOfChannels: 2,
-      length: 2048,
+      length: bufferLength,
       sampleRate: 44100,
     })
   }
 
+  // 37ms
   const autoCorrelate = (buf: Float32Array, sampleRate: number) => {
     let rms = 0
     let nBuf = buf.length
@@ -33,11 +41,11 @@ const makeAudioAnalyser = () => {
       rms += val * val
     }
     rms = Math.sqrt(rms / nBuf)
-    if (rms < 0.01) return -1
+    if (rms < 0.01) return [-1, rms]
 
     let r1 = 0
     let r2 = nBuf - 1
-    let threshold = 0.2
+    const threshold = 0.2
     for (let i = 0; i < nBuf / 2; i++) {
       if (Math.abs(buf[i]) < threshold) {
         r1 = i
@@ -51,35 +59,41 @@ const makeAudioAnalyser = () => {
       }
     }
 
-    buf = buf.slice(r1, r2)
-    nBuf = buf.length
+    for (let i = 0; i < r1; i++) buf[i] = 0
+    for (let i = r2 + 1; i < buf.length; i++) buf[i] = 0
 
-    let c = new Array(nBuf).fill(0)
-    for (let i = 0; i < nBuf; i++) {
-      for (let j = 0; j < nBuf - i; j++) {
-        c[i] += buf[j] * buf[j + i]
-      }
+    fft.realTransform(spectrum, buf)
+    fft.completeSpectrum(spectrum)
+
+    for (let i = 0; i < bufferLength; i++) {
+      powerSpectrum[i] =
+        spectrum[2 * i] * spectrum[2 * i] +
+        spectrum[2 * i + 1] * spectrum[2 * i + 1]
     }
 
+    fft.realTransform(corr, powerSpectrum)
+    fft.completeSpectrum(corr)
+
     let d = 0
-    while (c[d] > c[d + 1]) d++
+    while (corr[2 * d] > corr[2 * (d + 1)]) d++
     let maxVal = -1
     let maxPos = -1
-    for (let i = d; i < nBuf; i++) {
-      if (c[i] > maxVal) {
-        maxVal = c[i]
+    for (let i = d; i < nBuf / 2; i++) {
+      if (corr[2 * i] > maxVal) {
+        maxVal = corr[2 * i]
         maxPos = i
       }
     }
+
     let t0 = maxPos
-    let x1 = c[t0 - 1]
-    let x2 = c[t0]
-    let x3 = c[t0 + 1]
+    let x1 = corr[2 * (t0 - 1)]
+    let x2 = corr[t0]
+    let x3 = corr[2 * (t0 + 1)]
     let a = (x1 + x3 - 2 * x2) / 2
     let b = (x3 - x1) / 2
     if (a) t0 = t0 - b / (2 * a)
 
-    return sampleRate / t0
+    return [sampleRate / t0, rms]
   }
 
   return {
@@ -109,10 +123,11 @@ const makeAudioAnalyser = () => {
         .then(renderedBuffer => {
           const data0 = renderedBuffer.getChannelData(0)
           const data1 = renderedBuffer.getChannelData(1)
-          const pitch0 = autoCorrelate(data0, renderedBuffer.sampleRate)
-          const pitch1 = autoCorrelate(data1, renderedBuffer.sampleRate)
+          const [pitch0, rms0] = autoCorrelate(data0, renderedBuffer.sampleRate)
+          const [pitch1, rms1] = autoCorrelate(data1, renderedBuffer.sampleRate)
           pitch = Math.max(pitch0, pitch1)
-          // console.log("Pitch", pitch0, pitch1)
+          rms = Math.max(rms0, rms1)
+          // console.log("Pitch", pitch0, pitch1, rms0, rms1)
         })
         .catch(error => {
           console.error(error)
@@ -121,6 +136,9 @@ const makeAudioAnalyser = () => {
     get pitch() {
       return pitch
     },
+    get rms() {
+      return rms
+    }
   }
 }
 
@@ -174,7 +192,7 @@ export const AudioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement>(null)
   const sourceRef = useRef<HTMLSourceElement>(null)
 
-  const audioAnalyserRef = useRef(makeAudioAnalyser())
+  const audioAnalyser = useMemo(() => makeAudioAnalyser(), [])
 
   const activeAudioTrackRef = useRef<AudioTrack | null>(null)
 
@@ -201,10 +219,8 @@ export const AudioPlayer = () => {
     const onTimeUpdate = () => {
       playerActionsRef.current.setCurrentTime(audio.currentTime)
 
-      const analyser = audioAnalyserRef.current
-      if (!analyser) return
-      analyser.requestAnalyze(audio.currentTime)
-      dynamicThemeActionsRef.current.setPitch(analyser.pitch)
+      audioAnalyser.requestAnalyze(audio.currentTime)
+      dynamicThemeActionsRef.current.setPitchRms(audioAnalyser.pitch, audioAnalyser.rms)
     }
     const onPlay = () => {
       console.log("Track started playing")
@@ -299,7 +315,7 @@ export const AudioPlayer = () => {
         console.log("Played")
         const blob = playerState.activeTrack?.blob
         if (!blob) return
-        audioAnalyserRef.current.setBuffer(blob)
+        audioAnalyser.setBuffer(blob)
       })
       .catch(error => {
         playerActionsRef.current.pause()

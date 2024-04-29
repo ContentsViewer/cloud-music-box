@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useDynamicThemeStore } from "../stores/dynamic-theme-store"
 import { Box, styled } from "@mui/material"
 import { useThemeStore } from "../stores/theme-store"
@@ -13,6 +13,7 @@ export const DynamicBackground = () => {
   const [dynamicThemeState] = useDynamicThemeStore()
   const [themeStoreState] = useThemeStore()
   const [pitchColor, setPitchColor] = useState("transparent")
+  const pitchRef = useRef(-1)
 
   const noteFromPitch = (frequency: number) => {
     const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
@@ -20,14 +21,19 @@ export const DynamicBackground = () => {
   }
 
   useEffect(() => {
-    const pitch = dynamicThemeState.pitch
+    if (dynamicThemeState.pitch !== -1) pitchRef.current = dynamicThemeState.pitch
+    const pitch = pitchRef.current
+    const rms = dynamicThemeState.rms
+
     if (pitch === -1) return
 
     const sourceColor = Hct.fromInt(themeStoreState.sourceColor)
     // console.log(sourceColor.hue, sourceColor.chroma, sourceColor.tone)
 
     const note = noteFromPitch(pitch)
-    const noteColor = Hct.from((note % 12) * 30, 50, 50)
+    const tone = Math.min(150 * rms, 100);
+    const noteColor = Hct.from((note % 12) * 30, 50, tone)
+    // console.log("#", note % 12, pitch, rms * 200)
 
     // const primaryColor = MaterialDynamicColors.primaryContainer.getHct(
     //   themeStoreState.scheme
@@ -36,7 +42,7 @@ export const DynamicBackground = () => {
     const pitchColor = Blend.harmonize(noteColor.toInt(), sourceColor.toInt())
 
     setPitchColor(hexFromArgb(pitchColor))
-  }, [dynamicThemeState.pitch, themeStoreState.scheme])
+  }, [dynamicThemeState.pitch, dynamicThemeState.rms, themeStoreState.sourceColor])
 
   const primaryColor = (() => {
     const sourceColor = Hct.fromInt(themeStoreState.sourceColor)
