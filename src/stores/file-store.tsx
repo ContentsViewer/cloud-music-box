@@ -52,7 +52,7 @@ interface FileStoreStateProps {
   fileDb: IDBDatabase | undefined
   driveClient: Client | undefined
   pca: PublicClientApplication | undefined
-  rootFiles: BaseFileItem[] | undefined
+  rootFolderId: string | undefined
   configured: boolean
   driveConfigureStatus: "not-configured" | "no-account" | "configured"
 
@@ -64,7 +64,7 @@ export const FileStoreStateContext = createContext<FileStoreStateProps>({
   fileDb: undefined,
   driveClient: undefined,
   pca: undefined,
-  rootFiles: undefined,
+  rootFolderId: undefined,
   configured: false,
   syncingTrackFiles: {},
   syncQueue: [],
@@ -75,7 +75,7 @@ type FileStoreAction =
   | { type: "setFileDb"; payload: IDBDatabase }
   | { type: "setDriveClient"; payload?: Client }
   | { type: "setPca"; payload: PublicClientApplication }
-  | { type: "setRootFiles"; payload: BaseFileItem[] }
+  | { type: "setRootFolderId"; payload: string | undefined }
   | { type: "setConfigured"; payload: boolean }
   | {
       type: "pushSyncTask"
@@ -179,12 +179,14 @@ export const useFileStore = () => {
       const response = await state.driveClient
         .api(`/me/drive/items/${id}/children`)
         .get()
-      const children: BaseFileItem[] = await Promise.all(
-        response.value.map((item: any) => {
-          if (!state.fileDb) throw new Error("File database not initialized")
-          return makeFileItemFromResponseAndSync(item, state.fileDb)
-        })
-      )
+      const children = (
+        await Promise.all(
+          response.value.map((item: any) => {
+            if (!state.fileDb) throw new Error("File database not initialized")
+            return makeFileItemFromResponseAndSync(item, state.fileDb)
+          })
+        )
+      ).filter(child => child !== undefined) as BaseFileItem[]
 
       const childrenIds = children.map(child => child.id)
       currentFolder.childrenIds = childrenIds
@@ -340,7 +342,7 @@ const audioFormatMapping: { [key: string]: { mimeType: string } } = {
 async function makeFileItemFromResponseAndSync(
   responseItem: any,
   db: IDBDatabase
-): Promise<BaseFileItem> {
+): Promise<BaseFileItem | undefined> {
   let dbItem = await getFileItemFromIdb(db, responseItem.id)
   if (responseItem.folder) {
     dbItem = {
@@ -374,6 +376,9 @@ async function makeFileItemFromResponseAndSync(
       } as FileItem
     }
   }
+  if (dbItem === undefined) {
+    return undefined
+  }
 
   db.transaction("files", "readwrite").objectStore("files").put(dbItem)
   return dbItem as BaseFileItem
@@ -390,26 +395,6 @@ function getIdbRequest<T>(request: IDBRequest<T>) {
   })
 }
 
-const getRootsAndSync = async (client: Client, db: IDBDatabase) => {
-  const response = await client.api("/me/drive/root/children").get()
-
-  db.transaction("roots", "readwrite").objectStore("roots").clear()
-
-  const roots: BaseFileItem[] = await Promise.all(
-    response.value.map((item: any) => {
-      return makeFileItemFromResponseAndSync(item, db)
-    })
-  )
-
-  roots.forEach(root => {
-    db.transaction("roots", "readwrite")
-      .objectStore("roots")
-      .put({ id: root.id })
-  })
-
-  return roots
-}
-
 const reducer = (
   state: FileStoreStateProps,
   action: FileStoreAction
@@ -421,8 +406,8 @@ const reducer = (
       return { ...state, driveClient: action.payload }
     case "setPca":
       return { ...state, pca: action.payload }
-    case "setRootFiles":
-      return { ...state, rootFiles: action.payload }
+    case "setRootFolderId":
+      return { ...state, rootFolderId: action.payload }
     case "setConfigured":
       return { ...state, configured: action.payload }
     case "pushSyncTask": {
@@ -465,7 +450,7 @@ export const FileStoreProvider = ({
     fileDb: undefined,
     driveClient: undefined,
     pca: undefined,
-    rootFiles: undefined,
+    rootFolderId: undefined,
     configured: false,
     syncingTrackFiles: {},
     syncQueue: [],
@@ -513,16 +498,9 @@ export const FileStoreProvider = ({
 
           req.onupgradeneeded = ev => {
             const db = req.result
-            {
-              const store = db.createObjectStore("files", { keyPath: "id" })
-              store.createIndex("path", "path")
-            }
-            {
-              db.createObjectStore("roots", { keyPath: "id" })
-            }
-            {
-              db.createObjectStore("blobs")
-            }
+
+            db.createObjectStore("files", { keyPath: "id" })
+            db.createObjectStore("blobs")
           }
         })
         dispatch({ type: "setFileDb", payload: fileDb })
@@ -534,22 +512,12 @@ export const FileStoreProvider = ({
       }
 
       {
-        const rootIds = await getIdbRequest(
-          fileDb.transaction("roots", "readonly").objectStore("roots").getAll()
-        )
-        const roots = await Promise.all(
-          rootIds.map((elem: any) => {
-            if (!fileDb) throw new Error("File database not initialized")
-            return getIdbRequest(
-              fileDb
-                .transaction("files", "readwrite")
-                .objectStore("files")
-                .get(elem.id)
-            )
-          })
-        )
-        roots.sort((a, b) => a.name.localeCompare(b.name))
-        dispatch({ type: "setRootFiles", payload: roots })
+        const localStorage = window.localStorage
+        const rootFolderId = localStorage.getItem("rootFolderId")
+        dispatch({
+          type: "setRootFolderId",
+          payload: rootFolderId || undefined,
+        })
       }
 
       {
@@ -689,9 +657,14 @@ export const FileStoreProvider = ({
   useEffect(() => {
     if (state.driveClient === undefined) return
 
-    getRootsAndSync(state.driveClient, state.fileDb as IDBDatabase)
-      .then(roots => {
-        dispatch({ type: "setRootFiles", payload: roots })
+    const driveClient = state.driveClient
+    driveClient
+      .api("/me/drive/root")
+      .get()
+      .then(response => {
+        const rootId = response.id
+        window.localStorage.setItem("rootFolderId", rootId)
+        dispatch({ type: "setRootFolderId", payload: rootId })
       })
       .catch(error => {
         console.error(error)

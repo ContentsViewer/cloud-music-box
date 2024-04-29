@@ -62,81 +62,89 @@ export default function Page() {
 
       <Box
         sx={{
-          display: "flex",
-          flexDirection: "column",
           ml: `env(safe-area-inset-left, 0)`,
           mr: `env(safe-area-inset-right, 0)`,
           px: 2,
         }}
       >
-        <Typography variant="h6">About</Typography>
-        <Paper
+        <Box
           sx={{
-            p: 2,
-            mt: 2,
             display: "flex",
             flexDirection: "column",
-            alignItems: "center",
-            backgroundColor: alpha(colorSurfaceContainer, 0.5),
-            alignSelf: "center",
+            maxWidth: "1040px",
+            margin: "0 auto",
+            width: "100%",
           }}
         >
-          <Typography variant="body1" sx={{ fontWeight: "bold" }}>
-            Cloud Music Box
-          </Typography>
-          <img
-            style={{
-              maxWidth: "256px",
-              width: "100%",
-              aspectRatio: "1/1",
-            }}
-            src="./icon-512x512.png"
-            loading="lazy"
-            alt="icon"
-          />
-          <Typography
-            variant="body2"
+          <Typography variant="h6">About</Typography>
+          <Paper
             sx={{
-              color: colorOnSurfaceVariant,
-            }}
-          >
-            version: {process.env.APP_VERSION}
-          </Typography>
-          <Typography
-            variant="body2"
-            sx={{
-              color: colorOnSurfaceVariant,
-            }}
-          >
-            © 2024- Cloud Music Box
-          </Typography>
-          <Box
-            sx={{
+              p: 2,
+              mt: 2,
               display: "flex",
-              flexDirection: "row",
-              gap: 1,
-              width: "100%",
-              justifyContent: "flex-end",
+              flexDirection: "column",
+              alignItems: "center",
+              backgroundColor: alpha(colorSurfaceContainer, 0.5),
+              alignSelf: "center",
             }}
           >
-            <Link
+            <Typography variant="body1" sx={{ fontWeight: "bold" }}>
+              Cloud Music Box
+            </Typography>
+            <img
+              style={{
+                maxWidth: "256px",
+                width: "100%",
+                aspectRatio: "1/1",
+              }}
+              src="./icon-512x512.png"
+              loading="lazy"
+              alt="icon"
+            />
+            <Typography
               variant="body2"
-              href="https://contentsviewer.work"
-              target="_blank"
-              rel="noopener"
+              sx={{
+                color: colorOnSurfaceVariant,
+              }}
             >
-              Home Page
-            </Link>
-            <Link
+              version: {process.env.APP_VERSION}
+            </Typography>
+            <Typography
               variant="body2"
-              href="https://github.com/ContentsViewer/cloud-music-box"
-              target="_blank"
-              rel="noopener"
+              sx={{
+                color: colorOnSurfaceVariant,
+              }}
             >
-              GitHub
-            </Link>
-          </Box>
-        </Paper>
+              © 2024- Cloud Music Box
+            </Typography>
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: "row",
+                gap: 1,
+                width: "100%",
+                justifyContent: "flex-end",
+              }}
+            >
+              <Link
+                variant="body2"
+                href="https://contentsviewer.work"
+                target="_blank"
+                rel="noopener"
+              >
+                Home Page
+              </Link>
+              <Link
+                variant="body2"
+                href="https://github.com/ContentsViewer/cloud-music-box"
+                target="_blank"
+                rel="noopener"
+              >
+                GitHub
+              </Link>
+            </Box>
+          </Paper>
+        </Box>
       </Box>
     </Box>
   )

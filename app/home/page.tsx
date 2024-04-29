@@ -4,20 +4,23 @@ import AppTopBar from "@/src/components/app-top-bar"
 import { FileList } from "@/src/components/file-list"
 import { useRouter } from "@/src/router"
 import { useFileStore } from "@/src/stores/file-store"
+import { useThemeStore } from "@/src/stores/theme-store"
+import {
+  MaterialDynamicColors,
+  hexFromArgb,
+} from "@material/material-color-utilities"
 import {
   Cloud,
+  FolderRounded,
   HomeRounded,
   Login,
   MoreVert,
-  Settings,
-  SettingsRounded
+  SettingsRounded,
 } from "@mui/icons-material"
 import {
   Avatar,
   Box,
-  Button,
   List,
-  ListItem,
   ListItemAvatar,
   ListItemButton,
   ListItemIcon,
@@ -28,8 +31,13 @@ import {
   Menu,
   MenuItem,
   ListItemText,
+  Card,
+  CardContent,
+  CardActionArea,
+  alpha,
 } from "@mui/material"
-import { useEffect, useRef, useState } from "react"
+import React from "react"
+import { useEffect, useRef, useState, ReactNode } from "react"
 
 const LoginPage = () => {
   const [fileStoreState] = useFileStore()
@@ -116,6 +124,40 @@ const LoginPage = () => {
   )
 }
 
+const CardButton = React.memo(function CardButton({
+  children,
+  onClick = () => {},
+}: {
+  children?: ReactNode
+  onClick: () => void
+}) {
+  const [themeStoreState] = useThemeStore()
+  const colorSurfaceContainer = hexFromArgb(
+    MaterialDynamicColors.surfaceContainer.getArgb(themeStoreState.scheme)
+  )
+  return (
+    <Card
+      sx={{
+        backgroundColor: alpha(colorSurfaceContainer, 0.5),
+      }}
+    >
+      <CardActionArea onClick={onClick}>
+        <Box
+          sx={{
+            p: 2,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            alignItems: "center",
+          }}
+        >
+          {children}
+        </Box>
+      </CardActionArea>
+    </Card>
+  )
+})
+
 export default function Page() {
   const [fileStoreState] = useFileStore()
 
@@ -178,13 +220,44 @@ export default function Page() {
       "not-configured" ? null : driveConfigureStatus === "no-account" ? (
         <LoginPage />
       ) : (
-        <FileList
-          files={fileStoreState.rootFiles}
+        <Box
           sx={{
-            pl: `env(safe-area-inset-left, 0)`,
-            pr: `env(safe-area-inset-right, 0)`,
+            ml: `env(safe-area-inset-left, 0)`,
+            mr: `env(safe-area-inset-right, 0)`,
+            px: 2,
           }}
-        />
+        >
+          <Box
+            sx={{
+              gap: 2,
+              gridTemplateColumns: "repeat(auto-fill, minmax(144px, 1fr))",
+              display: "grid",
+              maxWidth: "1040px",
+              margin: "0 auto",
+              width: "100%",
+            }}
+          >
+            <CardButton
+              onClick={() => {
+                const rootFolderId = fileStoreState.rootFolderId
+                if (!rootFolderId) return
+                routerActionsRef.current.goFile(rootFolderId)
+              }}
+            >
+              <Typography variant="h6">Files</Typography>
+              <FolderRounded fontSize="large"></FolderRounded>
+            </CardButton>
+
+            <CardButton
+              onClick={() => {
+                routerActionsRef.current.goSettings()
+              }}
+            >
+              <Typography variant="h6">Settings</Typography>
+              <SettingsRounded fontSize="large"></SettingsRounded>
+            </CardButton>
+          </Box>
+        </Box>
       )}
     </Box>
   )

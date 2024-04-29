@@ -81,6 +81,7 @@ export default function Page() {
         folderId
       )
       if (isCancelled) return
+      if (!currentFile) return
       setCurrentFile(currentFile)
 
       try {
@@ -166,7 +167,13 @@ export default function Page() {
             edge="start"
             color="inherit"
             onClick={() => {
-              const parentId = currentFile?.parentId
+              if (!currentFile) return
+              if (currentFile.id === fileStoreState.rootFolderId) {
+                routerActions.goHome()
+                return
+              }
+
+              const parentId = currentFile.parentId
               if (!parentId) {
                 return
               }
@@ -294,12 +301,15 @@ export default function Page() {
           <LinearProgress sx={{ width: "100%" }} />
         </Fade>
       </AppTopBar>
-      <FileList
+      <Box
         sx={{
           mt: 8,
           pl: `env(safe-area-inset-left, 0)`,
           pr: `env(safe-area-inset-right, 0)`,
         }}
+      ></Box>
+      <FileList
+        sx={{ maxWidth: "1040px", margin: "0 auto", width: "100%" }}
         files={files}
       />
     </Box>
