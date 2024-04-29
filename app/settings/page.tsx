@@ -129,7 +129,7 @@ export default function Page() {
             </Link>
             <Link
               variant="body2"
-              href="https://github.com/ContentsViewer/cloud-music-client"
+              href="https://github.com/ContentsViewer/cloud-music-box"
               target="_blank"
               rel="noopener"
             >
