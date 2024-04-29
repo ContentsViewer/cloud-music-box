@@ -100,7 +100,7 @@ export default function Page() {
               color: colorOnSurfaceVariant,
             }}
           >
-            version: 0.0.1
+            version: {process.env.APP_VERSION}
           </Typography>
           <Typography
             variant="body2"

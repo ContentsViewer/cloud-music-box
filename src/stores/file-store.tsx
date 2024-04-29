@@ -19,7 +19,6 @@ import { useNetworkMonitor } from "./network-monitor"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
 import { Button } from "@mui/material"
-import { useThemeStore } from "./theme-store"
 
 export interface BaseFileItem {
   name: string
