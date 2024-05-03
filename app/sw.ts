@@ -223,17 +223,11 @@ const defaultCache: RuntimeCaching[] =
           request.headers.get("RSC") === "1" && request.headers.get("Next-Router-Prefetch") === "1" && sameOrigin && !pathname.startsWith("/api/"),
         handler: new NetworkFirst({
           cacheName: PAGES_CACHE_NAME.rscPrefetch,
-          plugins: [
-            new ExpirationPlugin({
-              maxEntries: 32,
-              maxAgeSeconds: 24 * 60 * 60, // 24 hours
-            }),
-          ],
         }),
       },
       {
         matcher: ({ request, url: { pathname }, sameOrigin }) => request.headers.get("RSC") === "1" && sameOrigin && !pathname.startsWith("/api/"),
-        handler: new StaleWhileRevalidate({
+        handler: new NetworkFirst({
           cacheName: PAGES_CACHE_NAME.rsc,
         }),
       },

@@ -140,9 +140,9 @@ export const useFileStore = () => {
         state.fileDb,
         id
       )) as FolderItem
-      if (currentFolder.type !== "folder") {
-        throw new Error("Item is not a folder")
-      }
+      // if (currentFolder.type !== "folder") {
+      //   throw new Error("Item is not a folder")
+      // }
 
       const childrenIds = currentFolder.childrenIds
       let children: BaseFileItem[] | undefined
@@ -172,9 +172,6 @@ export const useFileStore = () => {
         state.fileDb,
         id
       )) as FolderItem
-      if (currentFolder.type !== "folder") {
-        throw new Error("Item is not a folder")
-      }
 
       const response = await state.driveClient
         .api(`/me/drive/items/${id}/children`)
@@ -188,12 +185,14 @@ export const useFileStore = () => {
         )
       ).filter(child => child !== undefined) as BaseFileItem[]
 
-      const childrenIds = children.map(child => child.id)
-      currentFolder.childrenIds = childrenIds
-      state.fileDb
-        .transaction("files", "readwrite")
-        .objectStore("files")
-        .put(currentFolder)
+      if (currentFolder) {
+        const childrenIds = children.map(child => child.id)
+        currentFolder.childrenIds = childrenIds
+        state.fileDb
+          .transaction("files", "readwrite")
+          .objectStore("files")
+          .put(currentFolder)
+      }
 
       return children
     },
