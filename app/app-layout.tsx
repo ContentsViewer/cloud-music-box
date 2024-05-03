@@ -57,7 +57,7 @@ const ThemeChanger = () => {
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [playerCardExpanded, setPlayerCardExpanded] = useState<boolean>(false)
   const snackbarContainerClass = css`
-    margin-left: env(safe-area-inset-bottom, 0);
+    margin-left: env(safe-area-inset-left, 0);
     margin-bottom: calc(env(safe-area-inset-bottom, 0) + ${playerCardExpanded ? "0" : "136"}px);
   `;
   return (
