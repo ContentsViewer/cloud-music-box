@@ -28,7 +28,7 @@ export const TrackCover = (props: { coverUrl?: string; sx?: SxProps<Theme> }) =>
             sx={{
               width: "50%",
               height: "50%",
-              color: "rgba(255, 255, 255, 0.5)"
+              color: "rgba(255, 255, 255, 0.7)"
               // color: onPrimaryColor,
             }}
           />
