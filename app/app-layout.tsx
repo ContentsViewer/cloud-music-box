@@ -14,8 +14,8 @@ import { useThemeStore } from "@/src/stores/theme-store"
 import * as mm from "music-metadata-browser"
 import {
   DynamicThemeStoreProvider,
-  useDynamicThemeStore,
 } from "@/src/stores/dynamic-theme-store"
+import { css } from '@emotion/css';
 
 const ThemeChanger = () => {
   const [playerState] = usePlayerStore()
@@ -55,22 +55,11 @@ const ThemeChanger = () => {
 // }));
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  // useEffect(() => {
-  //   if ("serviceWorker" in navigator) {
-  //     window.addEventListener("load", () => {
-  //       navigator.serviceWorker
-  //         .register("./sw.js")
-  //         .then(registration => {
-  //           console.log("SW registered: ", registration)
-  //         })
-  //         .catch(registrationError => {
-  //           console.log("SW registration failed: ", registrationError)
-  //         })
-  //     })
-  //   }
-  // }, [])
   const [playerCardExpanded, setPlayerCardExpanded] = useState<boolean>(false)
-
+  const snackbarContainerClass = css`
+    margin-left: env(safe-area-inset-bottom, 0);
+    margin-bottom: calc(env(safe-area-inset-bottom, 0) + ${playerCardExpanded ? "0" : "136"}px);
+  `;
   return (
     <SnackbarProvider
       anchorOrigin={{
@@ -78,12 +67,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         horizontal: "left",
       }}
       classes={{
-        containerAnchorOriginBottomLeft: "snackbar-container",
+        containerAnchorOriginBottomLeft: snackbarContainerClass,
       }}
-      // Components={{
-      //   success: StyledMaterialDesignContent,
-      //   error: StyledMaterialDesignContent,
-      // }}
     >
       <RouterProvider>
         <NetworkMonitorProvider>
