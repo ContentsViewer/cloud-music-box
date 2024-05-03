@@ -22,6 +22,7 @@ import { AudioTrackFileItem, useFileStore } from "../stores/file-store"
 import { enqueueSnackbar } from "notistack"
 import * as mm from "music-metadata-browser"
 import React from "react"
+import { TrackCover } from "./track-cover"
 
 interface FileListItemBasicProps {
   name: string
@@ -158,9 +159,7 @@ export const FileListItemAudioTrack = React.memo(
         name={title}
         icon={
           <ListItemAvatar>
-            <Avatar src={coverUrl} variant="rounded">
-              {coverUrl ? null : <Audiotrack />}
-            </Avatar>
+            <TrackCover coverUrl={coverUrl} />
           </ListItemAvatar>
         }
         fileStatus={isSyncing ? "downloading" : fileStatus}

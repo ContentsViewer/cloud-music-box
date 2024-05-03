@@ -38,23 +38,7 @@ import { MouseEventHandler, useEffect, useMemo, useRef, useState } from "react"
 import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
-
-const TrackCover = (props: { coverUrl?: string; sx?: SxProps<Theme> }) => {
-  return (
-    <Avatar
-      src={props.coverUrl}
-      variant="rounded"
-      sx={{
-        width: 48,
-        height: 48,
-        borderRadius: "10%",
-        ...props.sx,
-      }}
-    >
-      {props.coverUrl ? null : <Audiotrack />}
-    </Avatar>
-  )
-}
+import { TrackCover } from "./track-cover"
 
 const SkipPreviousButton = ({
   onClick,
@@ -155,6 +139,14 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
     MaterialDynamicColors.onPrimary.getArgb(themeStoreState.scheme)
   )
 
+  const goBackEnabled = (() => {
+    const parentId = activeTrack?.file.parentId
+    if (!parentId) return false
+    if (`${routerState.pathname}${routerState.hash}` === `/files#${parentId}`)
+      return false
+    return true
+  })()
+
   return (
     <Box
       sx={{
@@ -163,10 +155,11 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
       }}
     >
       <Box sx={{ position: "absolute", top: 0, left: 0, right: 0 }}>
-        {parentId ? (
+        {goBackEnabled ? (
           <IconButton
             size="small"
             onClick={() => {
+              if (!parentId) return
               routerActions.goFile(parentId)
             }}
             sx={{
@@ -423,7 +416,6 @@ export const PlayerCard = (props: PlayerCardProps) => {
   const [playerState, playerActions] = usePlayerStore()
   const [themeStoreState] = useThemeStore()
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
-  const [routerState, routerActions] = useRouter()
   const cardRef = useRef<HTMLDivElement>(null)
   const coverOnShrinkRef = useRef<HTMLDivElement>(null)
   const coverOnExpandRef = useRef<HTMLDivElement>(null)
@@ -461,14 +453,6 @@ export const PlayerCard = (props: PlayerCardProps) => {
     }
   }, [activeTrack?.file.metadata?.common.picture])
 
-  const goBackEnabled = (() => {
-    const parentId = activeTrack?.file.parentId
-    if (!parentId) return false
-    if (`${routerState.pathname}${routerState.hash}` === `/files#${parentId}`)
-      return false
-    return true
-  })()
-
   const primaryBackgroundColor = (() => {
     const hct = Hct.fromInt(
       MaterialDynamicColors.primaryContainer
@@ -480,10 +464,6 @@ export const PlayerCard = (props: PlayerCardProps) => {
     hct.chroma /= 2
     return hexFromArgb(hct.toInt())
   })()
-
-  const colorOnSurfaceVariant = hexFromArgb(
-    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
-  )
 
   return (
     <div>
