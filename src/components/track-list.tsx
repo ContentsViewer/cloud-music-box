@@ -38,16 +38,24 @@ const TrackListItem = React.memo(function TrackListItem({
   playTrack,
 }: TrackListItemProps) {
   const [themeStoreState] = useThemeStore()
-  //   console.log(track.metadata)
+
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
+  const colorTertiary = hexFromArgb(
+    MaterialDynamicColors.tertiary.getArgb(themeStoreState.scheme)
+  )
+  const colorOnSurface = hexFromArgb(
+    MaterialDynamicColors.onSurface.getArgb(themeStoreState.scheme)
+  )
+  const selected = activeTrack?.id === track.id
+
   return (
     <ListItemButton
       onClick={() => {
         if (playTrack) playTrack(track)
       }}
-      selected={activeTrack?.id === track.id}
+      selected={selected}
     >
       <ListItemIcon>
         <Typography color={colorOnSurfaceVariant}>
@@ -60,6 +68,7 @@ const TrackListItem = React.memo(function TrackListItem({
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
+            color: selected ? colorTertiary : colorOnSurface,
           },
         }}
         secondaryTypographyProps={{

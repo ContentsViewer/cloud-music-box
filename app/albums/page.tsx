@@ -17,8 +17,6 @@ import {
 } from "@material/material-color-utilities"
 import {
   AlbumRounded,
-  ArrowBack,
-  ArrowBackRounded,
   FolderRounded,
   ArrowUpwardRounded,
   HomeRounded,
@@ -39,17 +37,21 @@ import {
   ListItemIcon,
   ListItemText,
 } from "@mui/material"
-import React, { useCallback, useRef } from "react"
+import React, { useCallback, useMemo, useRef } from "react"
 import { useEffect, useState } from "react"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
+import { usePlayerStore } from "@/src/stores/player-store"
 
 const AlbumCard = React.memo(function AlbumCard({
   albumItem,
   openAlbum = () => {},
+  appeal = false,
 }: {
   albumItem: AlbumItem
   openAlbum?: (albumId: string) => void
+  appeal?: boolean
 }) {
+  const [themeStoreState] = useThemeStore()
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
   useEffect(() => {
     if (!albumItem.cover) return
@@ -57,6 +59,11 @@ const AlbumCard = React.memo(function AlbumCard({
     setCoverUrl(url)
     return () => URL.revokeObjectURL(url)
   }, [albumItem.cover])
+
+  const colorTertiary = hexFromArgb(
+    MaterialDynamicColors.tertiary.getArgb(themeStoreState.scheme)
+  )
+
   return (
     <Box
       sx={{
@@ -66,10 +73,25 @@ const AlbumCard = React.memo(function AlbumCard({
         alignItems: "center",
       }}
     >
-      {/* <Fade in={true}> */}
       <ButtonBase
         sx={{
           borderRadius: "10%",
+          ...(appeal
+            ? {
+                boxShadow: `0 0 10px 0 ${colorTertiary}`,
+                animation: `appeal 5s ease-in-out infinite alternate`,
+                "@keyframes appeal": {
+                  "0%": {
+                    transform:
+                      "perspective(400px) translateY(-8px) scale(1.05) rotateX(10deg) rotateY(-10deg)",
+                  },
+                  "100%": {
+                    transform:
+                      "perspective(400px) translateY(-8px) scale(1.05) rotateX(10deg) rotateY(10deg)",
+                  },
+                },
+              }
+            : {}),
         }}
         onClick={() => {
           openAlbum(albumItem.name)
@@ -84,10 +106,9 @@ const AlbumCard = React.memo(function AlbumCard({
           coverUrl={coverUrl}
         />
       </ButtonBase>
-      {/* </Fade> */}
       <Typography
         sx={{
-          mt: 1,
+          mt: 0.5,
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -103,9 +124,13 @@ const AlbumCard = React.memo(function AlbumCard({
 
 interface AlbumListProps {
   albums: AlbumItem[]
+  activeAlbumId: string | undefined
 }
 
-const AlbumList = React.memo(function AlbumList({ albums }: AlbumListProps) {
+const AlbumList = React.memo(function AlbumList({
+  albums,
+  activeAlbumId,
+}: AlbumListProps) {
   const [routerState, routerActions] = useRouter()
   const routerActionsRef = useRef(routerActions)
   routerActionsRef.current = routerActions
@@ -117,7 +142,7 @@ const AlbumList = React.memo(function AlbumList({ albums }: AlbumListProps) {
   return (
     <Box
       sx={{
-        gap: 2,
+        gap: 3,
         gridTemplateColumns: "repeat(auto-fill, minmax(144px, 1fr))",
         display: "grid",
         maxWidth: "1040px",
@@ -127,7 +152,12 @@ const AlbumList = React.memo(function AlbumList({ albums }: AlbumListProps) {
     >
       {albums.map(album => {
         return (
-          <AlbumCard key={album.name} albumItem={album} openAlbum={openAlbum} />
+          <AlbumCard
+            key={album.name}
+            albumItem={album}
+            openAlbum={openAlbum}
+            appeal={album.name === activeAlbumId}
+          />
         )
       })}
     </Box>
@@ -143,6 +173,15 @@ const AlbumListPage = React.memo(function AlbumListPage(
   const [fileStoreState, fileStoreActions] = useFileStore()
   const fileStoreActionsRef = useRef(fileStoreActions)
   fileStoreActionsRef.current = fileStoreActions
+
+  const [playerState] = usePlayerStore()
+  const activeAlbumId = useMemo(() => {
+    let albumName = playerState.activeTrack?.file.metadata?.common.album
+    if (albumName === undefined) albumName = "Unknown Album"
+    albumName = albumName.replace(/\0+$/, "")
+    return albumName
+  }, [playerState.activeTrack?.file.metadata?.common.album])
+  // console.log(activeAlbumId)
 
   const [albums, setAlbums] = useState<AlbumItem[]>([])
 
@@ -172,11 +211,12 @@ const AlbumListPage = React.memo(function AlbumListPage(
   return (
     <Box
       sx={{
-        px: 2,
+        px: 4,
+        pt: 4,
         ...props.sx,
       }}
     >
-      <AlbumList albums={albums} />
+      <AlbumList albums={albums} activeAlbumId={activeAlbumId} />
     </Box>
   )
 })
