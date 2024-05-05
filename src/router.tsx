@@ -29,12 +29,12 @@ export const useRouter = () => {
 
   const actions = {
     goFile: (fileId: string) => {
-      const href = `/files#${fileId}`
+      const href = `/files#${encodeURIComponent(fileId)}`
       router.push(href, { scroll: false })
       window.localStorage.setItem("lastHref", href)
     },
     goAlbum: (albumId?: string) => {
-      const href = `/albums${albumId ? `#${albumId}` : ""}`
+      const href = `/albums${albumId ? `#${encodeURIComponent(albumId)}` : ""}`
       router.push(href, { scroll: false })
       window.localStorage.setItem("lastHref", href)
     },

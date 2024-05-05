@@ -39,6 +39,7 @@ import {
 } from "@mui/material"
 import React from "react"
 import { useEffect, useRef, useState, ReactNode } from "react"
+import DownloadingIndicator from "@/src/components/downloading-indicator"
 
 const LoginPage = () => {
   const [fileStoreState] = useFileStore()
@@ -165,6 +166,7 @@ export default function Page() {
   const [routerState, routerActions] = useRouter()
   const routerActionsRef = useRef(routerActions)
   routerActionsRef.current = routerActions
+  const [themeStoreState] = useThemeStore()
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
 
@@ -175,6 +177,12 @@ export default function Page() {
 
   const driveConfigureStatus = fileStoreState.driveConfigureStatus
 
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
+  const downloadingCount = Object.keys(fileStoreState.syncingTrackFiles).length
+
   return (
     <Box>
       <AppTopBar>
@@ -184,9 +192,16 @@ export default function Page() {
             Home
           </Typography>
           <Box sx={{ flexGrow: 1 }}></Box>
+          {downloadingCount > 0 ? (
+            <DownloadingIndicator
+              count={downloadingCount}
+              color={colorOnSurfaceVariant}
+            />
+          ) : null}
           <div>
             <IconButton
               color="inherit"
+              edge="end"
               onClick={event => {
                 setAnchorEl(event.currentTarget)
               }}

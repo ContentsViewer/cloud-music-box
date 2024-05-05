@@ -16,10 +16,14 @@ import {
   hexFromArgb,
 } from "@material/material-color-utilities"
 import {
+  AlbumRounded,
   ArrowBack,
   ArrowBackRounded,
   FolderRounded,
+  ArrowUpwardRounded,
   HomeRounded,
+  MoreVert,
+  SettingsRounded,
 } from "@mui/icons-material"
 import {
   Box,
@@ -30,9 +34,14 @@ import {
   Divider,
   Typography,
   ButtonBase,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
 } from "@mui/material"
 import React, { useCallback, useRef } from "react"
 import { useEffect, useState } from "react"
+import DownloadingIndicator from "@/src/components/downloading-indicator"
 
 const AlbumCard = React.memo(function AlbumCard({
   albumItem,
@@ -229,77 +238,50 @@ const AlbumPage = React.memo(function AlbumPage({
             sm: "row",
           },
           px: 2,
-          gap: 1,
-          alignItems: "center",
+          gap: 2,
+          // alignItems: "center",
           width: "100%",
           my: 3,
         }}
       >
-        {/* <Fade in={true}> */}
         <AlbumCover
           sx={{
-            // flexBasis: "50%",
-            // height: "auto",
-            // width: "auto",
-            // aspectRatio: "1 / 1",
-            // maxWidth: "200px",
             width: "200px",
             height: "200px",
+            alignSelf: "center",
           }}
           coverUrl={coverUrl}
         />
-        {/* </Fade> */}
 
         <Box
           sx={{
             flexGrow: 1,
             display: "flex",
             flexDirection: "column",
-            // alignItems: "flex-start",
-            // alignItems: "center",
-            // alignItems: {
-            //   xs: "",
-            //   sm: "flex-start",
-            // },
-
             minWidth: 0,
-            // width: "100%",
+            width: "100%",
+            justifyContent: "space-around",
           }}
         >
           <Typography
             variant="h5"
             sx={{
-              // width: "100%",
               fontWeight: "bold",
-              // display: "-webkit-box",
               overflow: "hidden",
-              // WebkitBoxOrient: "vertical",
-              // WebkitBoxOrient: "vertical",
-              // WebkitLineClamp: 2,
-              // -webkit-line-clamp: 3
-              // textAlign: "center",
-              // textAlign: {
-              //   xs: "center",
-              //   sm: "left",
-              // },
+              textAlign: {
+                xs: "center",
+                sm: "left",
+              },
             }}
           >
             {albumItem ? albumItem.name : ""}
           </Typography>
-          {/* <MarqueeText
-            variant="h5"
-            sx={{
-              width: "100%",
-            }}
-            typographySx={{
-              fontWeight: "bold",
-            }}
-            text={albumItem ? albumItem.name : ""}
-          /> */}
           <Box
             sx={{
               display: "flex",
-              minWidth: "200px",
+              flexDirection: "row",
+              // minWidth: "200px",
+              justifyContent: "flex-end",
             }}
           >
             <IconButton
@@ -334,6 +316,8 @@ export default function Page() {
   const fileStoreActionsRef = useRef(fileStoreActions)
   fileStoreActionsRef.current = fileStoreActions
 
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+
   useEffect(() => {
     const albumId = decodeURIComponent(routerState.hash.slice(1))
     if (albumId === "") {
@@ -353,13 +337,32 @@ export default function Page() {
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
 
+  const downloadingCount = Object.keys(fileStoreState.syncingTrackFiles).length
+
   return (
     <Box>
       <AppTopBar>
         <Toolbar>
           <IconButton
+            color="inherit"
+            onClick={() => {
+              routerActions.goHome()
+            }}
+            sx={{ ml: -1 }}
+          >
+            <HomeRounded />
+          </IconButton>
+          <Typography
+            sx={{
+              color: colorOnSurfaceVariant,
+            }}
+          >
+            /
+          </Typography>
+          <IconButton
             size="large"
-            edge="start"
+            // edge="start"
+            // sx={{ ml: -1 }}
             color="inherit"
             onClick={() => {
               if (currentAlbum) {
@@ -369,25 +372,10 @@ export default function Page() {
               routerActions.goHome()
             }}
           >
-            <ArrowBackRounded />
+            <ArrowUpwardRounded />
           </IconButton>
 
-          <IconButton
-            color="inherit"
-            onClick={() => {
-              routerActions.goHome()
-            }}
-          >
-            <HomeRounded />
-          </IconButton>
-          <Typography
-            sx={{
-              mx: 1,
-              color: colorOnSurfaceVariant,
-            }}
-          >
-            /
-          </Typography>
+          <AlbumRounded color="inherit" sx={{ mr: 1 }} />
           <MarqueeText
             variant="h6"
             sx={{
@@ -398,6 +386,42 @@ export default function Page() {
             }}
             text={currentAlbum ? currentAlbum.name : "Albums"}
           />
+          {downloadingCount > 0 ? (
+            <DownloadingIndicator
+              count={downloadingCount}
+              color={colorOnSurfaceVariant}
+            />
+          ) : null}
+          <div>
+            <IconButton
+              color="inherit"
+              edge="end"
+              onClick={event => {
+                setAnchorEl(event.currentTarget)
+              }}
+            >
+              <MoreVert />
+            </IconButton>
+            <Menu
+              anchorEl={anchorEl}
+              keepMounted
+              open={Boolean(anchorEl)}
+              onClose={() => {
+                setAnchorEl(null)
+              }}
+            >
+              <MenuItem
+                onClick={() => {
+                  routerActions.goSettings()
+                }}
+              >
+                <ListItemIcon>
+                  <SettingsRounded />
+                </ListItemIcon>
+                <ListItemText>Settings</ListItemText>
+              </MenuItem>
+            </Menu>
+          </div>
         </Toolbar>
       </AppTopBar>
       <Box
