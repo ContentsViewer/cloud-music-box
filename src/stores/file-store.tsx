@@ -48,6 +48,12 @@ interface SyncTask {
   reject: (error: any) => void
 }
 
+export interface AlbumItem {
+  name: string
+  fileIds: string[]
+  cover?: Blob
+}
+
 interface FileStoreStateProps {
   fileDb: IDBDatabase | undefined
   driveClient: Client | undefined
@@ -305,6 +311,34 @@ export const useFileStore = () => {
       }
       return { blob, file }
     },
+    getAlbumById: async (id: string) => {
+      if (!state.configured) {
+        throw new Error("File store not configured")
+      }
+      if (!state.fileDb) {
+        throw new Error("File database not initialized")
+      }
+
+      const album = await getAlbumItemFromIdb(state.fileDb, id)
+      return album
+    },
+    getAlbumIds: async () => {
+      if (!state.configured) {
+        throw new Error("File store not configured")
+      }
+      if (!state.fileDb) {
+        throw new Error("File database not initialized")
+      }
+
+      const albumIds = await getIdbRequest<string[]>(
+        state.fileDb
+          .transaction("albums")
+          .objectStore("albums")
+          .getAllKeys() as IDBRequest<string[]>
+      )
+
+      return albumIds
+    },
   }
 
   return [state, actions] as const
@@ -318,6 +352,22 @@ function getFileItemFromIdb(
     const request = db
       .transaction("files", "readwrite")
       .objectStore("files")
+      .get(id)
+    request.onsuccess = event => {
+      const item = (event.target as IDBRequest).result
+      resolve(item)
+    }
+    request.onerror = event => {
+      reject((event.target as IDBRequest).error)
+    }
+  })
+}
+
+function getAlbumItemFromIdb(db: IDBDatabase, id: string): Promise<AlbumItem> {
+  return new Promise((resolve, reject) => {
+    const request = db
+      .transaction("albums", "readwrite")
+      .objectStore("albums")
       .get(id)
     request.onsuccess = event => {
       const item = (event.target as IDBRequest).result
@@ -500,6 +550,7 @@ export const FileStoreProvider = ({
 
             db.createObjectStore("files", { keyPath: "id" })
             db.createObjectStore("blobs")
+            db.createObjectStore("albums")
           }
         })
         dispatch({ type: "setFileDb", payload: fileDb })
@@ -687,7 +738,7 @@ export const FileStoreProvider = ({
 
       return chain
         .then(() => {
-          console.log("START", fileId)
+          // console.log("START", fileId)
           if (!driveClient) throw new Error("Drive client not connected")
 
           return driveClient
@@ -709,12 +760,14 @@ export const FileStoreProvider = ({
         .then(({ blob, metadata }) => {
           if (!fileDb) throw new Error("File database not initialized")
 
+          let trackFile: AudioTrackFileItem | undefined
+
           return getFileItemFromIdb(fileDb, fileId).then(item => {
             if (!item) throw new Error("Item not found")
             if (item.type !== "audio-track")
               throw new Error("Item is not a track")
 
-            const trackFile = item as AudioTrackFileItem
+            trackFile = item as AudioTrackFileItem
             trackFile.metadata = metadata
             fileDb
               .transaction("files", "readwrite")
@@ -724,7 +777,38 @@ export const FileStoreProvider = ({
               .transaction("blobs", "readwrite")
               .objectStore("blobs")
               .put(blob, fileId)
-            return { file: trackFile, blob }
+
+            let albumName = metadata.common.album
+            if (albumName === undefined) return { file: trackFile, blob }
+            albumName = albumName.replace(/\0+$/, "")
+
+            return getAlbumItemFromIdb(fileDb, albumName).then(albumItem => {
+              if (albumItem) {
+                if (!albumItem.fileIds.includes(fileId)) {
+                  // 追加
+                  albumItem.fileIds.push(fileId)
+                }
+              } else {
+                albumItem = {
+                  name: albumName,
+                  fileIds: [fileId],
+                  cover: undefined,
+                }
+              }
+              if (albumItem.cover === undefined) {
+                const cover = mm.selectCover(metadata.common.picture)
+                if (cover) {
+                  albumItem.cover = new Blob([cover.data], {
+                    type: cover.format,
+                  })
+                }
+              }
+              fileDb
+                .transaction("albums", "readwrite")
+                .objectStore("albums")
+                .put(albumItem, albumName)
+              return { file: trackFile, blob }
+            })
           })
         })
         .then(result => {
@@ -734,7 +818,7 @@ export const FileStoreProvider = ({
           reject(error)
         })
         .then(() => {
-          console.log("END", fileId)
+          // console.log("END", fileId)
           dispatch({
             type: "setSyncingTrackFile",
             payload: {

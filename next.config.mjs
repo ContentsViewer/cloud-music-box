@@ -22,6 +22,8 @@ const withSerwist = withSerwistInit({
     { url: "redirect.txt", revision: revision },
     { url: "settings.html", revision: revision },
     { url: "settings.txt", revision: revision },
+    { url: "albums.html", revision: revision },
+    { url: "albums.txt", revision: revision },
   ],
   reloadOnOnline: false
 });

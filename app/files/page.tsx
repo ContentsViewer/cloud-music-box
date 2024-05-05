@@ -11,7 +11,6 @@ import { FileList } from "@/src/components/file-list"
 import {
   Badge,
   Box,
-  Divider,
   Fade,
   IconButton,
   LinearProgress,
@@ -30,6 +29,7 @@ import {
   ArrowDownward,
   HomeRounded,
   SettingsRounded,
+  ArrowBackRounded,
 } from "@mui/icons-material"
 import { useRouter } from "@/src/router"
 import { useThemeStore } from "@/src/stores/theme-store"
@@ -40,7 +40,6 @@ import {
 import { useNetworkMonitor } from "@/src/stores/network-monitor"
 import { MarqueeText } from "@/src/components/marquee-text"
 import AppTopBar from "@/src/components/app-top-bar"
-import { removeListener } from "process"
 
 export default function Page() {
   const [fileStoreState, fileStoreActions] = useFileStore()
@@ -51,7 +50,7 @@ export default function Page() {
 
   const [currentFile, setCurrentFile] = useState<BaseFileItem | null>(null)
   const [files, setFiles] = useState<BaseFileItem[] | undefined>([])
-  const [folderId, setFolderId] = useState<string | null>(null)
+  const [folderId, setFolderId] = useState<string | undefined>(undefined)
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const [remoteFetching, setRemoteFetching] = useState(false)
 
@@ -62,9 +61,11 @@ export default function Page() {
   routerActionsRef.current = routerActions
 
   useEffect(() => {
+    if (routerState.pathname !== "/files") return
+
     setFolderId(routerState.hash.slice(1))
     setFiles(undefined)
-  }, [routerState.hash])
+  }, [routerState.hash, routerState.pathname])
 
   useEffect(() => {
     if (!fileStoreState.configured) {
@@ -158,6 +159,10 @@ export default function Page() {
     })
   }
 
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
   return (
     <Box>
       <AppTopBar>
@@ -180,10 +185,11 @@ export default function Page() {
               routerActions.goFile(parentId)
             }}
           >
-            <ArrowBack />
+            <ArrowBackRounded />
           </IconButton>
 
           <IconButton
+            color="inherit"
             onClick={() => {
               routerActions.goHome()
             }}
@@ -193,11 +199,7 @@ export default function Page() {
           <Typography
             sx={{
               mx: 1,
-              color: hexFromArgb(
-                MaterialDynamicColors.onSurfaceVariant.getArgb(
-                  themeStoreState.scheme
-                )
-              ),
+              color: colorOnSurfaceVariant,
             }}
           >
             /
@@ -218,11 +220,7 @@ export default function Page() {
                 badgeContent={
                   <span
                     style={{
-                      color: hexFromArgb(
-                        MaterialDynamicColors.onSurfaceVariant.getArgb(
-                          themeStoreState.scheme
-                        )
-                      ),
+                      color: colorOnSurfaceVariant,
                     }}
                   >
                     {Object.keys(fileStoreState.syncingTrackFiles).length}
@@ -311,6 +309,7 @@ export default function Page() {
         <FileList
           sx={{ maxWidth: "1040px", margin: "0 auto", width: "100%" }}
           files={files}
+          folderId={folderId}
         />
       </Box>
     </Box>

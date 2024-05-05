@@ -23,6 +23,8 @@ import { enqueueSnackbar } from "notistack"
 import * as mm from "music-metadata-browser"
 import React from "react"
 import { TrackCover } from "./track-cover"
+import { useThemeStore } from "../stores/theme-store"
+import { MaterialDynamicColors, hexFromArgb } from "@material/material-color-utilities"
 
 interface FileListItemBasicProps {
   name: string
@@ -45,6 +47,11 @@ export function FileListItemBasic({
   selected,
   children,
 }: FileListItemBasicProps) {
+  const [themeStoreState] = useThemeStore()
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+  
   return (
     <ListItemButton onClick={onClick} disabled={disabled} selected={selected}>
       {icon}
@@ -61,6 +68,7 @@ export function FileListItemBasic({
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
+            color: colorOnSurfaceVariant,
           },
         }}
         primary={name}

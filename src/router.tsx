@@ -33,6 +33,11 @@ export const useRouter = () => {
       router.push(href, { scroll: false })
       window.localStorage.setItem("lastHref", href)
     },
+    goAlbum: (albumId?: string) => {
+      const href = `/albums${albumId ? `#${albumId}` : ""}`
+      router.push(href, { scroll: false })
+      window.localStorage.setItem("lastHref", href)
+    },
     goHome: () => {
       const href = "/home"
       router.push(href, { scroll: false })
@@ -45,13 +50,17 @@ export const useRouter = () => {
       }
       return lastHref
     },
-    goSettings: () => { 
+    goSettings: () => {
       const href = "/settings"
       router.push(href, { scroll: false })
     },
-    goBack: () => { 
+    goBack: () => {
       router.back()
-    }
+    },
+    go: (href: string) => {
+      router.push(href, { scroll: false })
+      window.localStorage.setItem("lastHref", href)
+    },
   }
 
   return [state, actions] as const

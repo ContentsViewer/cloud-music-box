@@ -30,7 +30,7 @@ const FileListItem = React.memo(function FileListItem({
 
   const isOnline = networkMonitor.isOnline
 
-  const playTrackWrapped = useCallback(() => { 
+  const playTrackWrapped = useCallback(() => {
     playTrack(file as AudioTrackFileItem)
   }, [playTrack, file])
 
@@ -84,7 +84,8 @@ const FileListItem = React.memo(function FileListItem({
 })
 
 export interface FileListProps {
-  files: BaseFileItem[] | undefined
+  folderId?: string
+  files?: BaseFileItem[]
   sx?: SxProps
 }
 
@@ -101,9 +102,13 @@ export function FileList(props: FileListProps) {
         f => f.type === "audio-track"
       ) as AudioTrackFileItem[]
       const index = tracks.findIndex(t => t.id === file.id)
-      playerActionsRef.current.playTrack(index, tracks)
+      playerActionsRef.current.playTrack(
+        index,
+        tracks,
+        `/files#${props.folderId}`
+      )
     },
-    [props.files]
+    [props.files, props.folderId]
   )
 
   return (
