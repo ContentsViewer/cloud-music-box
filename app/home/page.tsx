@@ -10,6 +10,7 @@ import {
   hexFromArgb,
 } from "@material/material-color-utilities"
 import {
+  AlbumRounded,
   Cloud,
   FolderRounded,
   HomeRounded,
@@ -246,6 +247,15 @@ export default function Page() {
             >
               <Typography variant="h6">Files</Typography>
               <FolderRounded fontSize="large"></FolderRounded>
+            </CardButton>
+
+            <CardButton
+              onClick={() => {
+                routerActionsRef.current.goAlbum()
+              }}
+            >
+              <Typography variant="h6">Albums</Typography>
+              <AlbumRounded fontSize="large"></AlbumRounded>
             </CardButton>
 
             <CardButton

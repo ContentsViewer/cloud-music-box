@@ -9,7 +9,6 @@ import {
   Undo,
 } from "@mui/icons-material"
 import {
-  Avatar,
   Box,
   Card,
   Toolbar,
@@ -22,7 +21,6 @@ import {
   alpha,
   useTheme,
   ButtonBase,
-  styled,
   AppBar,
 } from "@mui/material"
 import { AudioTrack, usePlayerStore } from "../stores/player-store"
@@ -127,8 +125,6 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
   const [routerState, routerActions] = useRouter()
   const [themeStoreState] = useThemeStore()
 
-  const parentId = activeTrack?.file.parentId
-
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
@@ -140,9 +136,10 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
   )
 
   const goBackEnabled = (() => {
-    const parentId = activeTrack?.file.parentId
-    if (!parentId) return false
-    if (`${routerState.pathname}${routerState.hash}` === `/files#${parentId}`)
+    if (!playerState.playSourceUrl) return false
+    if (
+      `${routerState.pathname}${routerState.hash}` === playerState.playSourceUrl
+    )
       return false
     return true
   })()
@@ -159,8 +156,9 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
           <IconButton
             size="small"
             onClick={() => {
-              if (!parentId) return
-              routerActions.goFile(parentId)
+              const sourceUrl = playerState.playSourceUrl
+              if (!sourceUrl) return
+              routerActions.go(sourceUrl)
             }}
             sx={{
               color: colorOnSurfaceVariant,
@@ -189,6 +187,7 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
           sx={{
             mr: 2,
             p: 0,
+            borderRadius: "10%",
           }}
           onClick={() => {
             if (onExpand) {
