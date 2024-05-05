@@ -26,10 +26,11 @@ import {
   MoreVert,
   CloudDownload,
   CloudOff,
-  ArrowDownward,
   HomeRounded,
   SettingsRounded,
-  ArrowBackRounded,
+  FolderRounded,
+  ArrowUpwardRounded,
+  ChevronRightRounded,
 } from "@mui/icons-material"
 import { useRouter } from "@/src/router"
 import { useThemeStore } from "@/src/stores/theme-store"
@@ -40,6 +41,7 @@ import {
 import { useNetworkMonitor } from "@/src/stores/network-monitor"
 import { MarqueeText } from "@/src/components/marquee-text"
 import AppTopBar from "@/src/components/app-top-bar"
+import DownloadingIndicator from "@/src/components/downloading-indicator"
 
 export default function Page() {
   const [fileStoreState, fileStoreActions] = useFileStore()
@@ -62,8 +64,8 @@ export default function Page() {
 
   useEffect(() => {
     if (routerState.pathname !== "/files") return
-
-    setFolderId(routerState.hash.slice(1))
+    const folderId = decodeURIComponent(routerState.hash.slice(1))
+    setFolderId(folderId)
     setFiles(undefined)
   }, [routerState.hash, routerState.pathname])
 
@@ -163,13 +165,37 @@ export default function Page() {
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
 
+  const downloadingCount = Object.keys(fileStoreState.syncingTrackFiles).length
+
   return (
     <Box>
       <AppTopBar>
         <Toolbar>
           <IconButton
+            color="inherit"
+            // edge="start"
+            sx={{ ml: -1 }}
+            onClick={() => {
+              routerActions.goHome()
+            }}
+          >
+            <HomeRounded />
+          </IconButton>
+
+          {/* <ChevronRightRounded color="inherit" /> */}
+
+          <Typography
+            sx={{
+              // mx: 1,
+              color: colorOnSurfaceVariant,
+            }}
+          >
+            /
+          </Typography>
+
+          <IconButton
             size="large"
-            edge="start"
+            // edge="start"
             color="inherit"
             onClick={() => {
               if (!currentFile) return
@@ -185,25 +211,10 @@ export default function Page() {
               routerActions.goFile(parentId)
             }}
           >
-            <ArrowBackRounded />
+            <ArrowUpwardRounded />
           </IconButton>
+          <FolderRounded color="inherit" sx={{ mr: 1 }} />
 
-          <IconButton
-            color="inherit"
-            onClick={() => {
-              routerActions.goHome()
-            }}
-          >
-            <HomeRounded />
-          </IconButton>
-          <Typography
-            sx={{
-              mx: 1,
-              color: colorOnSurfaceVariant,
-            }}
-          >
-            /
-          </Typography>
           <MarqueeText
             variant="h6"
             sx={{
@@ -214,46 +225,16 @@ export default function Page() {
             }}
             text={currentFile?.name || "Files"}
           />
-          {Object.keys(fileStoreState.syncingTrackFiles).length > 0 ? (
-            <Box sx={{ position: "relative", mr: 1 }}>
-              <Badge
-                badgeContent={
-                  <span
-                    style={{
-                      color: colorOnSurfaceVariant,
-                    }}
-                  >
-                    {Object.keys(fileStoreState.syncingTrackFiles).length}
-                  </span>
-                }
-              >
-                <Box
-                  sx={{
-                    width: "20px",
-                    height: "20px",
-                    // clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
-                    clipPath: "inset(0 0 0 0)",
-                  }}
-                >
-                  <ArrowDownward
-                    fontSize="small"
-                    color="disabled"
-                    sx={{
-                      animation: "down 2s linear infinite",
-                      "@keyframes down": {
-                        "0%": { transform: "translateY(-20px)" },
-                        "50%": { transform: "translateY(0)" },
-                        "100%": { transform: "translateY(20px)" },
-                      },
-                    }}
-                  />
-                </Box>
-              </Badge>
-            </Box>
+          {downloadingCount > 0 ? (
+            <DownloadingIndicator
+              count={downloadingCount}
+              color={colorOnSurfaceVariant}
+            />
           ) : null}
           <div>
             <IconButton
               color="inherit"
+              edge="end"
               onClick={event => {
                 setAnchorEl(event.currentTarget)
               }}

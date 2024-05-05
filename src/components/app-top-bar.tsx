@@ -1,7 +1,31 @@
 "use client"
 
-import { AppBar, alpha, useScrollTrigger, useTheme } from "@mui/material"
-import { ReactNode } from "react"
+import {
+  AppBar,
+  IconButton,
+  alpha,
+  useScrollTrigger,
+  useTheme,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText
+} from "@mui/material"
+import {
+  ArrowBack,
+  MoreVert,
+  CloudDownload,
+  CloudOff,
+  ArrowDownward,
+  HomeRounded,
+  SettingsRounded,
+  ArrowBackRounded,
+  FolderRounded,
+  ArrowUpwardRounded,
+  ChevronRightRounded,
+  ChevronLeftRounded,
+} from "@mui/icons-material"
+import { ReactNode, useState } from "react"
 import { useThemeStore } from "../stores/theme-store"
 import {
   MaterialDynamicColors,
@@ -45,3 +69,4 @@ export default function AppTopBar(props: AppTopBarProps) {
     </AppBar>
   )
 }
+

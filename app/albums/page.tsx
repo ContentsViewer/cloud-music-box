@@ -16,10 +16,12 @@ import {
   hexFromArgb,
 } from "@material/material-color-utilities"
 import {
-  ArrowBack,
-  ArrowBackRounded,
+  AlbumRounded,
   FolderRounded,
+  ArrowUpwardRounded,
   HomeRounded,
+  MoreVert,
+  SettingsRounded,
 } from "@mui/icons-material"
 import {
   Box,
@@ -30,17 +32,26 @@ import {
   Divider,
   Typography,
   ButtonBase,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
 } from "@mui/material"
-import React, { useCallback, useRef } from "react"
+import React, { useCallback, useMemo, useRef } from "react"
 import { useEffect, useState } from "react"
+import DownloadingIndicator from "@/src/components/downloading-indicator"
+import { usePlayerStore } from "@/src/stores/player-store"
 
 const AlbumCard = React.memo(function AlbumCard({
   albumItem,
   openAlbum = () => {},
+  appeal = false,
 }: {
   albumItem: AlbumItem
   openAlbum?: (albumId: string) => void
+  appeal?: boolean
 }) {
+  const [themeStoreState] = useThemeStore()
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
   useEffect(() => {
     if (!albumItem.cover) return
@@ -48,6 +59,11 @@ const AlbumCard = React.memo(function AlbumCard({
     setCoverUrl(url)
     return () => URL.revokeObjectURL(url)
   }, [albumItem.cover])
+
+  const colorTertiary = hexFromArgb(
+    MaterialDynamicColors.tertiary.getArgb(themeStoreState.scheme)
+  )
+
   return (
     <Box
       sx={{
@@ -57,10 +73,25 @@ const AlbumCard = React.memo(function AlbumCard({
         alignItems: "center",
       }}
     >
-      {/* <Fade in={true}> */}
       <ButtonBase
         sx={{
           borderRadius: "10%",
+          ...(appeal
+            ? {
+                boxShadow: `0 0 10px 0 ${colorTertiary}`,
+                animation: `appeal 5s ease-in-out infinite alternate`,
+                "@keyframes appeal": {
+                  "0%": {
+                    transform:
+                      "perspective(400px) translateY(-8px) scale(1.05) rotateX(10deg) rotateY(-10deg)",
+                  },
+                  "100%": {
+                    transform:
+                      "perspective(400px) translateY(-8px) scale(1.05) rotateX(10deg) rotateY(10deg)",
+                  },
+                },
+              }
+            : {}),
         }}
         onClick={() => {
           openAlbum(albumItem.name)
@@ -75,10 +106,9 @@ const AlbumCard = React.memo(function AlbumCard({
           coverUrl={coverUrl}
         />
       </ButtonBase>
-      {/* </Fade> */}
       <Typography
         sx={{
-          mt: 1,
+          mt: 0.5,
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -94,9 +124,13 @@ const AlbumCard = React.memo(function AlbumCard({
 
 interface AlbumListProps {
   albums: AlbumItem[]
+  activeAlbumId: string | undefined
 }
 
-const AlbumList = React.memo(function AlbumList({ albums }: AlbumListProps) {
+const AlbumList = React.memo(function AlbumList({
+  albums,
+  activeAlbumId,
+}: AlbumListProps) {
   const [routerState, routerActions] = useRouter()
   const routerActionsRef = useRef(routerActions)
   routerActionsRef.current = routerActions
@@ -108,7 +142,7 @@ const AlbumList = React.memo(function AlbumList({ albums }: AlbumListProps) {
   return (
     <Box
       sx={{
-        gap: 2,
+        gap: 3,
         gridTemplateColumns: "repeat(auto-fill, minmax(144px, 1fr))",
         display: "grid",
         maxWidth: "1040px",
@@ -118,7 +152,12 @@ const AlbumList = React.memo(function AlbumList({ albums }: AlbumListProps) {
     >
       {albums.map(album => {
         return (
-          <AlbumCard key={album.name} albumItem={album} openAlbum={openAlbum} />
+          <AlbumCard
+            key={album.name}
+            albumItem={album}
+            openAlbum={openAlbum}
+            appeal={album.name === activeAlbumId}
+          />
         )
       })}
     </Box>
@@ -134,6 +173,15 @@ const AlbumListPage = React.memo(function AlbumListPage(
   const [fileStoreState, fileStoreActions] = useFileStore()
   const fileStoreActionsRef = useRef(fileStoreActions)
   fileStoreActionsRef.current = fileStoreActions
+
+  const [playerState] = usePlayerStore()
+  const activeAlbumId = useMemo(() => {
+    let albumName = playerState.activeTrack?.file.metadata?.common.album
+    if (albumName === undefined) albumName = "Unknown Album"
+    albumName = albumName.replace(/\0+$/, "")
+    return albumName
+  }, [playerState.activeTrack?.file.metadata?.common.album])
+  // console.log(activeAlbumId)
 
   const [albums, setAlbums] = useState<AlbumItem[]>([])
 
@@ -163,11 +211,12 @@ const AlbumListPage = React.memo(function AlbumListPage(
   return (
     <Box
       sx={{
-        px: 2,
+        px: 4,
+        pt: 4,
         ...props.sx,
       }}
     >
-      <AlbumList albums={albums} />
+      <AlbumList albums={albums} activeAlbumId={activeAlbumId} />
     </Box>
   )
 })
@@ -229,77 +278,50 @@ const AlbumPage = React.memo(function AlbumPage({
             sm: "row",
           },
           px: 2,
-          gap: 1,
-          alignItems: "center",
+          gap: 2,
+          // alignItems: "center",
           width: "100%",
           my: 3,
         }}
       >
-        {/* <Fade in={true}> */}
         <AlbumCover
           sx={{
-            // flexBasis: "50%",
-            // height: "auto",
-            // width: "auto",
-            // aspectRatio: "1 / 1",
-            // maxWidth: "200px",
             width: "200px",
             height: "200px",
+            alignSelf: "center",
           }}
           coverUrl={coverUrl}
         />
-        {/* </Fade> */}
 
         <Box
           sx={{
             flexGrow: 1,
             display: "flex",
             flexDirection: "column",
-            // alignItems: "flex-start",
-            // alignItems: "center",
-            // alignItems: {
-            //   xs: "",
-            //   sm: "flex-start",
-            // },
-
             minWidth: 0,
-            // width: "100%",
+            width: "100%",
+            justifyContent: "space-around",
           }}
         >
           <Typography
             variant="h5"
             sx={{
-              // width: "100%",
               fontWeight: "bold",
-              // display: "-webkit-box",
               overflow: "hidden",
-              // WebkitBoxOrient: "vertical",
-              // WebkitBoxOrient: "vertical",
-              // WebkitLineClamp: 2,
-              // -webkit-line-clamp: 3
-              // textAlign: "center",
-              // textAlign: {
-              //   xs: "center",
-              //   sm: "left",
-              // },
+              textAlign: {
+                xs: "center",
+                sm: "left",
+              },
             }}
           >
             {albumItem ? albumItem.name : ""}
           </Typography>
-          {/* <MarqueeText
-            variant="h5"
-            sx={{
-              width: "100%",
-            }}
-            typographySx={{
-              fontWeight: "bold",
-            }}
-            text={albumItem ? albumItem.name : ""}
-          /> */}
           <Box
             sx={{
               display: "flex",
-              minWidth: "200px",
+              flexDirection: "row",
+              // minWidth: "200px",
+              justifyContent: "flex-end",
             }}
           >
             <IconButton
@@ -334,6 +356,8 @@ export default function Page() {
   const fileStoreActionsRef = useRef(fileStoreActions)
   fileStoreActionsRef.current = fileStoreActions
 
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+
   useEffect(() => {
     const albumId = decodeURIComponent(routerState.hash.slice(1))
     if (albumId === "") {
@@ -353,13 +377,32 @@ export default function Page() {
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
 
+  const downloadingCount = Object.keys(fileStoreState.syncingTrackFiles).length
+
   return (
     <Box>
       <AppTopBar>
         <Toolbar>
           <IconButton
+            color="inherit"
+            onClick={() => {
+              routerActions.goHome()
+            }}
+            sx={{ ml: -1 }}
+          >
+            <HomeRounded />
+          </IconButton>
+          <Typography
+            sx={{
+              color: colorOnSurfaceVariant,
+            }}
+          >
+            /
+          </Typography>
+          <IconButton
             size="large"
-            edge="start"
+            // edge="start"
+            // sx={{ ml: -1 }}
             color="inherit"
             onClick={() => {
               if (currentAlbum) {
@@ -369,25 +412,10 @@ export default function Page() {
               routerActions.goHome()
             }}
           >
-            <ArrowBackRounded />
+            <ArrowUpwardRounded />
           </IconButton>
 
-          <IconButton
-            color="inherit"
-            onClick={() => {
-              routerActions.goHome()
-            }}
-          >
-            <HomeRounded />
-          </IconButton>
-          <Typography
-            sx={{
-              mx: 1,
-              color: colorOnSurfaceVariant,
-            }}
-          >
-            /
-          </Typography>
+          <AlbumRounded color="inherit" sx={{ mr: 1 }} />
           <MarqueeText
             variant="h6"
             sx={{
@@ -398,6 +426,42 @@ export default function Page() {
             }}
             text={currentAlbum ? currentAlbum.name : "Albums"}
           />
+          {downloadingCount > 0 ? (
+            <DownloadingIndicator
+              count={downloadingCount}
+              color={colorOnSurfaceVariant}
+            />
+          ) : null}
+          <div>
+            <IconButton
+              color="inherit"
+              edge="end"
+              onClick={event => {
+                setAnchorEl(event.currentTarget)
+              }}
+            >
+              <MoreVert />
+            </IconButton>
+            <Menu
+              anchorEl={anchorEl}
+              keepMounted
+              open={Boolean(anchorEl)}
+              onClose={() => {
+                setAnchorEl(null)
+              }}
+            >
+              <MenuItem
+                onClick={() => {
+                  routerActions.goSettings()
+                }}
+              >
+                <ListItemIcon>
+                  <SettingsRounded />
+                </ListItemIcon>
+                <ListItemText>Settings</ListItemText>
+              </MenuItem>
+            </Menu>
+          </div>
         </Toolbar>
       </AppTopBar>
       <Box

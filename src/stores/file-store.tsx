@@ -779,7 +779,7 @@ export const FileStoreProvider = ({
               .put(blob, fileId)
 
             let albumName = metadata.common.album
-            if (albumName === undefined) return { file: trackFile, blob }
+            if (albumName === undefined) albumName = "Unknown Album"
             albumName = albumName.replace(/\0+$/, "")
 
             return getAlbumItemFromIdb(fileDb, albumName).then(albumItem => {
