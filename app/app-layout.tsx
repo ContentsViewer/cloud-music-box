@@ -7,7 +7,6 @@ import { PlayerStoreProvider, usePlayerStore } from "@/src/stores/player-store"
 import { DynamicBackground } from "@/src/components/dynamic-background"
 import { Box, Fade, Button } from "@mui/material"
 import {
-  MaterialDesignContent,
   SnackbarKey,
   SnackbarProvider,
   closeSnackbar,
