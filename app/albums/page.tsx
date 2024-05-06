@@ -239,8 +239,7 @@ const AlbumListPage = React.memo(function AlbumListPage(
   return (
     <Box
       sx={{
-        px: 4,
-        pt: 4,
+        p: 4,
         ...props.sx,
       }}
     >
@@ -521,7 +520,8 @@ export default function Page() {
               right: 0,
               left: 0,
               pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
-              overflow: "hidden"
+              overflow: "hidden",
+              minHeight: "100vh",
             }}
           >
             <AlbumListPage />
