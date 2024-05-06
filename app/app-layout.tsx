@@ -5,17 +5,21 @@ import { PlayerCard } from "@/src/components/player-card"
 import { FileStoreProvider } from "@/src/stores/file-store"
 import { PlayerStoreProvider, usePlayerStore } from "@/src/stores/player-store"
 import { DynamicBackground } from "@/src/components/dynamic-background"
-import { Box, Fade, styled } from "@mui/material"
-import { MaterialDesignContent, SnackbarProvider } from "notistack"
+import { Box, Fade, Button } from "@mui/material"
+import {
+  SnackbarKey,
+  SnackbarProvider,
+  closeSnackbar,
+  enqueueSnackbar,
+} from "notistack"
 import { NetworkMonitorProvider } from "@/src/stores/network-monitor"
 import { RouterProvider } from "@/src/router"
 import { useEffect, useRef, useState } from "react"
 import { useThemeStore } from "@/src/stores/theme-store"
 import * as mm from "music-metadata-browser"
-import {
-  DynamicThemeStoreProvider,
-} from "@/src/stores/dynamic-theme-store"
-import { css } from '@emotion/css';
+import { DynamicThemeStoreProvider } from "@/src/stores/dynamic-theme-store"
+import { css } from "@emotion/css"
+import { registerServiceWorker } from "./register-sw"
 
 const ThemeChanger = () => {
   const [playerState] = usePlayerStore()
@@ -30,7 +34,7 @@ const ThemeChanger = () => {
     const cover = mm.selectCover(
       playerState.activeTrack.file.metadata?.common.picture
     )
-    
+
     if (cover) {
       const url = URL.createObjectURL(
         new Blob([cover.data], { type: cover.format })
@@ -45,21 +49,40 @@ const ThemeChanger = () => {
   return null
 }
 
-// const StyledMaterialDesignContent = styled(MaterialDesignContent)(() => ({
-//   '&.notistack-MuiContent-success': {
-//     backgroundColor: '#2D7738',
-//   },
-//   '&.notistack-MuiContent-error': {
-//     backgroundColor: '#970C0C',
-//   },
-// }));
-
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [playerCardExpanded, setPlayerCardExpanded] = useState<boolean>(false)
   const snackbarContainerClass = css`
     margin-left: env(safe-area-inset-left, 0);
-    margin-bottom: calc(env(safe-area-inset-bottom, 0) + ${playerCardExpanded ? "0" : "136"}px);
-  `;
+    margin-bottom: calc(
+      env(safe-area-inset-bottom, 0) + ${playerCardExpanded ? "0" : "136"}px
+    );
+  `
+  useEffect(() => {
+    registerServiceWorker({
+      onNeedRefresh: updateSW => {
+        const action = (snackbarId: SnackbarKey) => {
+          return (
+            <>
+              <Button
+                onClick={() => {
+                  updateSW()
+                  closeSnackbar(snackbarId)
+                }}
+              >
+                Reload
+              </Button>
+            </>
+          )
+        }
+        enqueueSnackbar("A new version is available.", {
+          variant: "info",
+          action,
+          persist: true,
+        })
+      },
+    })
+  }, [])
+
   return (
     <SnackbarProvider
       anchorOrigin={{
