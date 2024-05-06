@@ -25,7 +25,8 @@ const withSerwist = withSerwistInit({
     { url: "albums.html", revision: revision },
     { url: "albums.txt", revision: revision },
   ],
-  reloadOnOnline: false
+  reloadOnOnline: false,
+  register: false,
 });
 
 export default withSerwist({
