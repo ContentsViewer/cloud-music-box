@@ -176,11 +176,12 @@ const AlbumListPage = React.memo(function AlbumListPage(
 
   const [playerState] = usePlayerStore()
   const activeAlbumId = useMemo(() => {
-    let albumName = playerState.activeTrack?.file.metadata?.common.album
+    if (!playerState.activeTrack) return undefined
+    let albumName = playerState.activeTrack.file.metadata?.common.album
     if (albumName === undefined) albumName = "Unknown Album"
     albumName = albumName.replace(/\0+$/, "")
     return albumName
-  }, [playerState.activeTrack?.file.metadata?.common.album])
+  }, [playerState.activeTrack])
   // console.log(activeAlbumId)
 
   const [albums, setAlbums] = useState<AlbumItem[]>([])
