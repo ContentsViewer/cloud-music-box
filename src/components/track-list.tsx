@@ -18,7 +18,7 @@ import {
   ListItemIcon,
 } from "@mui/material"
 import { AudioTrackFileItem } from "../stores/file-store"
-import React, { useCallback, useRef } from "react"
+import React, { useCallback, useMemo, useRef } from "react"
 import { usePlayerStore } from "../stores/player-store"
 import { useThemeStore } from "../stores/theme-store"
 import {
@@ -101,8 +101,13 @@ export const TrackList = React.memo(function TrackList({
   playerActionsRef.current = playerActions
 
   const tracksSorted = tracks?.sort((a, b) => {
-    if (!a.metadata?.common.track.no || !b.metadata?.common.track.no) return 0
-    return a.metadata.common.track.no - b.metadata.common.track.no
+    const aDiskN = a.metadata?.common.disk?.no || 1
+    const bDiskN = b.metadata?.common.disk?.no || 1
+    const aTrackN = a.metadata?.common.track.no || 1
+    const bTrackN = b.metadata?.common.track.no || 1
+
+    if (aDiskN !== bDiskN) return aDiskN - bDiskN
+    return aTrackN - bTrackN
   })
 
   const playTrack = useCallback(
@@ -123,18 +128,18 @@ export const TrackList = React.memo(function TrackList({
     },
     [tracksSorted, albumId]
   )
-  return (
-    <List>
-      {tracksSorted?.map(track => {
-        return (
-          <TrackListItem
-            key={track.id}
-            track={track}
-            activeTrack={playerStoreState.activeTrack?.file}
-            playTrack={playTrack}
-          />
-        )
-      })}
-    </List>
-  )
+  const trackListItems = useMemo(() => {
+    return tracksSorted?.map(track => {
+      return (
+        <TrackListItem
+          key={track.id}
+          track={track}
+          activeTrack={playerStoreState.activeTrack?.file}
+          playTrack={playTrack}
+        />
+      )
+    })
+  }, [tracksSorted, playerStoreState.activeTrack?.file, playTrack])
+
+  return <List>{trackListItems}</List>
 })

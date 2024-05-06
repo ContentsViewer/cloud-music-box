@@ -76,6 +76,11 @@ const AlbumCard = React.memo(function AlbumCard({
       <ButtonBase
         sx={{
           borderRadius: "10%",
+          // transition: "transform 1000ms cubic-bezier(0.4, 0, 0.2, 1), opacity 1000ms ease",
+          transition: theme =>
+            theme.transitions.create(["transform", "opacity"], {
+              duration: 1000,
+            }),
           ...(appeal
             ? {
                 boxShadow: `0 0 10px 0 ${colorTertiary}`,
@@ -93,8 +98,30 @@ const AlbumCard = React.memo(function AlbumCard({
               }
             : {}),
         }}
-        onClick={() => {
+        onClick={event => {
           openAlbum(albumItem.name)
+          const elem = event.currentTarget
+          elem.style.animation = "none"
+          // elem.style.transform = "scale(5) rotateY(180deg)"
+          elem.style.opacity = "0"
+          elem.style.zIndex = "100"
+          // Get the initial position and size of the element
+          const rect = elem.getBoundingClientRect()
+
+          // Calculate the translate values
+          const translateX =
+            window.innerWidth / 2 - (rect.left + rect.width / 2)
+          const translateY =
+            window.innerHeight / 2 - (rect.top + rect.height / 2)
+
+          // Calculate the scale value
+          const scale = Math.max(
+            window.innerWidth / rect.width,
+            window.innerHeight / rect.height
+          )
+
+          // Set the transform property
+          elem.style.transform = `perspective(400px) translate(${translateX}px, ${translateY}px) scale(${scale}) rotate3d(0, 1, 0, 180deg)`
         }}
       >
         <AlbumCover
@@ -176,11 +203,12 @@ const AlbumListPage = React.memo(function AlbumListPage(
 
   const [playerState] = usePlayerStore()
   const activeAlbumId = useMemo(() => {
-    let albumName = playerState.activeTrack?.file.metadata?.common.album
+    if (!playerState.activeTrack) return undefined
+    let albumName = playerState.activeTrack.file.metadata?.common.album
     if (albumName === undefined) albumName = "Unknown Album"
     albumName = albumName.replace(/\0+$/, "")
     return albumName
-  }, [playerState.activeTrack?.file.metadata?.common.album])
+  }, [playerState.activeTrack])
   // console.log(activeAlbumId)
 
   const [albums, setAlbums] = useState<AlbumItem[]>([])
@@ -469,13 +497,36 @@ export default function Page() {
           mt: 8,
           ml: `env(safe-area-inset-left, 0)`,
           mr: `env(safe-area-inset-right, 0)`,
+          position: "relative",
         }}
       >
-        {currentAlbum ? (
-          <AlbumPage albumItem={currentAlbum} />
-        ) : (
-          <AlbumListPage />
-        )}
+        <Fade in={currentAlbum !== undefined} timeout={1000} unmountOnExit>
+          <Box
+            sx={{
+              position: "absolute",
+              top: 0,
+              right: 0,
+              left: 0,
+              pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+            }}
+          >
+            <AlbumPage albumItem={currentAlbum} />
+          </Box>
+        </Fade>
+        <Fade in={currentAlbum === undefined} timeout={1000} unmountOnExit>
+          <Box
+            sx={{
+              position: "absolute",
+              top: 0,
+              right: 0,
+              left: 0,
+              pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+              overflow: "hidden"
+            }}
+          >
+            <AlbumListPage />
+          </Box>
+        </Fade>
       </Box>
     </Box>
   )
