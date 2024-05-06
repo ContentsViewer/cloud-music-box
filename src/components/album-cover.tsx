@@ -1,7 +1,5 @@
 import {
   AlbumRounded,
-  Audiotrack,
-  AudiotrackRounded,
 } from "@mui/icons-material"
 import { Avatar, Fade, SxProps, Theme } from "@mui/material"
 
