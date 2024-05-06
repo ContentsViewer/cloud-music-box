@@ -493,12 +493,9 @@ export default function Page() {
       </AppTopBar>
       <Box
         sx={{
-          // pt: 8,
           pl: `env(safe-area-inset-left, 0)`,
           pr: `env(safe-area-inset-right, 0)`,
           position: "relative",
-          overflow: "hidden",
-          minHeight: "100vh",
         }}
       >
         <Fade in={currentAlbum !== undefined} timeout={1000} unmountOnExit>
@@ -524,6 +521,8 @@ export default function Page() {
               left: 0,
               pt: 8,
               pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+              overflow: "hidden",
+              minHeight: "100vh",
             }}
           >
             <AlbumListPage />
