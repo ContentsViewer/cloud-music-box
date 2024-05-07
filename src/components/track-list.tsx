@@ -16,26 +16,33 @@ import {
   ListItemText,
   Theme,
   ListItemIcon,
+  ListItem,
+  Menu,
+  MenuItem,
 } from "@mui/material"
 import { AudioTrackFileItem } from "../stores/file-store"
-import React, { useCallback, useMemo, useRef } from "react"
+import React, { useCallback, useMemo, useRef, useState } from "react"
 import { usePlayerStore } from "../stores/player-store"
 import { useThemeStore } from "../stores/theme-store"
 import {
   MaterialDynamicColors,
   hexFromArgb,
 } from "@material/material-color-utilities"
+import { MoreVert } from "@mui/icons-material"
+import { useRouter } from "../router"
 
 interface TrackListItemProps {
   track: AudioTrackFileItem
   activeTrack: AudioTrackFileItem | undefined
   playTrack?: (track: AudioTrackFileItem) => void
+  menuItems?: React.ReactNode
 }
 
 const TrackListItem = React.memo(function TrackListItem({
   track,
   activeTrack,
   playTrack,
+  menuItems,
 }: TrackListItemProps) {
   const [themeStoreState] = useThemeStore()
 
@@ -50,39 +57,72 @@ const TrackListItem = React.memo(function TrackListItem({
   )
   const selected = activeTrack?.id === track.id
 
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+
   return (
-    <ListItemButton
-      onClick={() => {
-        if (playTrack) playTrack(track)
-      }}
-      selected={selected}
+    <ListItem
+      secondaryAction={
+        <div>
+          <IconButton
+            sx={{
+              color: colorOnSurfaceVariant,
+            }}
+            edge="end"
+            onClick={event => {
+              setAnchorEl(event.currentTarget)
+            }}
+            disabled={menuItems === undefined}
+          >
+            {/* <MoreHoriz /> */}
+            <MoreVert />
+          </IconButton>
+          <Menu
+            anchorEl={anchorEl}
+            keepMounted
+            open={Boolean(anchorEl)}
+            onClose={() => {
+              setAnchorEl(null)
+            }}
+          >
+            {menuItems}
+          </Menu>
+        </div>
+      }
+      disablePadding
     >
-      <ListItemIcon>
-        <Typography color={colorOnSurfaceVariant}>
-          {track.metadata?.common.track.no}
-        </Typography>
-      </ListItemIcon>
-      <ListItemText
-        primaryTypographyProps={{
-          style: {
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            color: selected ? colorTertiary : colorOnSurface,
-          },
+      <ListItemButton
+        onClick={() => {
+          if (playTrack) playTrack(track)
         }}
-        secondaryTypographyProps={{
-          style: {
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            color: colorOnSurfaceVariant,
-          },
-        }}
-        primary={track.metadata?.common?.title || track.name}
-        secondary={track.metadata?.common?.artists?.join(", ") || ""}
-      />
-    </ListItemButton>
+        selected={selected}
+      >
+        <ListItemIcon>
+          <Typography color={colorOnSurfaceVariant}>
+            {track.metadata?.common.track.no}
+          </Typography>
+        </ListItemIcon>
+        <ListItemText
+          primaryTypographyProps={{
+            style: {
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              color: selected ? colorTertiary : colorOnSurface,
+            },
+          }}
+          secondaryTypographyProps={{
+            style: {
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              color: colorOnSurfaceVariant,
+            },
+          }}
+          primary={track.metadata?.common?.title || track.name}
+          secondary={track.metadata?.common?.artists?.join(", ") || ""}
+        />
+      </ListItemButton>
+    </ListItem>
   )
 })
 
@@ -95,10 +135,12 @@ interface TrackListProps {
 export const TrackList = React.memo(function TrackList({
   tracks,
   albumId,
+  sx,
 }: TrackListProps) {
   const [playerStoreState, playerActions] = usePlayerStore()
   const playerActionsRef = useRef(playerActions)
   playerActionsRef.current = playerActions
+  const [routerState, routerActions] = useRouter()
 
   const tracksSorted = tracks?.sort((a, b) => {
     const aDiskN = a.metadata?.common.disk?.no || 1
@@ -136,10 +178,22 @@ export const TrackList = React.memo(function TrackList({
           track={track}
           activeTrack={playerStoreState.activeTrack?.file}
           playTrack={playTrack}
+          menuItems={[
+            <MenuItem
+              key="go-to-file"
+              onClick={() => {
+                const parentId = track.parentId
+                if (!parentId) return
+                routerActions.goFile(parentId)
+              }}
+            >
+              <ListItemText>Go to File</ListItemText>
+            </MenuItem>,
+          ]}
         />
       )
     })
-  }, [tracksSorted, playerStoreState.activeTrack?.file, playTrack])
+  }, [tracksSorted, playerStoreState.activeTrack?.file, playTrack, routerActions])
 
-  return <List>{trackListItems}</List>
+  return <List sx={{ ...sx }}>{trackListItems}</List>
 })

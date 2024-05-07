@@ -42,18 +42,6 @@ export const PlayerStateContext = createContext<PlayerStateProps>({
   duration: 0,
 })
 
-// interface DynamicPlayerStateProps {
-//   currentTime: number;
-//   setCurrentTime: (currentTime: number) => void;
-//   changeCurrentTime: (currentTime: number) => void;
-// }
-
-// export const DynamicPlayerStateContext = createContext<DynamicPlayerStateProps>({
-//   currentTime: 0,
-//   setCurrentTime: () => { },
-//   changeCurrentTime: () => { },
-// });
-
 type Action =
   | { type: "play" }
   | { type: "pause" }
@@ -66,7 +54,12 @@ type Action =
         playSourceUrl?: string
       }
     }
-  | { type: "activeTrackLoaded" }
+  | {
+      type: "trackLoaded"
+      payload: {
+        track: AudioTrack
+      }
+    }
   | {
       type: "setCurrentTime"
       payload: { currentTime: number; changed: boolean }
@@ -208,7 +201,7 @@ const cacheBlobs = (
           track.file = file
         }
         if (index === currentIndex) {
-          dispatch({ type: "activeTrackLoaded" })
+          dispatch({ type: "trackLoaded", payload: { track } })
         }
       })
       .catch(error => {
@@ -242,7 +235,10 @@ const reducer = (state: PlayerStateProps, action: Action) => {
     case "pause": {
       return { ...state, isPlaying: false }
     }
-    case "activeTrackLoaded": {
+    case "trackLoaded": {
+      const { track } = action.payload
+      if (state.activeTrack !== track) return state
+
       return { ...state, isActiveTrackLoading: false }
     }
     case "setCurrentTime": {

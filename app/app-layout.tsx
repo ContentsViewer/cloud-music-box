@@ -43,6 +43,8 @@ const ThemeChanger = () => {
       themeActionsRef.current.applyThemeFromImage(url)
 
       return () => URL.revokeObjectURL(url)
+    } else {
+      themeActionsRef.current.resetSourceColor()
     }
   }, [playerState.activeTrack, playerState.isActiveTrackLoading])
 
@@ -74,7 +76,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </>
           )
         }
-        enqueueSnackbar("A new version is available.", {
+        enqueueSnackbar("A New Version is Available.", {
           variant: "info",
           action,
           persist: true,

@@ -304,7 +304,7 @@ const AlbumPage = React.memo(function AlbumPage({
             xs: "column",
             sm: "row",
           },
-          px: 2,
+          px: 4,
           gap: 2,
           // alignItems: "center",
           width: "100%",
@@ -368,7 +368,7 @@ const AlbumPage = React.memo(function AlbumPage({
         </Box>
       </Box>
       {/* <Divider /> */}
-      <TrackList tracks={tracks} albumId={albumItem?.name} />
+      <TrackList sx={{ px: 0 }} tracks={tracks} albumId={albumItem?.name} />
     </Box>
   )
 })

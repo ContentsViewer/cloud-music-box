@@ -26,9 +26,11 @@ interface ThemeStateProps {
   sourceColor: number
 }
 
+const defaultSourceColor = 0x163447
+
 export const ThemeStateContext = createContext<ThemeStateProps>({
-  scheme: new SchemeContent(Hct.fromInt(0x163447), true, 0.3),
-  sourceColor: 0x163447,
+  scheme: new SchemeContent(Hct.fromInt(defaultSourceColor), true, 0.3),
+  sourceColor: defaultSourceColor,
 })
 
 type Action = {
@@ -50,6 +52,17 @@ export const useThemeStore = () => {
       const scheme = new SchemeContent(Hct.fromInt(sourceColor), true, 0.3)
       dispatch({ type: "setTheme", payload: { scheme, sourceColor } })
     },
+    resetSourceColor: () => {
+      const scheme = new SchemeContent(
+        Hct.fromInt(defaultSourceColor),
+        true,
+        0.3
+      )
+      dispatch({
+        type: "setTheme",
+        payload: { scheme: scheme, sourceColor: defaultSourceColor },
+      })
+    },
   }
   return [state, actions] as const
 }
@@ -57,10 +70,14 @@ export const useThemeStore = () => {
 const reducer = (state: ThemeStateProps, action: Action) => {
   switch (action.type) {
     case "setTheme":
+      const { scheme, sourceColor } = action.payload
+      if (state.sourceColor === sourceColor) return state
+
+      // console.log(state.sourceColor, sourceColor)
       return {
         ...state,
-        scheme: action.payload.scheme,
-        sourceColor: action.payload.sourceColor,
+        scheme: scheme,
+        sourceColor: sourceColor,
       }
     default:
       return state
@@ -73,8 +90,8 @@ export const ThemeStoreProvider = ({
   children: React.ReactNode
 }) => {
   const [state, dispatch] = useReducer(reducer, {
-    scheme: new SchemeContent(Hct.fromInt(0x163447), true, 0.3),
-    sourceColor: 0x163447,
+    scheme: new SchemeContent(Hct.fromInt(defaultSourceColor), true, 0.3),
+    sourceColor: defaultSourceColor,
   })
 
   const theme = createTheme({
@@ -92,7 +109,9 @@ export const ThemeStoreProvider = ({
         default: hexFromArgb(
           MaterialDynamicColors.surface.getArgb(state.scheme)
         ),
-        paper: hexFromArgb(MaterialDynamicColors.surfaceContainer.getArgb(state.scheme)),
+        paper: hexFromArgb(
+          MaterialDynamicColors.surfaceContainer.getArgb(state.scheme)
+        ),
       },
       error: {
         main: hexFromArgb(MaterialDynamicColors.error.getArgb(state.scheme)),

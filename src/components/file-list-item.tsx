@@ -3,18 +3,25 @@
 import {
   Avatar,
   Box,
+  IconButton,
   ListItemAvatar,
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  ListItem,
+  Menu,
+  MenuItem,
 } from "@mui/material"
 import FolderIcon from "@mui/icons-material/Folder"
 import {
   ArrowDownward,
   Audiotrack,
+  MoreHoriz,
   CloudOff,
   CloudQueue,
   Inventory,
+  MoreVert,
+  SettingsRounded,
 } from "@mui/icons-material"
 import { useNetworkMonitor } from "../stores/network-monitor"
 import { useEffect, useRef, useState } from "react"
@@ -28,6 +35,7 @@ import {
   MaterialDynamicColors,
   hexFromArgb,
 } from "@material/material-color-utilities"
+import { useRouter } from "../router"
 
 interface FileListItemBasicProps {
   name: string
@@ -38,6 +46,7 @@ interface FileListItemBasicProps {
   fileStatus: "online" | "offline" | "local" | "downloading"
   selected?: boolean
   children?: React.ReactNode
+  menuItems?: React.ReactNode
 }
 
 export function FileListItemBasic({
@@ -49,6 +58,7 @@ export function FileListItemBasic({
   fileStatus,
   selected,
   children,
+  menuItems,
 }: FileListItemBasicProps) {
   const [themeStoreState] = useThemeStore()
   const colorOnSurfaceVariant = hexFromArgb(
@@ -61,61 +71,94 @@ export function FileListItemBasic({
     MaterialDynamicColors.onSurface.getArgb(themeStoreState.scheme)
   )
 
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+
   return (
-    <ListItemButton onClick={onClick} disabled={disabled} selected={selected}>
-      {icon}
-      <ListItemText
-        primaryTypographyProps={{
-          style: {
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            color: selected ? colorTertiary : colorOnSurface,
-          },
-        }}
-        secondaryTypographyProps={{
-          style: {
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            color: colorOnSurfaceVariant,
-          },
-        }}
-        primary={name}
-        secondary={secondaryText}
-      />
-      {fileStatus === "online" ? (
-        <CloudQueue fontSize="small" color="disabled" />
-      ) : fileStatus === "offline" ? (
-        <CloudOff fontSize="small" color="disabled" />
-      ) : fileStatus === "local" ? (
-        <Inventory fontSize="small" color="disabled" />
-      ) : fileStatus === "downloading" ? (
-        // <CircularProgress size={16} />
-        <Box
-          sx={{
-            width: "20px",
-            height: "20px",
-            // clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
-            clipPath: "inset(0 0 0 0)",
-          }}
-        >
-          <ArrowDownward
-            fontSize="small"
-            color="disabled"
+    <ListItem
+      secondaryAction={
+        <div>
+          <IconButton
             sx={{
-              animation: "down 2s linear infinite",
-              "@keyframes down": {
-                "0%": { transform: "translateY(-20px)" },
-                "50%": { transform: "translateY(0)" },
-                "100%": { transform: "translateY(20px)" },
-              },
+              color: colorOnSurfaceVariant,
             }}
-          />
-        </Box>
-      ) : null}
-      {children}
-    </ListItemButton>
+            edge="end"
+            onClick={event => {
+              setAnchorEl(event.currentTarget)
+            }}
+            disabled={menuItems === undefined}
+          >
+            {/* <MoreHoriz /> */}
+            <MoreVert />
+          </IconButton>
+          <Menu
+            anchorEl={anchorEl}
+            keepMounted
+            open={Boolean(anchorEl)}
+            onClose={() => {
+              setAnchorEl(null)
+            }}
+          >
+            {menuItems}
+          </Menu>
+        </div>
+      }
+      disablePadding
+    >
+      <ListItemButton disabled={disabled} selected={selected} onClick={onClick}>
+        {icon}
+        <ListItemText
+          primaryTypographyProps={{
+            style: {
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              color: selected ? colorTertiary : colorOnSurface,
+            },
+          }}
+          secondaryTypographyProps={{
+            style: {
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              color: colorOnSurfaceVariant,
+            },
+          }}
+          primary={name}
+          secondary={secondaryText}
+        />
+        {children}
+        {fileStatus === "online" ? (
+          <CloudQueue fontSize="small" color="disabled" />
+        ) : fileStatus === "offline" ? (
+          <CloudOff fontSize="small" color="disabled" />
+        ) : fileStatus === "local" ? (
+          <Inventory fontSize="small" color="disabled" />
+        ) : fileStatus === "downloading" ? (
+          // <CircularProgress size={16} />
+          <Box
+            sx={{
+              width: "20px",
+              height: "20px",
+              // clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
+              clipPath: "inset(0 0 0 0)",
+            }}
+          >
+            <ArrowDownward
+              fontSize="small"
+              color="disabled"
+              sx={{
+                animation: "down 2s linear infinite",
+                "@keyframes down": {
+                  "0%": { transform: "translateY(-20px)" },
+                  "50%": { transform: "translateY(0)" },
+                  "100%": { transform: "translateY(20px)" },
+                },
+              }}
+            />
+          </Box>
+        ) : null}
+      </ListItemButton>
+    </ListItem>
   )
 }
 
@@ -138,6 +181,7 @@ export const FileListItemAudioTrack = React.memo(
     const [fileStoreState, fileStoreActions] = useFileStore()
     const fileStoreActionsRef = useRef(fileStoreActions)
     fileStoreActionsRef.current = fileStoreActions
+    const [routerState, routerActions] = useRouter()
 
     const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
 
@@ -185,6 +229,18 @@ export const FileListItemAudioTrack = React.memo(
         disabled={disabled}
         onClick={onClick}
         secondaryText={file.metadata?.common.artists?.join(", ") || ""}
+        menuItems={
+          [
+            <MenuItem key="go-to-album" onClick={() => {
+              let albumName = file.metadata?.common.album
+              if (albumName === undefined) albumName = "Unknown Album"
+              albumName = albumName.replace(/\0+$/, "")
+              routerActions.goAlbum(albumName)
+            }}>
+              <ListItemText>Go to Album</ListItemText>
+            </MenuItem>
+          ]
+        }
       />
     )
   }

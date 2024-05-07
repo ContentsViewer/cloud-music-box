@@ -594,6 +594,8 @@ export const FileStoreProvider = ({
     }
   }, [])
 
+  const clientConfiguring = useRef(false)
+
   useEffect(() => {
     if (!state.configured) return
     if (!networkMonitor.isOnline) {
@@ -605,6 +607,8 @@ export const FileStoreProvider = ({
 
     if (!pca) return
     if (state.driveClient) return
+
+    clientConfiguring.current = true
 
     let accessToken: string | null = null
     let account: AccountInfo | null = null
@@ -697,10 +701,12 @@ export const FileStoreProvider = ({
         })
         dispatch({ type: "setDriveClient", payload: client })
         enqueueSnackbar("Drive Client Connected", { variant: "success" })
+        clientConfiguring.current = false
       })
       .catch(error => {
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
+        clientConfiguring.current = false
       })
   }, [networkMonitor, state.configured, state.pca, state.driveClient])
 
