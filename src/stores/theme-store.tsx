@@ -73,7 +73,7 @@ const reducer = (state: ThemeStateProps, action: Action) => {
       const { scheme, sourceColor } = action.payload
       if (state.sourceColor === sourceColor) return state
 
-      // console.log(state.sourceColor, sourceColor)
+      // console.log(sourceColor, scheme)
       return {
         ...state,
         scheme: scheme,
