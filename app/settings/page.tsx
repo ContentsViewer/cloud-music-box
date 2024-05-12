@@ -3,6 +3,7 @@
 
 import AppTopBar from "@/src/components/app-top-bar"
 import { useRouter } from "@/src/router"
+import { useFileStore } from "@/src/stores/file-store"
 import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
@@ -17,8 +18,103 @@ import {
   Typography,
   alpha,
   Link,
+  SxProps,
+  Theme,
+  List,
+  ListItem,
+  ListItemText,
 } from "@mui/material"
-import { useRef } from "react"
+import { useEffect, useRef, useState } from "react"
+
+function formatBytes(bytes: number, decimals = 2) {
+  if (bytes === 0) return "0 Bytes"
+
+  const k = 1024
+  const dm = decimals < 0 ? 0 : decimals
+  const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i]
+}
+
+interface StorageSettingsAreaProps {
+  sx?: SxProps<Theme>
+}
+
+function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
+  const [quota, setQuota] = useState<number | undefined>(undefined)
+  const [usage, setUsage] = useState<number | undefined>(undefined)
+  const [themeStoreState] = useThemeStore()
+
+  const [fileStoreState, fileStoreActions] = useFileStore()
+
+  async function getStorageInfo() {
+    const { quota, usage } = await navigator.storage.estimate()
+    setQuota(quota)
+    setUsage(usage)
+  }
+
+  useEffect(() => {
+    getStorageInfo()
+  }, [])
+
+  const { blobsStorageMaxBytes, blobsStorageUsageBytes } = fileStoreState
+
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
+  return (
+    <Box
+      sx={{
+        ...sx,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Typography variant="h6">Storage</Typography>
+      <List>
+        <ListItem>
+          <ListItemText
+            primary="Local File"
+            secondary="Usage of downloaded audio files."
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
+          />
+
+          <Typography>
+            {blobsStorageUsageBytes !== undefined
+              ? formatBytes(blobsStorageUsageBytes)
+              : "---"}
+            {" / "}
+            {blobsStorageMaxBytes !== undefined
+              ? formatBytes(blobsStorageMaxBytes)
+              : "---"}
+          </Typography>
+        </ListItem>
+        <ListItem>
+          <ListItemText
+            primary="App"
+            secondary="Usage of the entire application."
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
+          />
+          <Typography>
+            {usage !== undefined ? formatBytes(usage) : "---"} {" / "}
+            {quota !== undefined ? formatBytes(quota) : "---"}
+          </Typography>
+        </ListItem>
+      </List>
+    </Box>
+  )
+}
 
 export default function Page() {
   const [routerState, routerActions] = useRouter()
@@ -76,7 +172,10 @@ export default function Page() {
             width: "100%",
           }}
         >
-          <Typography variant="h6">About</Typography>
+          <StorageSettingsArea />
+          <Typography variant="h6" sx={{ mt: 2 }}>
+            About
+          </Typography>
           <Paper
             sx={{
               p: 2,
@@ -86,6 +185,8 @@ export default function Page() {
               alignItems: "center",
               backgroundColor: alpha(colorSurfaceContainer, 0.5),
               alignSelf: "center",
+              width: "100%",
+              maxWidth: "288px",
             }}
           >
             <Typography variant="body1" sx={{ fontWeight: "bold" }}>

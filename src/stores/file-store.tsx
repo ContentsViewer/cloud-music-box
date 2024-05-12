@@ -64,6 +64,15 @@ interface FileStoreStateProps {
 
   syncingTrackFiles: { [key: string]: boolean }
   syncQueue: SyncTask[]
+
+  blobsStorageMaxBytes?: number
+  blobsStorageUsageBytes?: number
+}
+
+interface BlobsMetaRecord {
+  id: string
+  lastAccessed: number
+  blobSize: number
 }
 
 export const FileStoreStateContext = createContext<FileStoreStateProps>({
@@ -102,6 +111,8 @@ type FileStoreAction =
       type: "setDriveConfigureStatus"
       payload: "not-configured" | "no-account" | "configured"
     }
+  | { type: "setBlobsStorageMaxBytes"; payload: number }
+  | { type: "setBlobsStorageUsageBytes"; payload: number }
 
 export const FileStoreDispatchContext = createContext<
   React.Dispatch<FileStoreAction>
@@ -277,7 +288,10 @@ export const useFileStore = () => {
         const blob = (await getIdbRequest(
           fileDb.transaction("blobs", "readonly").objectStore("blobs").get(id)
         )) as Blob | undefined
-        if (blob) return { blob, file: track }
+        if (blob) {
+          markBlobAccessed(fileDb, id, blob)
+          return { blob, file: track }
+        }
       }
 
       const promise = new Promise<{ blob?: Blob; file?: AudioTrackFileItem }>(
@@ -338,6 +352,9 @@ export const useFileStore = () => {
       )
 
       return albumIds
+    },
+    setBlobsStorageMaxBytes: (bytes: number) => {
+      dispatch({ type: "setBlobsStorageMaxBytes", payload: bytes })
     },
   }
 
@@ -444,6 +461,71 @@ function getIdbRequest<T>(request: IDBRequest<T>) {
   })
 }
 
+function releaseBlobsUntilLimit(
+  db: IDBDatabase,
+  limit: number,
+  currentUsage: number
+) {
+  if (currentUsage <= limit) return Promise.resolve(currentUsage)
+
+  return new Promise<void>((resolve, reject) => {
+    const blobsMetaStore = db
+      .transaction("blobs-meta", "readwrite")
+      .objectStore("blobs-meta")
+    const blobsMetaIndex = blobsMetaStore.index("last-accessed")
+
+    const request = blobsMetaIndex.openCursor()
+    request.onsuccess = event => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result
+      if (cursor) {
+        const blobId = cursor.primaryKey
+        currentUsage -= cursor.value.blobSize
+
+        db.transaction("blobs", "readwrite").objectStore("blobs").delete(blobId)
+        cursor.delete()
+
+        if (currentUsage <= limit) {
+          resolve()
+          return
+        }
+
+        cursor.continue()
+      } else {
+        resolve()
+      }
+    }
+    request.onerror = event => {
+      reject((event.target as IDBRequest).error)
+    }
+  }).then(() => {
+    return currentUsage
+  })
+}
+
+async function markBlobAccessed(db: IDBDatabase, id: string, blob: Blob) {
+  const result = { appended: false }
+  let record = (await getIdbRequest(
+    db.transaction("blobs-meta", "readonly").objectStore("blobs-meta").get(id)
+  )) as BlobsMetaRecord | undefined
+  if (record === undefined) {
+    record = {
+      id,
+      lastAccessed: Date.now(),
+      blobSize: blob.size,
+    }
+    result.appended = true
+  }
+  record.lastAccessed = Date.now()
+
+  await getIdbRequest(
+    db
+      .transaction("blobs-meta", "readwrite")
+      .objectStore("blobs-meta")
+      .put(record)
+  )
+  return result
+}
+
 const reducer = (
   state: FileStoreStateProps,
   action: FileStoreAction
@@ -485,6 +567,12 @@ const reducer = (
     case "setDriveConfigureStatus": {
       return { ...state, driveConfigureStatus: action.payload }
     }
+    case "setBlobsStorageMaxBytes": {
+      return { ...state, blobsStorageMaxBytes: action.payload }
+    }
+    case "setBlobsStorageUsageBytes": {
+      return { ...state, blobsStorageUsageBytes: action.payload }
+    }
     default:
       throw new Error("Invalid action")
   }
@@ -507,6 +595,8 @@ export const FileStoreProvider = ({
   })
 
   const syncPromiseRef = useRef<Promise<void>>(Promise.resolve())
+  const blobsStorageMaxBytesRef = useRef<number | undefined>(undefined)
+  const blobsStorageUsageBytesRef = useRef<number | undefined>(undefined)
 
   const networkMonitor = useNetworkMonitor()
   const initialized = useRef(false)
@@ -551,6 +641,12 @@ export const FileStoreProvider = ({
             db.createObjectStore("files", { keyPath: "id" })
             db.createObjectStore("blobs")
             db.createObjectStore("albums")
+            {
+              const store = db.createObjectStore("blobs-meta", {
+                keyPath: "id",
+              })
+              store.createIndex("last-accessed", "lastAccessed")
+            }
           }
         })
         dispatch({ type: "setFileDb", payload: fileDb })
@@ -568,6 +664,44 @@ export const FileStoreProvider = ({
           type: "setRootFolderId",
           payload: rootFolderId || undefined,
         })
+
+        const blobsStorageMaxBytes = parseInt(
+          localStorage.getItem("blobsStorageMaxBytes") || "NaN"
+        )
+        if (isNaN(blobsStorageMaxBytes)) {
+          const estimate = await navigator.storage.estimate()
+          const quota = estimate.quota
+
+          const maxBytes = (quota || 100) * 0.5
+          localStorage.setItem(
+            "blobsStorageMaxBytes",
+            `${Math.floor(maxBytes)}`
+          )
+          dispatch({ type: "setBlobsStorageMaxBytes", payload: maxBytes })
+          blobsStorageMaxBytesRef.current = maxBytes
+        } else {
+          dispatch({
+            type: "setBlobsStorageMaxBytes",
+            payload: blobsStorageMaxBytes,
+          })
+          blobsStorageMaxBytesRef.current = blobsStorageMaxBytes
+        }
+
+        const blobsStorageUsageBytes = parseInt(
+          localStorage.getItem("blobsStorageUsageBytes") || "NaN"
+        )
+        if (isNaN(blobsStorageUsageBytes)) {
+          localStorage.setItem("blobsStorageUsageBytes", "0")
+          dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
+          blobsStorageUsageBytesRef.current = 0
+        } else {
+          console.log("SET USAGE", blobsStorageUsageBytes)
+          dispatch({
+            type: "setBlobsStorageUsageBytes",
+            payload: blobsStorageUsageBytes,
+          })
+          blobsStorageUsageBytesRef.current = blobsStorageUsageBytes
+        }
       }
 
       {
@@ -768,54 +902,79 @@ export const FileStoreProvider = ({
 
           let trackFile: AudioTrackFileItem | undefined
 
-          return getFileItemFromIdb(fileDb, fileId).then(item => {
-            if (!item) throw new Error("Item not found")
-            if (item.type !== "audio-track")
-              throw new Error("Item is not a track")
+          return markBlobAccessed(fileDb, fileId, blob)
+            .then(({ appended }) => {
+              assert(
+                blobsStorageMaxBytesRef.current !== undefined &&
+                  blobsStorageUsageBytesRef.current !== undefined
+              )
+              if (appended) {
+                const blobStorageUsageBytes =
+                  blobsStorageUsageBytesRef.current + blob.size
 
-            trackFile = item as AudioTrackFileItem
-            trackFile.metadata = metadata
-            fileDb
-              .transaction("files", "readwrite")
-              .objectStore("files")
-              .put(trackFile)
-            fileDb
-              .transaction("blobs", "readwrite")
-              .objectStore("blobs")
-              .put(blob, fileId)
-
-            let albumName = metadata.common.album
-            if (albumName === undefined) albumName = "Unknown Album"
-            albumName = albumName.replace(/\0+$/, "")
-
-            return getAlbumItemFromIdb(fileDb, albumName).then(albumItem => {
-              if (albumItem) {
-                if (!albumItem.fileIds.includes(fileId)) {
-                  // 追加
-                  albumItem.fileIds.push(fileId)
-                }
-              } else {
-                albumItem = {
-                  name: albumName,
-                  fileIds: [fileId],
-                  cover: undefined,
-                }
-              }
-              if (albumItem.cover === undefined) {
-                const cover = mm.selectCover(metadata.common.picture)
-                if (cover) {
-                  albumItem.cover = new Blob([cover.data], {
-                    type: cover.format,
+                return releaseBlobsUntilLimit(
+                  fileDb,
+                  blobsStorageMaxBytesRef.current,
+                  blobStorageUsageBytes
+                ).then(usage => {
+                  localStorage.setItem("blobsStorageUsageBytes", `${usage}`)
+                  dispatch({
+                    type: "setBlobsStorageUsageBytes",
+                    payload: usage,
                   })
-                }
+                  blobsStorageUsageBytesRef.current = usage
+                })
               }
-              fileDb
-                .transaction("albums", "readwrite")
-                .objectStore("albums")
-                .put(albumItem, albumName)
-              return { file: trackFile, blob }
+              return null
             })
-          })
+            .then(() => getFileItemFromIdb(fileDb, fileId))
+            .then(item => {
+              if (!item) throw new Error("Item not found")
+              if (item.type !== "audio-track")
+                throw new Error("Item is not a track")
+
+              trackFile = item as AudioTrackFileItem
+              trackFile.metadata = metadata
+              fileDb
+                .transaction("files", "readwrite")
+                .objectStore("files")
+                .put(trackFile)
+              fileDb
+                .transaction("blobs", "readwrite")
+                .objectStore("blobs")
+                .put(blob, fileId)
+
+              let albumName = metadata.common.album
+              if (albumName === undefined) albumName = "Unknown Album"
+              albumName = albumName.replace(/\0+$/, "")
+
+              return getAlbumItemFromIdb(fileDb, albumName).then(albumItem => {
+                if (albumItem) {
+                  if (!albumItem.fileIds.includes(fileId)) {
+                    albumItem.fileIds.push(fileId)
+                  }
+                } else {
+                  albumItem = {
+                    name: albumName,
+                    fileIds: [fileId],
+                    cover: undefined,
+                  }
+                }
+                if (albumItem.cover === undefined) {
+                  const cover = mm.selectCover(metadata.common.picture)
+                  if (cover) {
+                    albumItem.cover = new Blob([cover.data], {
+                      type: cover.format,
+                    })
+                  }
+                }
+                fileDb
+                  .transaction("albums", "readwrite")
+                  .objectStore("albums")
+                  .put(albumItem, albumName)
+                return { file: trackFile, blob }
+              })
+            })
         })
         .then(result => {
           resolve(result)

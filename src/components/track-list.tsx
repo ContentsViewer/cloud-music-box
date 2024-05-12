@@ -187,7 +187,7 @@ export const TrackList = React.memo(function TrackList({
                 routerActions.goFile(parentId)
               }}
             >
-              <ListItemText>Go to File</ListItemText>
+              <ListItemText>Open Files</ListItemText>
             </MenuItem>,
           ]}
         />

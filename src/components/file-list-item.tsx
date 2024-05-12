@@ -237,7 +237,7 @@ export const FileListItemAudioTrack = React.memo(
               albumName = albumName.replace(/\0+$/, "")
               routerActions.goAlbum(albumName)
             }}>
-              <ListItemText>Go to Album</ListItemText>
+              <ListItemText>Open Album</ListItemText>
             </MenuItem>
           ]
         }

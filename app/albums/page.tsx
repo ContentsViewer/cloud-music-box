@@ -493,8 +493,8 @@ export default function Page() {
       </AppTopBar>
       <Box
         sx={{
-          pl: `env(safe-area-inset-left, 0)`,
-          pr: `env(safe-area-inset-right, 0)`,
+          ml: `env(safe-area-inset-left, 0)`,
+          mr: `env(safe-area-inset-right, 0)`,
           position: "relative",
         }}
       >

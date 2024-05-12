@@ -1,7 +1,7 @@
 "use client"
 
 import { Roboto } from "next/font/google"
-import { createTheme } from "@mui/material/styles"
+import { createTheme, responsiveFontSizes } from "@mui/material/styles"
 import { ThemeProvider } from "@mui/material/styles"
 import { useTheme } from "@mui/material/styles"
 import {
@@ -94,38 +94,42 @@ export const ThemeStoreProvider = ({
     sourceColor: defaultSourceColor,
   })
 
-  const theme = createTheme({
-    palette: {
-      mode: "dark",
-      primary: {
-        main: hexFromArgb(MaterialDynamicColors.primary.getArgb(state.scheme)),
+  const theme = responsiveFontSizes(
+    createTheme({
+      palette: {
+        mode: "dark",
+        primary: {
+          main: hexFromArgb(
+            MaterialDynamicColors.primary.getArgb(state.scheme)
+          ),
+        },
+        secondary: {
+          main: hexFromArgb(
+            MaterialDynamicColors.secondary.getArgb(state.scheme)
+          ),
+        },
+        background: {
+          default: hexFromArgb(
+            MaterialDynamicColors.surface.getArgb(state.scheme)
+          ),
+          paper: hexFromArgb(
+            MaterialDynamicColors.surfaceContainer.getArgb(state.scheme)
+          ),
+        },
+        error: {
+          main: hexFromArgb(MaterialDynamicColors.error.getArgb(state.scheme)),
+        },
+        text: {
+          primary: hexFromArgb(
+            MaterialDynamicColors.onSurface.getArgb(state.scheme)
+          ),
+        },
       },
-      secondary: {
-        main: hexFromArgb(
-          MaterialDynamicColors.secondary.getArgb(state.scheme)
-        ),
+      typography: {
+        fontFamily: roboto.style.fontFamily,
       },
-      background: {
-        default: hexFromArgb(
-          MaterialDynamicColors.surface.getArgb(state.scheme)
-        ),
-        paper: hexFromArgb(
-          MaterialDynamicColors.surfaceContainer.getArgb(state.scheme)
-        ),
-      },
-      error: {
-        main: hexFromArgb(MaterialDynamicColors.error.getArgb(state.scheme)),
-      },
-      text: {
-        primary: hexFromArgb(
-          MaterialDynamicColors.onSurface.getArgb(state.scheme)
-        ),
-      },
-    },
-    typography: {
-      fontFamily: roboto.style.fontFamily,
-    },
-  })
+    })
+  )
 
   // console.log(theme);
 
