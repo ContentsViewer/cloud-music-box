@@ -45,6 +45,7 @@ interface StorageSettingsAreaProps {
 function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
   const [quota, setQuota] = useState<number | undefined>(undefined)
   const [usage, setUsage] = useState<number | undefined>(undefined)
+  const [themeStoreState] = useThemeStore()
 
   const [fileStoreState, fileStoreActions] = useFileStore()
 
@@ -60,6 +61,10 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
 
   const { blobsStorageMaxBytes, blobsStorageUsageBytes } = fileStoreState
 
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
   return (
     <Box
       sx={{
@@ -74,6 +79,11 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
           <ListItemText
             primary="Local File"
             secondary="Usage of downloaded audio files."
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
           />
 
           <Typography>
@@ -90,6 +100,11 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
           <ListItemText
             primary="App"
             secondary="Usage of the entire application."
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
           />
           <Typography>
             {usage !== undefined ? formatBytes(usage) : "---"} {" / "}

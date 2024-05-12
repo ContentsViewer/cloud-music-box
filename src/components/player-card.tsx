@@ -266,7 +266,32 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
   const onPrimaryColor = hexFromArgb(
     MaterialDynamicColors.onPrimary.getArgb(themeStoreState.scheme)
   )
+  const trackCoverWrapperRef = useRef<HTMLDivElement>(null)
+  const trackCoverRef = useRef<HTMLDivElement>(null)
 
+  useEffect(() => {
+    const resizeObserver = new ResizeObserver(entries => {
+      if (!trackCoverRef.current) return
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect
+        if (width < height) {
+          trackCoverRef.current.style.width = "100%"
+          trackCoverRef.current.style.height = "auto"
+        } else {
+          trackCoverRef.current.style.width = "auto"
+          trackCoverRef.current.style.height = "100%"
+        }
+      }
+    })
+
+    if (trackCoverWrapperRef.current) {
+      resizeObserver.observe(trackCoverWrapperRef.current)
+    }
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [])
   return (
     <Box sx={{ width: "100%", height: "100%" }}>
       <AppBar
@@ -292,58 +317,59 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
       </AppBar>
       <Box
         sx={{
-          display: "flex",
+          display: "grid",
           "@media (orientation: portrait)": {
-            flexDirection: "column",
+            // flexDirection: "column",
+            gridTemplateRows: "65% 35%",
           },
           "@media (orientation: landscape)": {
-            flexDirection: "row",
+            // flexDirection: "row",
+            gridTemplateColumns: "50% 50%",
           },
-          alignItems: "center",
-          justifyContent: "center",
+          // alignItems: "center",
+          // justifyContent: "center",
           width: "100%",
           height: "100%",
         }}
       >
         <Box
           sx={{
-            flexBasis: "50%",
-            height: "50%",
-            p: 5,
-            pl: "calc(env(safe-area-inset-left, 0) + 40px)",
+            m: 5,
+            ml: "calc(env(safe-area-inset-left, 0) + 40px)",
             boxSizing: "border-box",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            position: "relative",
           }}
+          ref={trackCoverWrapperRef}
         >
           <TrackCover
             sx={{
-              "@media (orientation: portrait)": {
-                height: "100%",
-                width: "auto",
-              },
-              "@media (orientation: landscape)": {
-                width: "100%",
-                height: "auto",
-              },
-              boxShadow: "0 8px 32px rgba(0, 0, 0, 0.25)",
+              position: "absolute",
+              // maxWidth: "100%",
               aspectRatio: "1 / 1",
+              width: "auto",
+              height: "auto",
+
+              boxShadow: "0 8px 32px rgba(0, 0, 0, 0.25)",
               boxSizing: "border-box",
             }}
             coverUrl={props.coverUrl}
+            ref={trackCoverRef}
           />
         </Box>
         <Box
           sx={{
-            flexBasis: "50%",
+            // flexBasis: "50%",
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
             minWidth: 0,
-            width: "100%",
+            // width: "100%",
             "@media (orientation: portrait)": {
               pl: 5,
+              alignSelf: "start",
             },
             "@media (orientation: landscape)": {
               pl: 0,
@@ -353,7 +379,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
         >
           <MarqueeText
             text={props.title}
-            variant="h5"
+            variant="h4"
             typographySx={{
               fontWeight: "bold",
             }}
