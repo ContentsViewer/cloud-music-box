@@ -229,7 +229,7 @@ export default function Page() {
             >
               <Link
                 variant="body2"
-                href="https://contentsviewer.work"
+                href="https://contentsviewer.work/Master/apps/cloud-music-box/docs"
                 target="_blank"
                 rel="noopener"
               >

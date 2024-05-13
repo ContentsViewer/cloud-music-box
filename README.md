@@ -23,7 +23,7 @@ It has the following features:
 * As a PWA, it provides a similar user experience on many platforms (`Windows`, `macOS`, `iOS`, `Android`).
 * It plays from centrally managed cloud storage, so there is no need to sync music for each player.
 * Even offline, music that has been downloaded can be played.
-* Even when the app is in the background, music can be played automatically (only on `iOS`, operation depends on Safari).
+* Even when the app is in the background, music can be played sequentially (May not work on iOS only).
 * The style and animation of the app change dynamically according to the music.
 
 > [!WARNING]
@@ -39,3 +39,14 @@ It has the following features:
 npm install
 npm run dev
 ```
+
+### Building the production version and verifying its operation
+
+```sh
+npm run build
+npx serve@latest out
+```
+
+## Further information
+
+* [Home Page](https://contentsviewer.work/Master/apps/cloud-music-box/docs)
