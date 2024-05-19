@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useEffect, useReducer } from "react"
+import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react"
 import * as NextNavigation from "next/navigation"
 
 interface RouterStateProps {
@@ -27,7 +27,7 @@ export const useRouter = () => {
   const dispatch = useContext(RouterDispatchContext)
   const router = NextNavigation.useRouter()
 
-  const actions = {
+  const actions = useMemo(() => ({
     goFile: (fileId: string) => {
       const href = `/files#${encodeURIComponent(fileId)}`
       router.push(href, { scroll: false })
@@ -61,7 +61,7 @@ export const useRouter = () => {
       router.push(href, { scroll: false })
       window.localStorage.setItem("lastHref", href)
     },
-  }
+  }), [router]);
 
   return [state, actions] as const
 }

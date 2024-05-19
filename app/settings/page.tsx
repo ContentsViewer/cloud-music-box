@@ -118,9 +118,6 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
 
 export default function Page() {
   const [routerState, routerActions] = useRouter()
-  const routerActionsRef = useRef(routerActions)
-  routerActionsRef.current = routerActions
-
   const [themeStoreState] = useThemeStore()
 
   const colorOnSurface = hexFromArgb(
@@ -143,7 +140,7 @@ export default function Page() {
             edge="start"
             color="inherit"
             onClick={() => {
-              routerActionsRef.current.goBack()
+              routerActions.goBack()
             }}
           >
             <ArrowBackRounded />
