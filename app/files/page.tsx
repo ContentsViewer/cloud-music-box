@@ -251,7 +251,7 @@ export default function Page() {
                 disabled={!networkMonitor.isOnline}
                 onClick={handleDownload}
               >
-                <ListItemIcon>
+                <ListItemIcon sx={{ color: "inherit" }}>
                   {networkMonitor.isOnline ? <CloudDownload /> : <CloudOff />}
                 </ListItemIcon>
                 <ListItemText>Download</ListItemText>
@@ -262,7 +262,7 @@ export default function Page() {
                   routerActionsRef.current.goSettings()
                 }}
               >
-                <ListItemIcon>
+                <ListItemIcon sx={{ color: "inherit" }}>
                   <SettingsRounded />
                 </ListItemIcon>
                 <ListItemText>Settings</ListItemText>

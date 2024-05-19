@@ -240,6 +240,7 @@ const AlbumListPage = React.memo(function AlbumListPage(
     <Box
       sx={{
         p: 4,
+        px: 6,
         ...props.sx,
       }}
     >
@@ -482,7 +483,7 @@ export default function Page() {
                   routerActions.goSettings()
                 }}
               >
-                <ListItemIcon>
+                <ListItemIcon sx={{ color: "inherit" }}>
                   <SettingsRounded />
                 </ListItemIcon>
                 <ListItemText>Settings</ListItemText>

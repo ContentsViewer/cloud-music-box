@@ -221,7 +221,7 @@ export default function Page() {
                   routerActionsRef.current.goSettings()
                 }}
               >
-                <ListItemIcon>
+                <ListItemIcon sx={{ color: "inherit" }}>
                   <SettingsRounded />
                 </ListItemIcon>
                 <ListItemText>Settings</ListItemText>

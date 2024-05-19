@@ -142,15 +142,17 @@ export const TrackList = React.memo(function TrackList({
   playerActionsRef.current = playerActions
   const [routerState, routerActions] = useRouter()
 
-  const tracksSorted = tracks?.sort((a, b) => {
-    const aDiskN = a.metadata?.common.disk?.no || 1
-    const bDiskN = b.metadata?.common.disk?.no || 1
-    const aTrackN = a.metadata?.common.track.no || 1
-    const bTrackN = b.metadata?.common.track.no || 1
+  const tracksSorted = useMemo(() => {
+    return tracks?.sort((a, b) => {
+      const aDiskN = a.metadata?.common.disk?.no || 1
+      const bDiskN = b.metadata?.common.disk?.no || 1
+      const aTrackN = a.metadata?.common.track.no || 1
+      const bTrackN = b.metadata?.common.track.no || 1
 
-    if (aDiskN !== bDiskN) return aDiskN - bDiskN
-    return aTrackN - bTrackN
-  })
+      if (aDiskN !== bDiskN) return aDiskN - bDiskN
+      return aTrackN - bTrackN
+    })
+  }, [tracks])
 
   const playTrack = useCallback(
     (file: AudioTrackFileItem) => {
@@ -171,6 +173,7 @@ export const TrackList = React.memo(function TrackList({
     [tracksSorted, albumId]
   )
   const trackListItems = useMemo(() => {
+    // console.log("!!!!!")
     return tracksSorted?.map(track => {
       return (
         <TrackListItem
@@ -193,7 +196,12 @@ export const TrackList = React.memo(function TrackList({
         />
       )
     })
-  }, [tracksSorted, playerStoreState.activeTrack?.file, playTrack, routerActions])
+  }, [
+    tracksSorted,
+    playerStoreState.activeTrack?.file,
+    playTrack,
+    routerActions,
+  ])
 
   return <List sx={{ ...sx }}>{trackListItems}</List>
 })

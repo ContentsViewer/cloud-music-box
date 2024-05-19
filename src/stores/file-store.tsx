@@ -356,6 +356,19 @@ export const useFileStore = () => {
     setBlobsStorageMaxBytes: (bytes: number) => {
       dispatch({ type: "setBlobsStorageMaxBytes", payload: bytes })
     },
+    clearAllLocalBlobs: async () => {
+      if (!state.configured) {
+        throw new Error("File store not configured")
+      }
+      if (!state.fileDb) {
+        throw new Error("File database not initialized")
+      }
+
+      await getIdbRequest(state.fileDb.transaction("blobs", "readwrite").objectStore("blobs").clear())
+      await getIdbRequest(state.fileDb.transaction("blobs-meta", "readwrite").objectStore("blobs-meta").clear())
+      localStorage.setItem("blobsStorageUsageBytes", "0")
+      dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
+    }
   }
 
   return [state, actions] as const
@@ -480,6 +493,7 @@ function releaseBlobsUntilLimit(
       if (cursor) {
         const blobId = cursor.primaryKey
         currentUsage -= cursor.value.blobSize
+        // console.log("!!!B", currentUsage, cursor.value.blobSize)
 
         db.transaction("blobs", "readwrite").objectStore("blobs").delete(blobId)
         cursor.delete()
@@ -650,7 +664,7 @@ export const FileStoreProvider = ({
           }
         })
         dispatch({ type: "setFileDb", payload: fileDb })
-        enqueueSnackbar("File Database Connected", { variant: "success" })
+        // enqueueSnackbar("File Database Connected", { variant: "success" })
       } catch (error) {
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
@@ -672,7 +686,7 @@ export const FileStoreProvider = ({
           const estimate = await navigator.storage.estimate()
           const quota = estimate.quota
 
-          const maxBytes = (quota || 100) * 0.5
+          const maxBytes = (quota || 100) * 0.7
           localStorage.setItem(
             "blobsStorageMaxBytes",
             `${Math.floor(maxBytes)}`
@@ -695,7 +709,7 @@ export const FileStoreProvider = ({
           dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
           blobsStorageUsageBytesRef.current = 0
         } else {
-          console.log("SET USAGE", blobsStorageUsageBytes)
+          // console.log("SET USAGE", blobsStorageUsageBytes)
           dispatch({
             type: "setBlobsStorageUsageBytes",
             payload: blobsStorageUsageBytes,
@@ -911,12 +925,18 @@ export const FileStoreProvider = ({
               if (appended) {
                 const blobStorageUsageBytes =
                   blobsStorageUsageBytesRef.current + blob.size
-
+                // console.log(
+                //   "!!!A",
+                //   blobsStorageUsageBytesRef.current,
+                //   blob.size,
+                //   blobStorageUsageBytes
+                // )
                 return releaseBlobsUntilLimit(
                   fileDb,
                   blobsStorageMaxBytesRef.current,
                   blobStorageUsageBytes
                 ).then(usage => {
+                  // console.log("!!!C", usage)
                   localStorage.setItem("blobsStorageUsageBytes", `${usage}`)
                   dispatch({
                     type: "setBlobsStorageUsageBytes",
@@ -932,6 +952,7 @@ export const FileStoreProvider = ({
               if (!item) throw new Error("Item not found")
               if (item.type !== "audio-track")
                 throw new Error("Item is not a track")
+              assert(blobsStorageUsageBytesRef.current !== undefined)
 
               trackFile = item as AudioTrackFileItem
               trackFile.metadata = metadata
@@ -939,10 +960,13 @@ export const FileStoreProvider = ({
                 .transaction("files", "readwrite")
                 .objectStore("files")
                 .put(trackFile)
-              fileDb
-                .transaction("blobs", "readwrite")
-                .objectStore("blobs")
-                .put(blob, fileId)
+
+              if (blobsStorageUsageBytesRef.current > 0) {
+                fileDb
+                  .transaction("blobs", "readwrite")
+                  .objectStore("blobs")
+                  .put(blob, fileId)
+              }
 
               let albumName = metadata.common.album
               if (albumName === undefined) albumName = "Unknown Album"
