@@ -1,6 +1,12 @@
 "use client"
 
-import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react"
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+} from "react"
 import * as NextNavigation from "next/navigation"
 
 interface RouterStateProps {
@@ -27,41 +33,52 @@ export const useRouter = () => {
   const dispatch = useContext(RouterDispatchContext)
   const router = NextNavigation.useRouter()
 
-  const actions = useMemo(() => ({
-    goFile: (fileId: string) => {
-      const href = `/files#${encodeURIComponent(fileId)}`
-      router.push(href, { scroll: false })
-      window.localStorage.setItem("lastHref", href)
-    },
-    goAlbum: (albumId?: string) => {
-      const href = `/albums${albumId ? `#${encodeURIComponent(albumId)}` : ""}`
-      router.push(href, { scroll: false })
-      window.localStorage.setItem("lastHref", href)
-    },
-    goHome: () => {
-      const href = "/home"
-      router.push(href, { scroll: false })
-      window.localStorage.setItem("lastHref", href)
-    },
-    goLastHref: () => {
-      const lastHref = window.localStorage.getItem("lastHref")
-      if (lastHref) {
-        router.push(lastHref, { scroll: false })
-      }
-      return lastHref
-    },
-    goSettings: () => {
-      const href = "/settings"
-      router.push(href, { scroll: false })
-    },
-    goBack: () => {
-      router.back()
-    },
-    go: (href: string) => {
-      router.push(href, { scroll: false })
-      window.localStorage.setItem("lastHref", href)
-    },
-  }), [router]);
+  const actions = useMemo(
+    () => ({
+      goFile: (fileId: string) => {
+        const href = `/files#${encodeURIComponent(fileId)}`
+        router.push(href, { scroll: false })
+        window.localStorage.setItem("lastHref", href)
+      },
+      goAlbum: (albumId?: string) => {
+        const href = `/albums${
+          albumId ? `#${encodeURIComponent(albumId)}` : ""
+        }`
+        router.push(href, { scroll: false })
+        window.localStorage.setItem("lastHref", href)
+      },
+      goHome: (options?: { reload: boolean }) => {
+        const { reload = false } = options || {}
+        
+        const href = "/home"
+        window.localStorage.setItem("lastHref", href)
+        if (reload) {
+          window.location.assign(`${process.env.NEXT_PUBLIC_BASE_PATH || ""}${href}`)
+        } else {
+          router.push(href, { scroll: false })
+        }
+      },
+      goLastHref: () => {
+        const lastHref = window.localStorage.getItem("lastHref")
+        if (lastHref) {
+          router.push(lastHref, { scroll: false })
+        }
+        return lastHref
+      },
+      goSettings: () => {
+        const href = "/settings"
+        router.push(href, { scroll: false })
+      },
+      goBack: () => {
+        router.back()
+      },
+      go: (href: string) => {
+        router.push(href, { scroll: false })
+        window.localStorage.setItem("lastHref", href)
+      },
+    }),
+    [router]
+  )
 
   return [state, actions] as const
 }

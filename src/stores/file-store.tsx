@@ -356,6 +356,19 @@ export const useFileStore = () => {
     setBlobsStorageMaxBytes: (bytes: number) => {
       dispatch({ type: "setBlobsStorageMaxBytes", payload: bytes })
     },
+    clearAllLocalBlobs: async () => {
+      if (!state.configured) {
+        throw new Error("File store not configured")
+      }
+      if (!state.fileDb) {
+        throw new Error("File database not initialized")
+      }
+
+      await getIdbRequest(state.fileDb.transaction("blobs", "readwrite").objectStore("blobs").clear())
+      await getIdbRequest(state.fileDb.transaction("blobs-meta", "readwrite").objectStore("blobs-meta").clear())
+      localStorage.setItem("blobsStorageUsageBytes", "0")
+      dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
+    }
   }
 
   return [state, actions] as const

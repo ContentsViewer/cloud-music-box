@@ -23,7 +23,16 @@ import {
   List,
   ListItem,
   ListItemText,
+  ListItemButton,
+  Button,
+  DialogContent,
+  DialogActions,
+  Backdrop,
+  CircularProgress,
 } from "@mui/material"
+import Dialog from "@mui/material/Dialog"
+import DialogTitle from "@mui/material/DialogTitle"
+
 import { useEffect, useRef, useState } from "react"
 
 function formatBytes(bytes: number, decimals = 2) {
@@ -46,8 +55,16 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
   const [quota, setQuota] = useState<number | undefined>(undefined)
   const [usage, setUsage] = useState<number | undefined>(undefined)
   const [themeStoreState] = useThemeStore()
+  const [routerState, routerActions] = useRouter()
 
   const [fileStoreState, fileStoreActions] = useFileStore()
+  const [clearLocalDataDialogOpen, setClearLocalDataDialogOpen] =
+    useState(false)
+  const [backdropOpen, setBackdropOpen] = useState(false)
+
+  const handleCloseClearLocalDataDialog = () => {
+    setClearLocalDataDialogOpen(false)
+  }
 
   async function getStorageInfo() {
     const { quota, usage } = await navigator.storage.estimate()
@@ -112,6 +129,55 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
           </Typography>
         </ListItem>
       </List>
+
+      <Button
+        variant="outlined"
+        color="error"
+        onClick={() => {
+          setClearLocalDataDialogOpen(true)
+        }}
+      >
+        Clear Local Data
+      </Button>
+      <Dialog
+        open={clearLocalDataDialogOpen}
+        onClose={handleCloseClearLocalDataDialog}
+      >
+        <DialogTitle>Clear Local Data</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Clear the downloaded audio files. This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button autoFocus onClick={handleCloseClearLocalDataDialog}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            onClick={() => {
+              setBackdropOpen(true)
+              fileStoreActions
+                .clearAllLocalBlobs()
+                .then(() => {
+                  routerActions.goHome({ reload: true })
+                })
+                .catch(error => {
+                  console.error(error)
+                  setBackdropOpen(false)
+                })
+            }}
+          >
+            Clear & Reload
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Backdrop
+        sx={{ zIndex: theme => theme.zIndex.modal + 1 }}
+        open={backdropOpen}
+      >
+        {backdropOpen && <CircularProgress />}
+      </Backdrop>
     </Box>
   )
 }
