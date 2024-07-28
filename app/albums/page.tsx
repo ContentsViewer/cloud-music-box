@@ -29,7 +29,6 @@ import {
   IconButton,
   SxProps,
   Toolbar,
-  Divider,
   Typography,
   ButtonBase,
   Menu,
@@ -170,7 +169,10 @@ const AlbumList = React.memo(function AlbumList({
     <Box
       sx={{
         gap: 3,
-        gridTemplateColumns: "repeat(auto-fill, minmax(144px, 1fr))",
+        gridTemplateColumns: {
+          xs: "repeat(auto-fill, minmax(120px, 1fr))",
+          sm: "repeat(auto-fill, minmax(144px, 1fr))"
+        },
         display: "grid",
         maxWidth: "1040px",
         margin: "0 auto",
@@ -239,7 +241,10 @@ const AlbumListPage = React.memo(function AlbumListPage(
   return (
     <Box
       sx={{
-        p: 4,
+        p: {
+          xs: 3,
+          sm: 4,
+        },
         px: 6,
         ...props.sx,
       }}

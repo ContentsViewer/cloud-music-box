@@ -11,9 +11,11 @@ import {
   DynamicScheme,
   Hct,
   MaterialDynamicColors,
+  rgbaFromArgb,
 } from "@material/material-color-utilities"
 import { Dispatch, createContext, useContext, useReducer } from "react"
 import { GlobalStyles } from "@mui/material"
+import { extractColorFromImage } from "../theming/color-from-image"
 
 const roboto = Roboto({
   weight: ["300", "400", "500", "700"],
@@ -45,10 +47,9 @@ export const useThemeStore = () => {
   const dispatch = useContext(ThemeDispatchContext)
 
   const actions = {
-    applyThemeFromImage: async (imageSrc: string) => {
-      const image = document.createElement("img")
-      image.src = imageSrc
-      const sourceColor = await sourceColorFromImage(image)
+    applyThemeFromImage: async (blob: Blob) => {
+      const sourceColor = await extractColorFromImage(blob)
+      // console.log(rgbaFromArgb(sourceColor))
       const scheme = new SchemeContent(Hct.fromInt(sourceColor), true, 0.3)
       dispatch({ type: "setTheme", payload: { scheme, sourceColor } })
     },

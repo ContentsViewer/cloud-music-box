@@ -36,13 +36,8 @@ const ThemeChanger = () => {
     )
 
     if (cover) {
-      const url = URL.createObjectURL(
-        new Blob([cover.data], { type: cover.format })
-      )
-
-      themeActionsRef.current.applyThemeFromImage(url)
-
-      return () => URL.revokeObjectURL(url)
+      const blob = new Blob([cover.data], { type: cover.format })
+      themeActionsRef.current.applyThemeFromImage(blob)
     } else {
       themeActionsRef.current.resetSourceColor()
     }

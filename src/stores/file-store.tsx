@@ -745,6 +745,7 @@ export const FileStoreProvider = ({
   const clientConfiguring = useRef(false)
 
   useEffect(() => {
+    if (clientConfiguring.current) return
     if (!state.configured) return
     if (!networkMonitor.isOnline) {
       // If offline, client should be disconnected.
