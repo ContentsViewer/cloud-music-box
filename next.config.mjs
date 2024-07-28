@@ -35,5 +35,17 @@ export default withSerwist({
   output: "export",
   env: {
     APP_VERSION: process.env.npm_package_version
-  }
+  },
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.optimization.splitChunks = {
+        // Reduce a lot of js chunks.
+        cacheGroups: {
+          default: false,
+          vendors: false,
+        },
+      };
+    }
+    return config;
+  },
 });
