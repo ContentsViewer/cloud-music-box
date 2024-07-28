@@ -7,6 +7,7 @@ import {
   hexFromArgb,
   Blend,
   Hct,
+  CorePalette,
 } from "@material/material-color-utilities"
 
 export const DynamicBackground = () => {
@@ -38,7 +39,7 @@ export const DynamicBackground = () => {
     // const tone = Math.min(10 + 150 * Math.log(rms + 1), 100);
     const tone = Math.min(100 * Math.pow(rms, 1 / 2.2), 100)
     // console.log(rms, tone)
-    const noteColor = Hct.from((note % 12) * 30, sourceColor.chroma / 2, tone)
+    const noteColor = Hct.from((note % 12) * 30, sourceColor.chroma * 0.5, tone)
     // const noteColor = Hct.from((note % 12) * 30, 50, tone)
     // console.log(sourceColor.chroma)
     // console.log("#", note % 12, pitch, rms * 200)
@@ -58,8 +59,11 @@ export const DynamicBackground = () => {
 
   const primaryColor = (() => {
     const sourceColor = Hct.fromInt(themeStoreState.sourceColor)
-    sourceColor.tone /= 2
-    sourceColor.chroma /= 2
+    // CorePalette.of
+    sourceColor.tone *= 0.5
+    sourceColor.chroma *= 0.5
+    // sourceColor.tone = 30
+    // sourceColor.chroma = 16
     return hexFromArgb(
       // MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
       sourceColor.toInt()
@@ -89,6 +93,7 @@ export const DynamicBackground = () => {
           opacity: 1.0,
           // backgroundImage: `radical-gradient(transparent, ${backgroundColor})`,
           background: `radial-gradient(circle at 76% 26%, transparent, ${backgroundColor})`,
+          // background: `radial-gradient(circle at 64% 46%, transparent, ${backgroundColor})`,
           zIndex: -1,
         }}
       />
