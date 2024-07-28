@@ -39,7 +39,7 @@ export const DynamicBackground = () => {
     // const tone = Math.min(10 + 150 * Math.log(rms + 1), 100);
     const tone = Math.min(100 * Math.pow(rms, 1 / 2.2), 100)
     // console.log(rms, tone)
-    const noteColor = Hct.from((note % 12) * 30, sourceColor.chroma * 0.5, tone)
+    const noteColor = Hct.from((note % 12) * 30, sourceColor.chroma, tone)
     // const noteColor = Hct.from((note % 12) * 30, 50, tone)
     // console.log(sourceColor.chroma)
     // console.log("#", note % 12, pitch, rms * 200)
