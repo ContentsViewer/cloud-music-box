@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { useDynamicThemeStore } from "../stores/dynamic-theme-store"
+import { useAudioDynamicsStore } from "../stores/audio-dynamics-store"
 import { Box, styled } from "@mui/material"
 import { useThemeStore } from "../stores/theme-store"
 import {
@@ -11,7 +11,7 @@ import {
 } from "@material/material-color-utilities"
 
 export const DynamicBackground = () => {
-  const [dynamicThemeState] = useDynamicThemeStore()
+  const [audioDynamicsState] = useAudioDynamicsStore()
   const [themeStoreState] = useThemeStore()
   const [pitchColor, setPitchColor] = useState("transparent")
   const pitchRef = useRef(-1)
@@ -22,12 +22,16 @@ export const DynamicBackground = () => {
   }
 
   useEffect(() => {
-    if (dynamicThemeState.pitch !== -1) {
-      pitchRef.current = dynamicThemeState.pitch
+    console.log(audioDynamicsState.frame)
+    const pitchCurrent = Math.max(audioDynamicsState.frame.pitch0, audioDynamicsState.frame.pitch1)
+    const rmsCurrent = Math.max(audioDynamicsState.frame.rms0, audioDynamicsState.frame.rms1)
+
+    if (pitchCurrent !== -1) {
+      pitchRef.current = pitchCurrent
     }
 
     const pitch = pitchRef.current
-    const rms = dynamicThemeState.rms
+    const rms = rmsCurrent
 
     if (pitch === -1) return
 
@@ -52,8 +56,7 @@ export const DynamicBackground = () => {
 
     setPitchColor(hexFromArgb(pitchColor))
   }, [
-    dynamicThemeState.pitch,
-    dynamicThemeState.rms,
+    audioDynamicsState.frame,
     themeStoreState.sourceColor,
   ])
 

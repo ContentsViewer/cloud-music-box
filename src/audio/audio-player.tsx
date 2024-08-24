@@ -6,7 +6,7 @@ import { enqueueSnackbar } from "notistack"
 import { useFileStore } from "../stores/file-store"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
-import { useDynamicThemeStore } from "../stores/dynamic-theme-store"
+import { useAudioDynamicsStore } from "../stores/audio-dynamics-store"
 import FFT from "fft.js"
 
 const makeAudioAnalyser = () => {
@@ -14,8 +14,6 @@ const makeAudioAnalyser = () => {
   let sourceNode: AudioBufferSourceNode
   let audioBuffer: AudioBuffer
   let isAnalyzing = false
-  let pitch: number = -1
-  let rms: number = 0
   const bufferLength = 2048
   const fft = new FFT(bufferLength)
   const spectrum = fft.createComplexArray()
@@ -103,8 +101,8 @@ const makeAudioAnalyser = () => {
     },
 
     requestAnalyze: async (start: number) => {
-      if (!audioBuffer) return
-      if (isAnalyzing) return
+      if (!audioBuffer) throw new Error("Audio buffer not set")
+      if (isAnalyzing) throw new Error("Analyzing in progress")
 
       if (sourceNode) {
         sourceNode.stop()
@@ -118,26 +116,20 @@ const makeAudioAnalyser = () => {
       sourceNode.connect(audioContext.destination)
       sourceNode.start(0, start, 1)
 
-      audioContext
+      return audioContext
         .startRendering()
         .then(renderedBuffer => {
-          const data0 = renderedBuffer.getChannelData(0)
-          const data1 = renderedBuffer.getChannelData(1)
-          const [pitch0, rms0] = autoCorrelate(data0, renderedBuffer.sampleRate)
-          const [pitch1, rms1] = autoCorrelate(data1, renderedBuffer.sampleRate)
-          pitch = Math.max(pitch0, pitch1)
-          rms = Math.max(rms0, rms1)
-          // console.log("Pitch", pitch0, pitch1, rms0, rms1)
+          const samples0 = renderedBuffer.getChannelData(0)
+          const samples1 = renderedBuffer.getChannelData(1)
+          const [pitch0, rms0] = autoCorrelate(samples0, renderedBuffer.sampleRate)
+          const [pitch1, rms1] = autoCorrelate(samples1, renderedBuffer.sampleRate)
+          return {
+            timeSeconds: start,
+            pitch0, pitch1,
+            rms0, rms1,
+            samples0, samples1
+          }
         })
-        .catch(error => {
-          console.error(error)
-        })
-    },
-    get pitch() {
-      return pitch
-    },
-    get rms() {
-      return rms
     }
   }
 }
@@ -182,7 +174,7 @@ export const AudioPlayer = () => {
   const playerActionsRef = useRef(playerActions)
   playerActionsRef.current = playerActions
 
-  const [, dynamicThemeActions] = useDynamicThemeStore()
+  const [, dynamicThemeActions] = useAudioDynamicsStore()
   const dynamicThemeActionsRef = useRef(dynamicThemeActions)
 
   const fileStore = useFileStore()
@@ -220,7 +212,11 @@ export const AudioPlayer = () => {
       playerActionsRef.current.setCurrentTime(audio.currentTime)
 
       audioAnalyser.requestAnalyze(audio.currentTime)
-      dynamicThemeActionsRef.current.setPitchRms(audioAnalyser.pitch, audioAnalyser.rms)
+        .then(frame => { 
+          dynamicThemeActionsRef.current.setFrame(frame)
+        }).catch(error => {
+          console.warn("Failed to analyze audio", error)
+        })
     }
     const onPlay = () => {
       console.log("Track started playing")
