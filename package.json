@@ -20,6 +20,7 @@
     "@mui/icons-material": "^5.15.14",
     "@mui/material": "^5.15.14",
     "@mui/material-nextjs": "^5.15.11",
+    "@react-three/fiber": "^8.17.5",
     "@serwist/next": "^9.0.0",
     "fft.js": "^4.0.4",
     "framer-motion": "^11.1.7",
@@ -29,12 +30,13 @@
     "notistack": "^3.0.1",
     "react": "^18",
     "react-dom": "^18",
-    "react-fast-marquee": "^1.6.4"
+    "three": "^0.167.1"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@types/three": "^0.167.2",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
     "eslint-config-next": "14.1.4",

@@ -15,6 +15,7 @@ const makeAudioAnalyser = () => {
   let audioBuffer: AudioBuffer
   let isAnalyzing = false
   const bufferLength = 2048
+  const sampleRate = 44100
   const fft = new FFT(bufferLength)
   const spectrum = fft.createComplexArray()
   const powerSpectrum = new Float32Array(bufferLength)
@@ -25,8 +26,8 @@ const makeAudioAnalyser = () => {
 
     audioContext = new OfflineAudioContext({
       numberOfChannels: 2,
-      length: bufferLength,
-      sampleRate: 44100,
+      length: sampleRate * 0.5,
+      sampleRate: sampleRate,
     })
   }
 
@@ -121,12 +122,13 @@ const makeAudioAnalyser = () => {
         .then(renderedBuffer => {
           const samples0 = renderedBuffer.getChannelData(0)
           const samples1 = renderedBuffer.getChannelData(1)
-          const [pitch0, rms0] = autoCorrelate(samples0, renderedBuffer.sampleRate)
-          const [pitch1, rms1] = autoCorrelate(samples1, renderedBuffer.sampleRate)
+          const [pitch0, rms0] = autoCorrelate(samples0.slice(0, bufferLength), sampleRate)
+          const [pitch1, rms1] = autoCorrelate(samples1.slice(0, bufferLength), sampleRate)
           return {
             timeSeconds: start,
             pitch0, pitch1,
             rms0, rms1,
+            sampleRate: renderedBuffer.sampleRate,
             samples0, samples1
           }
         })

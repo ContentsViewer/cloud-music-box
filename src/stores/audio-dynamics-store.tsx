@@ -7,6 +7,7 @@ export interface AudioFrame {
   pitch1: number
   rms0: number
   rms1: number
+  sampleRate: number
   samples0: Float32Array
   samples1: Float32Array
 }
@@ -22,6 +23,7 @@ export const AudioDynamicsStateContext = createContext<AudioDynamicsStateProps>(
     pitch1: -1,
     rms0: 0,
     rms1: 0,
+    sampleRate: 0,
     samples0: new Float32Array(0),
     samples1: new Float32Array(0),
   },
@@ -79,6 +81,7 @@ export const AudioDynamicsProvider = ({
       pitch1: -1,
       rms0: 0,
       rms1: 0,
+      sampleRate: 0,
       samples0: new Float32Array(0),
       samples1: new Float32Array(0),
     },

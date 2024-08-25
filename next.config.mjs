@@ -33,6 +33,7 @@ export default withSerwist({
   basePath: basePath,
   reactStrictMode: true,
   output: "export",
+  transpilePackages: ['three'],
   env: {
     APP_VERSION: process.env.npm_package_version
   },
