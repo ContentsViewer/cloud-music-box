@@ -252,7 +252,7 @@ const LissajousCurve = () => {
               p.y = (p.y + SQRT2) * 0.5;
               // p.y = pow(p.y, 0.5) - 1.0;
               // p.y = log(p.y + 1.0) - 0.5;
-              p.y = p.y * p.y * p.y  * p.y * p.y;
+              p.y = p.y * p.y * p.y * p.y;
               
               // float scale = 2.0;
               // p *= 1.5;
