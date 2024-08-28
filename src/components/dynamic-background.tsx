@@ -119,16 +119,29 @@ const LissajousCurve = () => {
       pointsRef.current.geometry.attributes.particleColor.array
 
     // console.log(context.particleTail)
+    let x, y, z;
+    z = 0;
     for (let i = 0; i < samplesCountToAppend; ++i) {
       const t = context.particleTail
       // console.log(t)
-      const x = samples1[startOffset + i] // R
-      const y = samples0[startOffset + i] // L
+      x = samples1[startOffset + i] // R
+      y = samples0[startOffset + i] // L
       // const z = context.frame.pitch0 / 10000
-      const z = 0
+
+      // if (x < 0) {
+      //   x = -Math.pow(-x, 1.0 / 2.2)
+      // } else {
+      //   x = Math.pow(x, 1.0 / 2.2)
+      // }
+      // if (y < 0) {
+      //   y = -Math.pow(-y, 1.0 / 2.2)
+      // } else {
+      //   y = Math.pow(y, 1.0 / 2.2)
+      // }
       positions[t * 3 + 0] = x
-      // positions[t * 3 + 0] = Math.sqrt(x * x)
+      // positions[t * 3 + 0] = Math.pow(x, 1.0 / 2.2)
       positions[t * 3 + 1] = y
+      // positions[t * 3 + 1] = Math.pow(y, 1.0 / 2.2)
       // positions[t * 3 + 1] = Math.sqrt(y * y)
       positions[t * 3 + 2] = z
       // startTimeArray[t] = time
@@ -201,15 +214,38 @@ const LissajousCurve = () => {
             void main() {
               float elapsed = time - startTime;
               vAlpha = 0.5 - clamp(elapsed, 0.0, 0.5);
-              // vAlpha = 1.0 - smoothstep(0.0, 1.0, elapsed / 0.5);
               // vAlpha = 1.0 - pow(elapsed / 0.5, 3.0);
+              // vAlpha = 1.0 - smoothstep(0.0, 1.0, elapsed / 0.5);
               // vAlpha *= 0.5;
               mat3 rotationMatrix = mat3(
                 cos(0.785398), sin(0.785398), 0.0,
                 -sin(0.785398), cos(0.785398), 0.0,
                 0.0, 0.0, 1.0
               );
-              vec3 p = rotationMatrix * position;
+              vec3 p = position;
+              float r = length(p.xy);
+              float scale = pow(r, 1.0 / 2.2) / r;
+              p.xy *= scale;
+
+              // if (p.x < 0.0) {
+              //   p.x = -pow(-p.x, 1.0 / 2.2);
+              // } else {
+              //   p.x = pow(p.x, 1.0 / 2.2);
+              // }
+              // if (p.y < 0.0) {
+              //   p.y = -pow(-p.y, 1.0 / 2.2);
+              // } else {
+              //   p.y = pow(p.y, 1.0 / 2.2);
+              // }
+
+              // float signX = sign(p.x);
+              // // p.x = abs(p.x) * signX;     
+              // p.x = pow(abs(p.x), 1.0 / 2.2) * signX;
+
+              // float signY = sign(p.y);
+              // p.y = pow(abs(p.y), 1.0 / 2.2) * signY;
+
+              p = rotationMatrix * p;
               const float SQRT2 = 1.414214;
               // p.y += SQRT2 * 0.1 * sin(2.0 * 3.14159265359 * p.x + time);
               // p.y = (p.y + SQRT2) * 0.5 - 1.0;
@@ -219,13 +255,14 @@ const LissajousCurve = () => {
               p.y = p.y * p.y * p.y  * p.y * p.y;
               
               // float scale = 2.0;
-              p *= 1.5;
+              // p *= 1.5;
               
               p.y = p.y - 1.0;
 
               // vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
               gl_PointSize = 2.0;
               // gl_PointSize = 2.0 + 5.0 * (1.0 - step(0.01, elapsed / 0.5));
+              gl_PointSize = 2.0 + 2.0 * (1.0 - smoothstep(0.0, 1.0, elapsed / 0.5));
               // gl_Position = projectionMatrix * mvPosition;
               gl_Position = vec4(p, 1.0);
               vColor = particleColor;
