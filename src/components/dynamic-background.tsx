@@ -37,7 +37,8 @@ const LissajousCurve = () => {
   const context = useMemo<RenderingContext>(() => {
     return { time: 0, particleStart: 0, particleTail: 0, currentPitch: 440 }
   }, [])
-  const particleCount = 44100
+  // const particleCount = 44100
+  const particleCount = 22050
 
   useEffect(() => {
     const frame = audioDynamicsState.frame
@@ -199,7 +200,7 @@ const LissajousCurve = () => {
             varying vec3 vColor;
             void main() {
               float elapsed = time - startTime;
-              vAlpha = 1.0 - clamp(elapsed, 0.0, 1.0);
+              vAlpha = 0.5 - clamp(elapsed, 0.0, 0.5);
               mat3 rotationMatrix = mat3(
                 cos(0.785398), sin(0.785398), 0.0,
                 -sin(0.785398), cos(0.785398), 0.0,
@@ -327,10 +328,6 @@ export const DynamicBackground = () => {
       window.removeEventListener("beforeunload", handleBeforeUnload)
     }
   }, [])
-
-  const cameraRef = useRef<THREE.Camera>()
-  const [position, setPosition] = useState([0, 0, 0.1])
-  const [rotation, setRotation] = useState([THREE.MathUtils.degToRad(30), 0, 0])
 
   return (
     <div>
