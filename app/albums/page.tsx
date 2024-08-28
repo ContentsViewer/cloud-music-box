@@ -538,6 +538,7 @@ export default function Page() {
           mr: `env(safe-area-inset-right, 0)`,
           position: "relative",
           height: "100%",
+          overflow: "hidden",
         }}
       >
         <Fade in={currentAlbum !== undefined} timeout={1000} unmountOnExit>
@@ -577,7 +578,7 @@ export default function Page() {
               pt: 8,
               pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
               overflow: "auto",
-              minHeight: "100vh",
+              // minHeight: "100vh",
               height: "100%",
               scrollbarColor: `${colorOnSurfaceVariant} transparent`,
               scrollbarWidth: "thin",
