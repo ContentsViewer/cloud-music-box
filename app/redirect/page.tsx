@@ -12,26 +12,8 @@ export default function Page() {
   const routerActionsRef = useRef(routerActions)
   routerActionsRef.current = routerActions
 
-  const [success, setSuccess] = useState(false)
-
-  // useEffect(() => {
-  //   let timerId: NodeJS.Timeout | null = null
-
-  //   if (fileStoreState.driveClient) {
-  //     setSuccess(true)
-  //     timerId = setTimeout(() => {
-  //       // routerActionsRef.current.goHome()
-  //     }, 2000)
-  //   }
-  //   return () => {
-  //     if (timerId) {
-  //       clearTimeout(timerId)
-  //     }
-  //   }
-  // }, [fileStoreState.driveClient])
-
   return (
-    <Box>
+    <Box component="div">
       <Backdrop
         open={true}
         sx={{
@@ -41,45 +23,6 @@ export default function Page() {
         }}
       >
         <CircularProgress />
-        {/* <Box
-          sx={{
-            width: 100,
-            height: 100,
-            position: "relative",
-          }}
-        >
-          <CloudRounded
-            sx={{ fontSize: 100, position: "absolute" }}
-          ></CloudRounded>
-          {success ? (
-            <Grow in={true}>
-              <CheckCircleRounded
-                sx={{
-                  fontSize: 50,
-                  position: "absolute",
-                  color: theme => theme.palette.success.main,
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  margin: "auto",
-                }}
-              />
-            </Grow>
-          ) : (
-            <CircularProgress
-              sx={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                margin: "auto",
-              }}
-            />
-          )}
-        </Box>
-        <Box>Connecting...</Box> */}
       </Backdrop>
     </Box>
   )

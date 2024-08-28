@@ -55,6 +55,7 @@ export const TimelineSlider = (props: TimelineSliderProps) => {
 
   return (
     <Box
+      component="div"
       sx={{
         display: "flex",
         flexDirection: "column",
@@ -70,6 +71,7 @@ export const TimelineSlider = (props: TimelineSliderProps) => {
         max={1000}
       />
       <Box
+        component="div"
         sx={{
           display: "flex",
           alignItems: "center",

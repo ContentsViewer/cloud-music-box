@@ -136,6 +136,7 @@ export function FileListItemBasic({
         ) : fileStatus === "downloading" ? (
           // <CircularProgress size={16} />
           <Box
+            component="div"
             sx={{
               width: "20px",
               height: "20px",
@@ -229,18 +230,19 @@ export const FileListItemAudioTrack = React.memo(
         disabled={disabled}
         onClick={onClick}
         secondaryText={file.metadata?.common.artists?.join(", ") || ""}
-        menuItems={
-          [
-            <MenuItem key="go-to-album" onClick={() => {
+        menuItems={[
+          <MenuItem
+            key="go-to-album"
+            onClick={() => {
               let albumName = file.metadata?.common.album
               if (albumName === undefined) albumName = "Unknown Album"
               albumName = albumName.replace(/\0+$/, "")
               routerActions.goAlbum(albumName)
-            }}>
-              <ListItemText>Open Album</ListItemText>
-            </MenuItem>
-          ]
-        }
+            }}
+          >
+            <ListItemText>Open Album</ListItemText>
+          </MenuItem>,
+        ]}
       />
     )
   }

@@ -90,6 +90,7 @@ const PlayPauseButton = ({
       onClick={onClick}
     >
       <Box
+        component="div"
         sx={{
           position: "relative",
           width: "32px",
@@ -146,12 +147,16 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
 
   return (
     <Box
+      component="div"
       sx={{
         position: "relative",
         ...props.sx,
       }}
     >
-      <Box sx={{ position: "absolute", top: 0, left: 0, right: 0 }}>
+      <Box
+        component="div"
+        sx={{ position: "absolute", top: 0, left: 0, right: 0 }}
+      >
         {goBackEnabled ? (
           <IconButton
             size="small"
@@ -175,6 +180,7 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
         }}
       />
       <Box
+        component="div"
         sx={{
           display: "flex",
           alignItems: "center",
@@ -197,7 +203,7 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
         >
           <TrackCover coverUrl={coverUrl} />
         </ButtonBase>
-        <Box sx={{ flexGrow: 1, minWidth: "0" }}>
+        <Box component="div" sx={{ flexGrow: 1, minWidth: "0" }}>
           <MarqueeText
             text={title}
             color={hexFromArgb(
@@ -232,7 +238,10 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
           }}
         />
       </Box>
-      <Box sx={{ position: "absolute", bottom: 0, left: 0, right: 0 }}>
+      <Box
+        component="div"
+        sx={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
+      >
         <Fade
           in={playerState.isActiveTrackLoading}
           style={{
@@ -293,7 +302,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
     }
   }, [])
   return (
-    <Box sx={{ width: "100%", height: "100%" }}>
+    <Box component="div" sx={{ width: "100%", height: "100%" }}>
       <AppBar
         sx={{
           backgroundColor: "transparent",
@@ -316,6 +325,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
         </Toolbar>
       </AppBar>
       <Box
+        component="div"
         sx={{
           display: "grid",
           "@media (orientation: portrait)": {
@@ -333,6 +343,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
         }}
       >
         <Box
+          component="div"
           sx={{
             m: 5,
             ml: "calc(env(safe-area-inset-left, 0) + 40px)",
@@ -360,6 +371,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
           />
         </Box>
         <Box
+          component="div"
           sx={{
             // flexBasis: "50%",
             display: "flex",
@@ -391,6 +403,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
 
           <TimelineSlider sx={{ mt: 1 }} />
           <Box
+            component="div"
             sx={{
               display: "flex",
               flexDirection: "row",
@@ -493,6 +506,7 @@ export const PlayerCard = (props: PlayerCardProps) => {
   return (
     <div>
       <Box
+        component="div"
         style={{
           // transform: props.expand ? "translateY(-50vh) scale(2)" : "scale(1)",
           transform: props.expand
@@ -537,6 +551,7 @@ export const PlayerCard = (props: PlayerCardProps) => {
       </Box>
 
       <Box
+        component="div"
         style={{
           // transform: props.expand ? "translateY(-50vh) scale(2)" : "scale(1)",
           transform: props.expand
@@ -557,6 +572,7 @@ export const PlayerCard = (props: PlayerCardProps) => {
       >
         <Fade in={props.expand} timeout={1000} unmountOnExit>
           <Box
+            component="div"
             sx={{
               //position: "fixed",
               //top: 0,

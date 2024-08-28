@@ -12,7 +12,13 @@ interface MarqueeTextProps {
   typographySx?: SxProps<Theme>
 }
 
-export const MarqueeText = ({ text, variant, color, sx, typographySx }: MarqueeTextProps) => {
+export const MarqueeText = ({
+  text,
+  variant,
+  color,
+  sx,
+  typographySx,
+}: MarqueeTextProps) => {
   const firstTextRef = useRef<HTMLSpanElement>(null)
   const secondTextRef = useRef<HTMLSpanElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -24,28 +30,30 @@ export const MarqueeText = ({ text, variant, color, sx, typographySx }: MarqueeT
     const containerWidth = containerRef.current.offsetWidth
 
     for (const ref of [firstTextRef, secondTextRef]) {
-      if (!ref.current) continue;
+      if (!ref.current) continue
 
-      const style = ref.current.style;
+      const style = ref.current.style
       if (textWidth <= containerWidth) {
-        style.animation = "none";
-        style.setProperty("--marquee-animation-play-state", "none");
+        style.animation = "none"
+        style.setProperty("--marquee-animation-play-state", "none")
       }
       if (textWidth > containerWidth) {
-        const playState = style.getPropertyValue("--marquee-animation-play-state");
+        const playState = style.getPropertyValue(
+          "--marquee-animation-play-state"
+        )
         if (playState === "none" || playState === "") {
-          style.animation = `marquee ${textWidth / 16}s linear infinite`;
-          style.setProperty("--marquee-animation-play-state", "running");
+          style.animation = `marquee ${textWidth / 16}s linear infinite`
+          style.setProperty("--marquee-animation-play-state", "running")
         }
       }
     }
 
     if (secondTextRef.current) {
-      const style = secondTextRef.current.style;
+      const style = secondTextRef.current.style
       if (textWidth <= containerWidth) {
-        style.display = "none";
+        style.display = "none"
       } else {
-        style.display = "block";
+        style.display = "block"
       }
     }
   }
@@ -70,6 +78,7 @@ export const MarqueeText = ({ text, variant, color, sx, typographySx }: MarqueeT
 
   return (
     <Box
+      component="div"
       sx={{
         ...sx,
         overflow: "hidden",
@@ -93,7 +102,7 @@ export const MarqueeText = ({ text, variant, color, sx, typographySx }: MarqueeT
       >
         {text}
       </Typography>
-      
+
       <Typography
         ref={secondTextRef}
         color={color}
