@@ -17,7 +17,7 @@ import { RouterProvider } from "@/src/router"
 import { useEffect, useRef, useState } from "react"
 import { useThemeStore } from "@/src/stores/theme-store"
 import * as mm from "music-metadata-browser"
-import { DynamicThemeStoreProvider } from "@/src/stores/dynamic-theme-store"
+import { AudioDynamicsProvider } from "@/src/stores/audio-dynamics-store"
 import { css } from "@emotion/css"
 import { registerServiceWorker } from "./register-sw"
 
@@ -94,14 +94,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <NetworkMonitorProvider>
           <FileStoreProvider>
             <PlayerStoreProvider>
-              <DynamicThemeStoreProvider>
+              <AudioDynamicsProvider>
                 <ThemeChanger />
                 <DynamicBackground />
                 <AudioPlayer />
                 <Fade in={!playerCardExpanded} unmountOnExit>
                   <Box
+                    component="div"
                     sx={{
-                      pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+                      // pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+                      height: "100%",
                     }}
                   >
                     {children}
@@ -116,7 +118,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     setPlayerCardExpanded(true)
                   }}
                 />
-              </DynamicThemeStoreProvider>
+              </AudioDynamicsProvider>
             </PlayerStoreProvider>
           </FileStoreProvider>
         </NetworkMonitorProvider>

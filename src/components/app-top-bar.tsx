@@ -2,29 +2,10 @@
 
 import {
   AppBar,
-  IconButton,
   alpha,
   useScrollTrigger,
   useTheme,
-  Menu,
-  MenuItem,
-  ListItemIcon,
-  ListItemText
 } from "@mui/material"
-import {
-  ArrowBack,
-  MoreVert,
-  CloudDownload,
-  CloudOff,
-  ArrowDownward,
-  HomeRounded,
-  SettingsRounded,
-  ArrowBackRounded,
-  FolderRounded,
-  ArrowUpwardRounded,
-  ChevronRightRounded,
-  ChevronLeftRounded,
-} from "@mui/icons-material"
 import { ReactNode, useState } from "react"
 import { useThemeStore } from "../stores/theme-store"
 import {
@@ -33,7 +14,8 @@ import {
 } from "@material/material-color-utilities"
 
 interface AppTopBarProps {
-  children: ReactNode
+  children: ReactNode,
+  scrollTarget?: Node | Window
 }
 
 export default function AppTopBar(props: AppTopBarProps) {
@@ -43,13 +25,13 @@ export default function AppTopBar(props: AppTopBarProps) {
   const trigger = useScrollTrigger({
     disableHysteresis: true,
     threshold: 0,
+    target: props.scrollTarget,
   })
 
   return (
     <AppBar
       sx={{
-        backdropFilter: "blur(16px)",
-        WebkitBackdropFilter: "blur(16px)",
+        backdropFilter: trigger ? "blur(16px)" : "blur(0px)",
         backgroundColor: alpha(
           hexFromArgb(
             MaterialDynamicColors.surfaceContainer.getArgb(
@@ -60,7 +42,7 @@ export default function AppTopBar(props: AppTopBarProps) {
         ),
         transition: theme.transitions.create([
           "background-color",
-          "backdrop-filter",
+          // "backdrop-filter",
         ]),
       }}
       elevation={0}

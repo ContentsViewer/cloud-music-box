@@ -84,6 +84,7 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
 
   return (
     <Box
+      component="div"
       sx={{
         ...sx,
         display: "flex",
@@ -186,6 +187,8 @@ export default function Page() {
   const [routerState, routerActions] = useRouter()
   const [themeStoreState] = useThemeStore()
 
+  const scrollTargetRef = useRef<Node | undefined>(undefined)
+
   const colorOnSurface = hexFromArgb(
     MaterialDynamicColors.onSurface.getArgb(themeStoreState.scheme)
   )
@@ -195,11 +198,15 @@ export default function Page() {
   const colorSurfaceContainer = hexFromArgb(
     MaterialDynamicColors.surfaceContainer.getArgb(themeStoreState.scheme)
   )
-  // console.log(colorSurfaceContainer)
 
   return (
-    <Box>
-      <AppTopBar>
+    <Box
+      sx={{
+        height: "100%",
+        overflow: "hidden",
+      }}
+    >
+      <AppTopBar scrollTarget={scrollTargetRef.current}>
         <Toolbar>
           <IconButton
             size="large"
@@ -217,13 +224,18 @@ export default function Page() {
           </Typography>
         </Toolbar>
       </AppTopBar>
-      <Box sx={{ mt: 8 }} />
-
       <Box
+        ref={scrollTargetRef}
         sx={{
           ml: `env(safe-area-inset-left, 0)`,
           mr: `env(safe-area-inset-right, 0)`,
           px: 2,
+          pt: 8,
+          overflow: "auto",
+          height: "100%",
+          scrollbarColor: `${colorOnSurfaceVariant} transparent`,
+          scrollbarWidth: "thin",
+          pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
         }}
       >
         <Box
