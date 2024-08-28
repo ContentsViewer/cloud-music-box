@@ -48,8 +48,7 @@ export default function AppTopBar(props: AppTopBarProps) {
   return (
     <AppBar
       sx={{
-        backdropFilter: "blur(16px)",
-        WebkitBackdropFilter: "blur(16px)",
+        backdropFilter: trigger ? "blur(16px)" : "blur(0px)",
         backgroundColor: alpha(
           hexFromArgb(
             MaterialDynamicColors.surfaceContainer.getArgb(

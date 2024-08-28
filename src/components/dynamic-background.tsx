@@ -12,51 +12,68 @@ import {
   hexFromArgb,
   Blend,
   Hct,
+  redFromArgb,
 } from "@material/material-color-utilities"
+
+import { CameraControls, OrbitControls } from "@react-three/drei"
+
+const noteFromPitch = (frequency: number) => {
+  const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
+  return Math.round(noteNum) + 69
+}
 
 interface RenderingContext {
   time: number
   frame?: AudioFrame
-  particleTail: number
+  particleTail: number,
+  currentPitch: number
 }
 
-var temp = 0
+interface LissajousCurveProps {}
 
 const LissajousCurve = () => {
   const [audioDynamicsState] = useAudioDynamicsStore()
+  const [themeStoreState] = useThemeStore()
   const pointsRef = useRef<THREE.Points>(null)
   const shaderMaterialRef = useRef<THREE.ShaderMaterial>(null)
 
   const context = useMemo<RenderingContext>(() => {
-    return { time: 0, particleStart: 0, particleTail: 0 }
+    return { time: 0, particleStart: 0, particleTail: 0, currentPitch: 440 }
   }, [])
   const particleCount = 44100
-  // const particleCount = 88200
 
   useEffect(() => {
-    // temp ^= 1
-    // if (temp != 0) {
-    //   return
-    // }
-
     const frame = audioDynamicsState.frame
     context.frame = frame
-    // const delta = frame.timeSeconds - context.time
-    // if (Math.abs(delta) > 0.01) {
-    //   console.log(delta)
-    // }
     context.time = frame.timeSeconds
+    const pitch = Math.max(frame.pitch0, frame.pitch1)
+    if (pitch !== -1) {
+      context.currentPitch = pitch
+    }
     // console.log(context.time, frame)
   }, [audioDynamicsState.frame])
 
-  const vertices = useMemo(() => {
-    const vertices = new Float32Array(particleCount * 3)
-    // vertices[0] = 1
-    // vertices[1] = 0;
-    // vertices[2] = 0;
-    return vertices
-  }, [])
+  const vertices = useMemo(() => new Float32Array(particleCount * 3), [])
   const startTimes = useMemo(() => new Float32Array(particleCount), [])
+  const particleColors = useMemo(() => new Float32Array(particleCount * 3), [])
+  const particleBaseColor = useMemo(() => {
+    const baseColor = MaterialDynamicColors.primary.getArgb(
+      themeStoreState.scheme
+    )
+    return Hct.fromInt(baseColor)
+  }, [themeStoreState])
+
+  // useEffect(() => {
+  //   const baseColor = MaterialDynamicColors.primary.getArgb(
+  //     themeStoreState.scheme
+  //   )
+
+  //   if (!shaderMaterialRef.current) return
+
+  //   shaderMaterialRef.current.uniforms.baseColor.value = new THREE.Color(
+  //     baseColor
+  //   )
+  // }, [themeStoreState])
 
   useFrame((state, deltaTime) => {
     const time = state.clock.getElapsedTime()
@@ -88,37 +105,43 @@ const LissajousCurve = () => {
     const samples0 = context.frame.samples0
     const samples1 = context.frame.samples1
 
-    // if (context.frame.samples0.length < samplesCountToAppend) {
-    //   console.log("AAA", context.frame.samples0.length, samplesCountToAppend)
-    // }
-    // console.log(samplesCountToAppend)
-    // const end = startOffset + samplesCountToAppend
-    // if (end > samples0.length) {
-    //   console.log("AAA", samples0.length, end)
-    // }
-    // if (startOffset >= samples0.length) {
-    //   console.log("AAAAA")
-    // }
+    // const rms = Math.max(context.frame.rms0, context.frame.rms1)
+    const note = noteFromPitch(context.currentPitch)
+    // const tone = Math.min(100 * Math.pow(rms, 1 / 2.2), 100)
+    const noteColor = Hct.from((note % 12) * 30, particleBaseColor.chroma, 80)
+    const pitchColor = Blend.harmonize(
+      noteColor.toInt(),
+      particleBaseColor.toInt()
+    )
+    // console.log((pitchColor >> 16 & 255) / 255.0, (pitchColor >> 8 & 255) / 255.0, (pitchColor & 255) / 255.0)
 
     const positions = pointsRef.current.geometry.attributes.position.array
     const startTimeArray = pointsRef.current.geometry.attributes.startTime.array
+    const particleColors =
+      pointsRef.current.geometry.attributes.particleColor.array
+
     // console.log(context.particleTail)
     for (let i = 0; i < samplesCountToAppend; ++i) {
       const t = context.particleTail
       // console.log(t)
-      const x = samples0[startOffset + i]
-      const y = samples1[startOffset + i]
+      const x = samples1[startOffset + i] // R
+      const y = samples0[startOffset + i] // L
+      // const z = context.frame.pitch0 / 10000
       const z = 0
       positions[t * 3 + 0] = x
+      // positions[t * 3 + 0] = Math.sqrt(x * x)
       positions[t * 3 + 1] = y
+      // positions[t * 3 + 1] = Math.sqrt(y * y)
       positions[t * 3 + 2] = z
       // startTimeArray[t] = time
       startTimeArray[t] =
         time - (deltaTime * (samplesCountToAppend - i)) / samplesCountToAppend
+
+      particleColors[t * 3 + 0] = ((pitchColor >> 16) & 255) / 255.0
+      particleColors[t * 3 + 1] = ((pitchColor >> 8) & 255) / 255.0
+      particleColors[t * 3 + 2] = (pitchColor & 255) / 255.0
+
       context.particleTail = (t + 1) % particleCount
-      // if (startOffset > samples0.length * 0.5) {
-      //   console.log(x, y)
-      // }
     }
     // console.log(samples0[startOffset], samples1[startOffset], samples0, startOffset)
 
@@ -135,6 +158,7 @@ const LissajousCurve = () => {
 
     pointsRef.current.geometry.attributes.position.needsUpdate = true
     pointsRef.current.geometry.attributes.startTime.needsUpdate = true
+    pointsRef.current.geometry.attributes.particleColor.needsUpdate = true
     shaderMaterialRef.current.uniforms.time.value = time
   })
 
@@ -154,6 +178,12 @@ const LissajousCurve = () => {
             itemSize={1}
             array={startTimes}
           />
+          <bufferAttribute
+            attach="attributes-particleColor"
+            count={particleCount}
+            itemSize={3}
+            array={particleColors}
+          />
         </bufferGeometry>
         <shaderMaterial
           ref={shaderMaterialRef}
@@ -162,23 +192,51 @@ const LissajousCurve = () => {
             {
               uniforms: {
                 time: { value: 0 },
+                baseColor: { value: new THREE.Color(0xffffff) },
               },
               vertexShader: `
             attribute float startTime;
+            attribute vec3 particleColor;
             uniform float time;
             varying float vAlpha;
+            varying vec3 vColor;
             void main() {
               float elapsed = time - startTime;
               vAlpha = 1.0 - clamp(elapsed, 0.0, 1.0);
-              vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+              mat3 rotationMatrix = mat3(
+                cos(0.785398), sin(0.785398), 0.0,
+                -sin(0.785398), cos(0.785398), 0.0,
+                0.0, 0.0, 1.0
+              );
+              vec3 p = rotationMatrix * position;
+              const float SQRT2 = 1.414214;
+              // p.y += SQRT2 * 0.1 * sin(2.0 * 3.14159265359 * p.x + time);
+              // p.y = (p.y + SQRT2) * 0.5 - 1.0;
+              p.y = (p.y + SQRT2) * 0.5;
+              // p.y = pow(p.y, 0.5) - 1.0;
+              // p.y = log(p.y + 1.0) - 0.5;
+              p.y = p.y * p.y * p.y  * p.y * p.y - 0.5;
+              // p.y = p.y - 1.0;
+
+              vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
               gl_PointSize = 2.0;
               gl_Position = projectionMatrix * mvPosition;
+              vColor = particleColor;
             }
           `,
               fragmentShader: `
             varying float vAlpha;
+            varying vec3 vColor;
+            uniform vec3 baseColor;
             void main() {
-              gl_FragColor = vec4(1.0, 1.0, 1.0, vAlpha);
+              vec3 c = baseColor;
+              // Merge the color with the base color
+              // vec3 mergedColor = mix(baseColor, c, 0.5);
+              gl_FragColor = vec4(vColor, vAlpha);
+
+
+              // gl_FragColor = vec4(baseColor, vAlpha);
+              // gl_FragColor = vec4(1.0, 1.0, 1.0, vAlpha);
               // gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
             }
           `,
@@ -199,12 +257,8 @@ export const DynamicBackground = () => {
   const [audioDynamicsState] = useAudioDynamicsStore()
   const [themeStoreState] = useThemeStore()
   const [pitchColor, setPitchColor] = useState("transparent")
+  const [isPageUnloading, setIsPageUnloading] = useState(false)
   const pitchRef = useRef(-1)
-
-  const noteFromPitch = (frequency: number) => {
-    const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
-    return Math.round(noteNum) + 69
-  }
 
   useEffect(() => {
     const pitchCurrent = Math.max(
@@ -267,6 +321,19 @@ export const DynamicBackground = () => {
   })()
 
   // console.log(primaryColor)
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      setIsPageUnloading(true)
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [])
+
+  const cameraRef = useRef<THREE.Camera>()
+  const [position, setPosition] = useState([0, 0, 0.1])
+  const [rotation, setRotation] = useState([THREE.MathUtils.degToRad(30), 0, 0])
 
   return (
     <div>
@@ -306,15 +373,25 @@ export const DynamicBackground = () => {
           right: 0,
           bottom: 0,
           left: 0,
+          zIndex: -1,
+          display: isPageUnloading ? "none" : "block",
         }}
       >
         <Canvas
           camera={{
             fov: 90,
-            position: [0, 0, 1],
+            position: [0, 0, 0.5],
+            // rotation: [0, 0, Math.PI / 4]
+            // rotation: [THREE.MathUtils.degToRad(30), 0, 0],
+            near: 0.01,
           }}
+          // onCreated={() => {
+          //   setIsCanvasReady(true)
+          // }}
+          // style={{background: 'transparent'}}
         >
           <LissajousCurve />
+          {/* <CameraControls makeDefault /> */}
         </Canvas>
       </div>
     </div>
