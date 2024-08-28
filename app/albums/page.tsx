@@ -41,6 +41,7 @@ import { useEffect, useState } from "react"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
 import { usePlayerStore } from "@/src/stores/player-store"
 
+
 const AlbumCard = React.memo(function AlbumCard({
   albumItem,
   openAlbum = () => {},
@@ -171,7 +172,7 @@ const AlbumList = React.memo(function AlbumList({
         gap: 3,
         gridTemplateColumns: {
           xs: "repeat(auto-fill, minmax(120px, 1fr))",
-          sm: "repeat(auto-fill, minmax(144px, 1fr))"
+          sm: "repeat(auto-fill, minmax(144px, 1fr))",
         },
         display: "grid",
         maxWidth: "1040px",
@@ -195,6 +196,7 @@ const AlbumList = React.memo(function AlbumList({
 
 interface AlbumListPageProps {
   sx?: SxProps<Theme>
+  onMount?: () => void
 }
 const AlbumListPage = React.memo(function AlbumListPage(
   props: AlbumListPageProps
@@ -214,6 +216,10 @@ const AlbumListPage = React.memo(function AlbumListPage(
   // console.log(activeAlbumId)
 
   const [albums, setAlbums] = useState<AlbumItem[]>([])
+
+  useEffect(() => {
+    props.onMount?.()
+  }, [])
 
   useEffect(() => {
     if (!fileStoreState.configured) return
@@ -257,9 +263,11 @@ const AlbumListPage = React.memo(function AlbumListPage(
 interface AlbumPageProps {
   sx?: SxProps<Theme>
   albumItem?: AlbumItem
+  onMount?: () => void
 }
 const AlbumPage = React.memo(function AlbumPage({
   albumItem,
+  onMount,
   sx,
 }: AlbumPageProps) {
   const [fileStoreState, fileStoreActions] = useFileStore()
@@ -269,6 +277,10 @@ const AlbumPage = React.memo(function AlbumPage({
 
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
   const [tracks, setTracks] = useState<AudioTrackFileItem[] | undefined>([])
+
+  useEffect(() => {
+    onMount?.()
+  }, [])
 
   useEffect(() => {
     if (!albumItem?.fileIds) return
@@ -390,6 +402,9 @@ export default function Page() {
   fileStoreActionsRef.current = fileStoreActions
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+  const albumPageRef = useRef<Node | undefined>(undefined)
+  const albumListRef = useRef<Node | undefined>(undefined)
+  const [scrollTarget, setScrollTarget] = useState<Node | undefined>(undefined)
 
   useEffect(() => {
     const albumId = decodeURIComponent(routerState.hash.slice(1))
@@ -413,8 +428,20 @@ export default function Page() {
   const downloadingCount = Object.keys(fileStoreState.syncingTrackFiles).length
 
   return (
-    <Box>
-      <AppTopBar>
+    <Box
+      sx={{
+        height: "100%",
+        overflow: "hidden",
+      }}
+    >
+      <AppTopBar
+        scrollTarget={scrollTarget}
+        // scrollTarget={
+
+        //   const ref = currentAlbum == undefined ? albumListRef.current : albumPageRef.current
+        //   if (ref === null) return undefined
+        //   return ref
+      >
         <Toolbar>
           <IconButton
             color="inherit"
@@ -502,10 +529,12 @@ export default function Page() {
           ml: `env(safe-area-inset-left, 0)`,
           mr: `env(safe-area-inset-right, 0)`,
           position: "relative",
+          height: "100%",
         }}
       >
         <Fade in={currentAlbum !== undefined} timeout={1000} unmountOnExit>
           <Box
+            ref={albumPageRef}
             sx={{
               position: "absolute",
               top: 0,
@@ -513,13 +542,20 @@ export default function Page() {
               left: 0,
               pt: 8,
               pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+              overflow: "auto",
+              height: "100%",
+              scrollbarColor: `${colorOnSurfaceVariant} transparent`,
+              scrollbarWidth: "thin",
             }}
           >
-            <AlbumPage albumItem={currentAlbum} />
+            <AlbumPage albumItem={currentAlbum} onMount={() => { 
+              setScrollTarget(albumPageRef.current)
+            }} />
           </Box>
         </Fade>
         <Fade in={currentAlbum === undefined} timeout={1000} unmountOnExit>
           <Box
+            ref={albumListRef}
             sx={{
               position: "absolute",
               top: 0,
@@ -527,11 +563,16 @@ export default function Page() {
               left: 0,
               pt: 8,
               pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
-              overflow: "hidden",
+              overflow: "auto",
               minHeight: "100vh",
+              height: "100%",
+              scrollbarColor: `${colorOnSurfaceVariant} transparent`,
+              scrollbarWidth: "thin",
             }}
           >
-            <AlbumListPage />
+            <AlbumListPage onMount={() => { 
+              setScrollTarget(albumListRef.current)
+            }}/>
           </Box>
         </Fade>
       </Box>

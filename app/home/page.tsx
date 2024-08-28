@@ -1,7 +1,6 @@
 "use client"
 
 import AppTopBar from "@/src/components/app-top-bar"
-import { FileList } from "@/src/components/file-list"
 import { useRouter } from "@/src/router"
 import { useFileStore } from "@/src/stores/file-store"
 import { useThemeStore } from "@/src/stores/theme-store"
@@ -169,6 +168,7 @@ export default function Page() {
   const [themeStoreState] = useThemeStore()
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+  const scrollTargetRef = useRef<Node | undefined>(undefined)
 
   useEffect(() => {
     if (fileStoreState.driveConfigureStatus !== "no-account") return
@@ -184,8 +184,14 @@ export default function Page() {
   const downloadingCount = Object.keys(fileStoreState.syncingTrackFiles).length
 
   return (
-    <Box>
-      <AppTopBar>
+    <Box
+      component="div"
+      sx={{
+        height: "100%",
+        overflow: "hidden",
+      }}
+    >
+      <AppTopBar scrollTarget={scrollTargetRef.current}>
         <Toolbar>
           <HomeRounded />
           <Typography sx={{ mx: 1 }} variant="h6">
@@ -230,60 +236,70 @@ export default function Page() {
           </div>
         </Toolbar>
       </AppTopBar>
-      <Box sx={{ mt: 8 }} />
-
-      {driveConfigureStatus ===
-      "not-configured" ? null : driveConfigureStatus === "no-account" ? (
-        <LoginPage />
-      ) : (
-        <Box
-          sx={{
-            ml: `env(safe-area-inset-left, 0)`,
-            mr: `env(safe-area-inset-right, 0)`,
-            px: 2,
-          }}
-        >
+      <Box
+        ref={scrollTargetRef}
+        sx={{
+          pt: 8,
+          overflow: "auto",
+          height: "100%",
+          scrollbarColor: `${colorOnSurfaceVariant} transparent`,
+          scrollbarWidth: "thin",
+          pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+        }}
+      >
+        {driveConfigureStatus ===
+        "not-configured" ? null : driveConfigureStatus === "no-account" ? (
+          <LoginPage />
+        ) : (
           <Box
             sx={{
-              gap: 2,
-              gridTemplateColumns: "repeat(auto-fill, minmax(144px, 1fr))",
-              display: "grid",
-              maxWidth: "1040px",
-              margin: "0 auto",
-              width: "100%",
+              ml: `env(safe-area-inset-left, 0)`,
+              mr: `env(safe-area-inset-right, 0)`,
+              px: 2,
             }}
           >
-            <CardButton
-              onClick={() => {
-                const rootFolderId = fileStoreState.rootFolderId
-                if (!rootFolderId) return
-                routerActionsRef.current.goFile(rootFolderId)
+            <Box
+              sx={{
+                gap: 2,
+                gridTemplateColumns: "repeat(auto-fill, minmax(144px, 1fr))",
+                display: "grid",
+                maxWidth: "1040px",
+                margin: "0 auto",
+                width: "100%",
               }}
             >
-              <Typography variant="h6">Files</Typography>
-              <FolderRounded fontSize="large"></FolderRounded>
-            </CardButton>
+              <CardButton
+                onClick={() => {
+                  const rootFolderId = fileStoreState.rootFolderId
+                  if (!rootFolderId) return
+                  routerActionsRef.current.goFile(rootFolderId)
+                }}
+              >
+                <Typography variant="h6">Files</Typography>
+                <FolderRounded fontSize="large"></FolderRounded>
+              </CardButton>
 
-            <CardButton
-              onClick={() => {
-                routerActionsRef.current.goAlbum()
-              }}
-            >
-              <Typography variant="h6">Albums</Typography>
-              <AlbumRounded fontSize="large"></AlbumRounded>
-            </CardButton>
+              <CardButton
+                onClick={() => {
+                  routerActionsRef.current.goAlbum()
+                }}
+              >
+                <Typography variant="h6">Albums</Typography>
+                <AlbumRounded fontSize="large"></AlbumRounded>
+              </CardButton>
 
-            <CardButton
-              onClick={() => {
-                routerActionsRef.current.goSettings()
-              }}
-            >
-              <Typography variant="h6">Settings</Typography>
-              <SettingsRounded fontSize="large"></SettingsRounded>
-            </CardButton>
+              <CardButton
+                onClick={() => {
+                  routerActionsRef.current.goSettings()
+                }}
+              >
+                <Typography variant="h6">Settings</Typography>
+                <SettingsRounded fontSize="large"></SettingsRounded>
+              </CardButton>
+            </Box>
           </Box>
-        </Box>
-      )}
+        )}
+      </Box>
     </Box>
   )
 }

@@ -49,7 +49,7 @@ export default function Page() {
   fileStoreActionsRef.current = fileStoreActions
 
   const networkMonitor = useNetworkMonitor()
-
+  const scrollTargetRef = useRef<Node | undefined>(undefined)
   const [currentFile, setCurrentFile] = useState<BaseFileItem | null>(null)
   const [files, setFiles] = useState<BaseFileItem[] | undefined>([])
   const [folderId, setFolderId] = useState<string | undefined>(undefined)
@@ -168,8 +168,14 @@ export default function Page() {
   const downloadingCount = Object.keys(fileStoreState.syncingTrackFiles).length
 
   return (
-    <Box>
-      <AppTopBar>
+    <Box
+      component="div"
+      sx={{
+        height: "100%",
+        overflow: "hidden",
+      }}
+    >
+      <AppTopBar scrollTarget={scrollTargetRef.current}>
         <Toolbar>
           <IconButton
             color="inherit"
@@ -281,10 +287,18 @@ export default function Page() {
         </Fade>
       </AppTopBar>
       <Box
+        component="div"
+        ref={scrollTargetRef}
         sx={{
-          mt: 8,
+          // mt: 8,
+          pt: 8,
           ml: `env(safe-area-inset-left, 0)`,
           mr: `env(safe-area-inset-right, 0)`,
+          overflow: "auto",
+          height: "100%",
+          scrollbarColor: `${colorOnSurfaceVariant} transparent`,
+          scrollbarWidth: "thin",
+          pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
         }}
       >
         <FileList

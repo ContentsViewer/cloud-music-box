@@ -100,8 +100,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <AudioPlayer />
                 <Fade in={!playerCardExpanded} unmountOnExit>
                   <Box
+                    component="div"
                     sx={{
-                      pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+                      // pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+                      height: "100%",
                     }}
                   >
                     {children}

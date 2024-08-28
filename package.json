@@ -1,6 +1,6 @@
 {
   "name": "cloud-music-box",
-  "version": "0.12.2",
+  "version": "0.13.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -20,7 +20,6 @@
     "@mui/icons-material": "^5.15.14",
     "@mui/material": "^5.15.14",
     "@mui/material-nextjs": "^5.15.11",
-    "@react-three/drei": "^9.111.3",
     "@react-three/fiber": "^8.17.5",
     "@serwist/next": "^9.0.0",
     "fft.js": "^4.0.4",

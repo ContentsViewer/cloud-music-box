@@ -40,7 +40,6 @@ export const TimelineSlider = (props: TimelineSliderProps) => {
   const [themeStoreState] = useThemeStore()
 
   const duration = playerState.duration
-
   const actualTime = playerState.currentTime
 
   const [inputValue, setInputValue] = useState<number>(0)
@@ -51,7 +50,6 @@ export const TimelineSlider = (props: TimelineSliderProps) => {
 
   useEffect(() => {
     const time = actualTime
-
     setInputValue(time ? (actualTime / duration) * 1000 : 0)
   }, [actualTime, duration])
 
@@ -66,10 +64,6 @@ export const TimelineSlider = (props: TimelineSliderProps) => {
       <Slider
         sx={{
           height: 4,
-          // gridColumn: "1 / 4",
-          // mx: 4,
-          // px: 4,
-          // pt: 1,
         }}
         size="small"
         value={inputValue}

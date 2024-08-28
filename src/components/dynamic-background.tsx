@@ -1,4 +1,4 @@
-import { use, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AudioFrame,
   useAudioDynamicsStore,
@@ -12,10 +12,7 @@ import {
   hexFromArgb,
   Blend,
   Hct,
-  redFromArgb,
 } from "@material/material-color-utilities"
-
-import { CameraControls, OrbitControls } from "@react-three/drei"
 
 const noteFromPitch = (frequency: number) => {
   const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
@@ -25,7 +22,7 @@ const noteFromPitch = (frequency: number) => {
 interface RenderingContext {
   time: number
   frame?: AudioFrame
-  particleTail: number,
+  particleTail: number
   currentPitch: number
 }
 
@@ -338,6 +335,7 @@ export const DynamicBackground = () => {
   return (
     <div>
       <Box
+        component="div"
         style={{ backgroundColor: pitchColor }}
         sx={{
           position: "fixed",
@@ -355,6 +353,7 @@ export const DynamicBackground = () => {
         }}
       />
       <Box
+        component="div"
         sx={{
           position: "fixed",
           top: 0,
