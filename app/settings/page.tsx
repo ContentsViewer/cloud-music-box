@@ -201,6 +201,7 @@ export default function Page() {
 
   return (
     <Box
+      component="div"
       sx={{
         height: "100%",
         overflow: "hidden",
@@ -225,6 +226,7 @@ export default function Page() {
         </Toolbar>
       </AppTopBar>
       <Box
+        component="div"
         ref={scrollTargetRef}
         sx={{
           ml: `env(safe-area-inset-left, 0)`,
@@ -239,6 +241,7 @@ export default function Page() {
         }}
       >
         <Box
+          component="div"
           sx={{
             display: "flex",
             flexDirection: "column",
@@ -294,6 +297,7 @@ export default function Page() {
               © 2024- Cloud Music Box
             </Typography>
             <Box
+              component="div"
               sx={{
                 display: "flex",
                 flexDirection: "row",

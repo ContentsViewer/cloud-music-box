@@ -11,7 +11,7 @@ export default function DownloadingIndicator({
   color,
 }: DownloadingIndicatorProps) {
   return (
-    <Box sx={{ position: "relative", mr: 1 }}>
+    <Box component="div" sx={{ position: "relative", mr: 1 }}>
       <Badge
         badgeContent={
           <span
@@ -24,6 +24,7 @@ export default function DownloadingIndicator({
         }
       >
         <Box
+          component="div"
           sx={{
             width: "20px",
             height: "20px",

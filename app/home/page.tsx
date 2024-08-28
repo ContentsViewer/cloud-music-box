@@ -50,6 +50,7 @@ const LoginPage = () => {
 
   return (
     <Box
+      component="div"
       sx={{
         display: "flex",
         alignItems: "center",
@@ -144,6 +145,7 @@ const CardButton = React.memo(function CardButton({
     >
       <CardActionArea onClick={onClick}>
         <Box
+            component="div"
           sx={{
             p: 2,
             display: "flex",
@@ -197,7 +199,7 @@ export default function Page() {
           <Typography sx={{ mx: 1 }} variant="h6">
             Home
           </Typography>
-          <Box sx={{ flexGrow: 1 }}></Box>
+          <Box component="div" sx={{ flexGrow: 1 }}></Box>
           {downloadingCount > 0 ? (
             <DownloadingIndicator
               count={downloadingCount}
@@ -237,6 +239,7 @@ export default function Page() {
         </Toolbar>
       </AppTopBar>
       <Box
+        component="div"
         ref={scrollTargetRef}
         sx={{
           pt: 8,
@@ -252,6 +255,7 @@ export default function Page() {
           <LoginPage />
         ) : (
           <Box
+            component="div"
             sx={{
               ml: `env(safe-area-inset-left, 0)`,
               mr: `env(safe-area-inset-right, 0)`,
@@ -259,6 +263,7 @@ export default function Page() {
             }}
           >
             <Box
+              component="div"
               sx={{
                 gap: 2,
                 gridTemplateColumns: "repeat(auto-fill, minmax(144px, 1fr))",
