@@ -41,7 +41,6 @@ import { useEffect, useState } from "react"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
 import { usePlayerStore } from "@/src/stores/player-store"
 
-
 const AlbumCard = React.memo(function AlbumCard({
   albumItem,
   openAlbum = () => {},
@@ -66,6 +65,7 @@ const AlbumCard = React.memo(function AlbumCard({
 
   return (
     <Box
+      component="div"
       sx={{
         display: "flex",
         flexDirection: "column",
@@ -168,6 +168,7 @@ const AlbumList = React.memo(function AlbumList({
   }, [])
   return (
     <Box
+      component="div"
       sx={{
         gap: 3,
         gridTemplateColumns: {
@@ -246,6 +247,7 @@ const AlbumListPage = React.memo(function AlbumListPage(
 
   return (
     <Box
+      component="div"
       sx={{
         p: {
           xs: 3,
@@ -306,6 +308,7 @@ const AlbumPage = React.memo(function AlbumPage({
 
   return (
     <Box
+      component="div"
       sx={{
         ...sx,
         display: "flex",
@@ -316,6 +319,7 @@ const AlbumPage = React.memo(function AlbumPage({
       }}
     >
       <Box
+        component="div"
         sx={{
           display: "flex",
           flexDirection: {
@@ -339,6 +343,7 @@ const AlbumPage = React.memo(function AlbumPage({
         />
 
         <Box
+          component="div"
           sx={{
             flexGrow: 1,
             display: "flex",
@@ -362,6 +367,7 @@ const AlbumPage = React.memo(function AlbumPage({
             {albumItem ? albumItem.name : ""}
           </Typography>
           <Box
+            component="div"
             sx={{
               display: "flex",
               flexDirection: "row",
@@ -429,6 +435,7 @@ export default function Page() {
 
   return (
     <Box
+      component="div"
       sx={{
         height: "100%",
         overflow: "hidden",
@@ -525,6 +532,7 @@ export default function Page() {
         </Toolbar>
       </AppTopBar>
       <Box
+        component="div"
         sx={{
           ml: `env(safe-area-inset-left, 0)`,
           mr: `env(safe-area-inset-right, 0)`,
@@ -534,6 +542,7 @@ export default function Page() {
       >
         <Fade in={currentAlbum !== undefined} timeout={1000} unmountOnExit>
           <Box
+            component="div"
             ref={albumPageRef}
             sx={{
               position: "absolute",
@@ -548,13 +557,17 @@ export default function Page() {
               scrollbarWidth: "thin",
             }}
           >
-            <AlbumPage albumItem={currentAlbum} onMount={() => { 
-              setScrollTarget(albumPageRef.current)
-            }} />
+            <AlbumPage
+              albumItem={currentAlbum}
+              onMount={() => {
+                setScrollTarget(albumPageRef.current)
+              }}
+            />
           </Box>
         </Fade>
         <Fade in={currentAlbum === undefined} timeout={1000} unmountOnExit>
           <Box
+            component="div"
             ref={albumListRef}
             sx={{
               position: "absolute",
@@ -570,9 +583,11 @@ export default function Page() {
               scrollbarWidth: "thin",
             }}
           >
-            <AlbumListPage onMount={() => { 
-              setScrollTarget(albumListRef.current)
-            }}/>
+            <AlbumListPage
+              onMount={() => {
+                setScrollTarget(albumListRef.current)
+              }}
+            />
           </Box>
         </Fade>
       </Box>
