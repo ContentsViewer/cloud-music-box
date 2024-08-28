@@ -201,6 +201,9 @@ const LissajousCurve = () => {
             void main() {
               float elapsed = time - startTime;
               vAlpha = 0.5 - clamp(elapsed, 0.0, 0.5);
+              // vAlpha = 1.0 - smoothstep(0.0, 1.0, elapsed / 0.5);
+              // vAlpha = 1.0 - pow(elapsed / 0.5, 3.0);
+              // vAlpha *= 0.5;
               mat3 rotationMatrix = mat3(
                 cos(0.785398), sin(0.785398), 0.0,
                 -sin(0.785398), cos(0.785398), 0.0,
@@ -213,12 +216,18 @@ const LissajousCurve = () => {
               p.y = (p.y + SQRT2) * 0.5;
               // p.y = pow(p.y, 0.5) - 1.0;
               // p.y = log(p.y + 1.0) - 0.5;
-              p.y = p.y * p.y * p.y  * p.y * p.y - 0.5;
-              // p.y = p.y - 1.0;
+              p.y = p.y * p.y * p.y  * p.y * p.y;
+              
+              // float scale = 2.0;
+              p *= 1.5;
+              
+              p.y = p.y - 1.0;
 
-              vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+              // vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
               gl_PointSize = 2.0;
-              gl_Position = projectionMatrix * mvPosition;
+              // gl_PointSize = 2.0 + 5.0 * (1.0 - step(0.01, elapsed / 0.5));
+              // gl_Position = projectionMatrix * mvPosition;
+              gl_Position = vec4(p, 1.0);
               vColor = particleColor;
             }
           `,
