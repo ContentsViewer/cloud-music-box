@@ -80,6 +80,8 @@ const LissajousCurve = () => {
     if (!shaderMaterialRef.current) return
     if (!context.frame) return
 
+    const canvasSize = state.size
+
     const sampleRate = context.frame.sampleRate
 
     const startOffset = ~~(
@@ -171,6 +173,7 @@ const LissajousCurve = () => {
     pointsRef.current.geometry.attributes.startTime.needsUpdate = true
     pointsRef.current.geometry.attributes.particleColor.needsUpdate = true
     shaderMaterialRef.current.uniforms.time.value = time
+    shaderMaterialRef.current.uniforms.aspect.value = canvasSize.width / canvasSize.height
   })
 
   const particles = useMemo(() => {
@@ -204,16 +207,21 @@ const LissajousCurve = () => {
               uniforms: {
                 time: { value: 0 },
                 baseColor: { value: new THREE.Color(0xffffff) },
+                aspect: { value: 1 },
               },
               vertexShader: `
             attribute float startTime;
             attribute vec3 particleColor;
             uniform float time;
+            uniform float aspect;
             varying float vAlpha;
             varying vec3 vColor;
             void main() {
-              float elapsed = time - startTime;
-              vAlpha = 0.5 - clamp(elapsed, 0.0, 0.5);
+              float elapsed = clamp((time - startTime) / 0.5, 0.0, 1.0);
+              float effectScale = pow(1.0 - elapsed, 1.0 / 2.2);
+              // vAlpha = 0.5 - clamp(elapsed, 0.0, 0.5);
+              // elapsed = pow(elapsed, 1.0 / 2.2);
+              vAlpha = effectScale / 2.0;
               // vAlpha = 1.0 - pow(elapsed / 0.5, 3.0);
               // vAlpha = 1.0 - smoothstep(0.0, 1.0, elapsed / 0.5);
               // vAlpha *= 0.5;
@@ -249,20 +257,33 @@ const LissajousCurve = () => {
               const float SQRT2 = 1.414214;
               // p.y += SQRT2 * 0.1 * sin(2.0 * 3.14159265359 * p.x + time);
               // p.y = (p.y + SQRT2) * 0.5 - 1.0;
-              p.y = (p.y + SQRT2) * 0.5;
+              // p.y = (p.y + SQRT2) * 0.5;
               // p.y = pow(p.y, 0.5) - 1.0;
               // p.y = log(p.y + 1.0) - 0.5;
-              p.y = p.y * p.y * p.y * p.y;
+              // p.y = p.y * p.y * p.y * p.y;
               
               // float scale = 2.0;
               // p *= 1.5;
               
+              // p.y = p.y - 1.0;
+              if (p.y < 0.0) {
+                p.y = -p.y;
+                p.x = -p.x;
+              }
               p.y = p.y - 1.0;
 
+              if (aspect < 1.0) {
+                p.x /= aspect;
+              }
+
+              // p.x = p.x * 2.0;
+
               // vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
-              gl_PointSize = 2.0;
+              // gl_PointSize = 2.0;
               // gl_PointSize = 2.0 + 5.0 * (1.0 - step(0.01, elapsed / 0.5));
-              gl_PointSize = 2.0 + 2.0 * (1.0 - smoothstep(0.0, 1.0, elapsed / 0.5));
+              // gl_PointSize = 2.0 + 2.0 * smoothstep(0.0, 1.0, effectScale);
+              // gl_PointSize = 2.0 + 2.0 * effectScale;
+              gl_PointSize = 4.0 * effectScale;
               // gl_Position = projectionMatrix * mvPosition;
               gl_Position = vec4(p, 1.0);
               vColor = particleColor;
@@ -417,6 +438,7 @@ export const DynamicBackground = () => {
           left: 0,
           zIndex: -1,
           display: isPageUnloading ? "none" : "block",
+          opacity: 0.5,
         }}
       >
         <Canvas
