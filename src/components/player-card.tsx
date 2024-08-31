@@ -353,6 +353,9 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             alignItems: "center",
             justifyContent: "center",
             position: "relative",
+            "@media (orientation: portrait)": {
+              mt: 8
+            },
           }}
           ref={trackCoverWrapperRef}
         >
@@ -383,7 +386,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             "@media (orientation: portrait)": {
               pl: 5,
               // alignSelf: "start",
-              alignSelf: "end",
+              // alignSelf: "end",
               pb: 5,
             },
             "@media (orientation: landscape)": {
