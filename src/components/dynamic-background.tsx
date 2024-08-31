@@ -127,7 +127,10 @@ const LissajousCurve = () => {
       const t = context.particleTail
       // console.log(t)
       x = samples1[startOffset + i] // R
-      y = samples0[startOffset + i] // L
+      // y = samples1[startOffset + i + ~~(sampleRate / 2 / 8)] // L
+      // y = samples1[startOffset + i + 6] // L
+      y = samples0[startOffset + i + 6] // L
+      // y = samples0[startOffset + i] // L
       // const z = context.frame.pitch0 / 10000
 
       // if (x < 0) {
@@ -216,12 +219,24 @@ const LissajousCurve = () => {
             uniform float aspect;
             varying float vAlpha;
             varying vec3 vColor;
+
             void main() {
-              float elapsed = clamp((time - startTime) / 0.5, 0.0, 1.0);
+              float elapsed = clamp((time - startTime) / 1.0, 0.0, 1.0);
               float effectScale = pow(1.0 - elapsed, 1.0 / 2.2);
               // vAlpha = 0.5 - clamp(elapsed, 0.0, 0.5);
               // elapsed = pow(elapsed, 1.0 / 2.2);
-              vAlpha = effectScale / 2.0;
+              // vAlpha = effectScale / 2.0;
+              // vAlpha = effectScale;
+              float alpha = 1.0;
+
+              if (elapsed < 0.1) {
+                alpha = mix(1.0, 0.3, smoothstep(0.0, 0.1, elapsed));
+              } else if (elapsed <= 0.75) {
+                alpha = mix(0.3, 0.2, smoothstep(0.1, 0.75, elapsed));
+              } else {
+                alpha = mix(0.2, 0.0, smoothstep(0.75, 1.0, elapsed)); 
+              }
+              vAlpha = alpha;
               // vAlpha = 1.0 - pow(elapsed / 0.5, 3.0);
               // vAlpha = 1.0 - smoothstep(0.0, 1.0, elapsed / 0.5);
               // vAlpha *= 0.5;
@@ -265,9 +280,8 @@ const LissajousCurve = () => {
               // float scale = 2.0;
               // p *= 1.5;
               
-              // p.y = p.y - 1.0;
               if (p.y < 0.0) {
-                p.y = -p.y;
+                p.y = 2.0 + p.y;
                 p.x = -p.x;
               }
               p.y = p.y - 1.0;
@@ -283,7 +297,12 @@ const LissajousCurve = () => {
               // gl_PointSize = 2.0 + 5.0 * (1.0 - step(0.01, elapsed / 0.5));
               // gl_PointSize = 2.0 + 2.0 * smoothstep(0.0, 1.0, effectScale);
               // gl_PointSize = 2.0 + 2.0 * effectScale;
-              gl_PointSize = 4.0 * effectScale;
+              // gl_PointSize = 4.0 * effectScale;
+              float pointSize = 4.0;
+              if (elapsed > 0.75) {
+                gl_PointSize = mix(4.0, 0.0, smoothstep(0.75, 1.0, elapsed));
+              }
+              gl_PointSize = pointSize;
               // gl_Position = projectionMatrix * mvPosition;
               gl_Position = vec4(p, 1.0);
               vColor = particleColor;
@@ -307,6 +326,11 @@ const LissajousCurve = () => {
           `,
               transparent: true,
               vertexColors: true,
+              // blending: THREE.CustomBlending,
+              // blendSrc: THREE.SrcAlphaFactor,
+              // blendDst: THREE.OneMinusSrcAlphaFactor,
+              // blendSrcAlpha: THREE.OneFactor,
+              // blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
             },
           ]}
         />
@@ -437,11 +461,15 @@ export const DynamicBackground = () => {
           bottom: 0,
           left: 0,
           zIndex: -1,
+          pointerEvents: "none",
           display: isPageUnloading ? "none" : "block",
-          opacity: 0.5,
+          // opacity: 0.8,
         }}
       >
         <Canvas
+          style={{
+            pointerEvents: "none",
+          }}
           camera={{
             fov: 90,
             position: [0, 0, 0.5],
@@ -455,7 +483,6 @@ export const DynamicBackground = () => {
           // style={{background: 'transparent'}}
         >
           <LissajousCurve />
-          {/* <CameraControls makeDefault /> */}
         </Canvas>
       </div>
     </div>
