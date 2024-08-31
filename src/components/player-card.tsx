@@ -330,7 +330,8 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
           display: "grid",
           "@media (orientation: portrait)": {
             // flexDirection: "column",
-            gridTemplateRows: "65% 35%",
+            // gridTemplateRows: "65% 35%",
+            gridTemplateRows: "50% 50%",
           },
           "@media (orientation: landscape)": {
             // flexDirection: "row",
@@ -381,7 +382,9 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             // width: "100%",
             "@media (orientation: portrait)": {
               pl: 5,
-              alignSelf: "start",
+              // alignSelf: "start",
+              alignSelf: "end",
+              pb: 5,
             },
             "@media (orientation: landscape)": {
               pl: 0,

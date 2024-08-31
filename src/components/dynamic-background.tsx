@@ -280,11 +280,11 @@ const LissajousCurve = () => {
               // float scale = 2.0;
               // p *= 1.5;
               
-              if (p.y < 0.0) {
-                p.y = 2.0 + p.y;
-                p.x = -p.x;
-              }
-              p.y = p.y - 1.0;
+              // if (p.y < 0.0) {
+              //   p.y = 2.0 + p.y;
+              //   p.x = -p.x;
+              // }
+              // p.y = p.y - 1.0;
 
               if (aspect < 1.0) {
                 p.x /= aspect;
@@ -299,8 +299,11 @@ const LissajousCurve = () => {
               // gl_PointSize = 2.0 + 2.0 * effectScale;
               // gl_PointSize = 4.0 * effectScale;
               float pointSize = 3.0;
+              if (r > 0.5) {
+                pointSize = 3.0 + mix(0.0, 2.0, smoothstep(0.5, 1.0, r));
+              }
               if (elapsed > 0.75) {
-                gl_PointSize = mix(3.0, 0.0, smoothstep(0.75, 1.0, elapsed));
+                gl_PointSize = mix(pointSize, 0.0, smoothstep(0.75, 1.0, elapsed));
               }
               gl_PointSize = pointSize;
               // gl_Position = projectionMatrix * mvPosition;
