@@ -1,7 +1,6 @@
 "use client"
 
 import {
-  Audiotrack,
   PlayArrowRounded,
   SkipNextRounded,
   SkipPreviousRounded,
@@ -24,7 +23,6 @@ import {
   AppBar,
 } from "@mui/material"
 import { AudioTrack, usePlayerStore } from "../stores/player-store"
-import { useFileStore } from "../stores/file-store"
 import { useThemeStore } from "../stores/theme-store"
 import { TimelineSlider } from "./timeline-slider"
 import {
@@ -37,6 +35,7 @@ import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
 import { TrackCover } from "./track-cover"
+import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 
 const SkipPreviousButton = ({
   onClick,
@@ -278,6 +277,9 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
   const trackCoverWrapperRef = useRef<HTMLDivElement>(null)
   const trackCoverRef = useRef<HTMLDivElement>(null)
 
+  const [audioDynamicsSettings, audioDynamicsSettingsActions] =
+    useAudioDynamicsSettingsStore()
+
   useEffect(() => {
     const resizeObserver = new ResizeObserver(entries => {
       if (!trackCoverRef.current) return
@@ -354,7 +356,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             justifyContent: "center",
             position: "relative",
             "@media (orientation: portrait)": {
-              mt: 8
+              mt: 8,
             },
           }}
           ref={trackCoverWrapperRef}
@@ -372,6 +374,9 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             }}
             coverUrl={props.coverUrl}
             ref={trackCoverRef}
+            onClick={() => {
+              audioDynamicsSettingsActions.setDynamicsEffectAppeal(true)
+            }}
           />
         </Box>
         <Box

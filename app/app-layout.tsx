@@ -20,6 +20,7 @@ import * as mm from "music-metadata-browser"
 import { AudioDynamicsProvider } from "@/src/stores/audio-dynamics-store"
 import { css } from "@emotion/css"
 import { registerServiceWorker } from "./register-sw"
+import { AudioDynamicsSettingsProvider, useAudioDynamicsSettingsStore } from "@/src/stores/audio-dynamics-settings"
 
 const ThemeChanger = () => {
   const [playerState] = usePlayerStore()
@@ -46,7 +47,7 @@ const ThemeChanger = () => {
   return null
 }
 
-export function AppLayout({ children }: { children: React.ReactNode }) {
+const AppMain = ({ children }: { children: React.ReactNode }) => {
   const [playerCardExpanded, setPlayerCardExpanded] = useState<boolean>(false)
   const snackbarContainerClass = css`
     margin-left: env(safe-area-inset-left, 0);
@@ -54,6 +55,63 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       env(safe-area-inset-bottom, 0) + ${playerCardExpanded ? "0" : "136"}px
     );
   `
+  const [audioDynamicsSettings,] = useAudioDynamicsSettingsStore();
+
+  return (
+    <SnackbarProvider
+      anchorOrigin={{
+        vertical: "bottom",
+        horizontal: "left",
+      }}
+      classes={{
+        containerAnchorOriginBottomLeft: snackbarContainerClass,
+      }}
+    >
+      <ThemeChanger />
+      <DynamicBackground />
+      <AudioPlayer />
+      <Box
+        component="div"
+        sx={{
+          height: "100%",
+          width: "100%",
+          position: "absolute",
+
+          zIndex: audioDynamicsSettings.dynamicsEffectAppeal ? -1 : 0,
+          opacity: audioDynamicsSettings.dynamicsEffectAppeal ? 0.4 : 1,
+          scale: audioDynamicsSettings.dynamicsEffectAppeal ? "0.8" : "1",
+          transition: "opacity 0.5s ease-in-out, scale 0.5s ease-in-out",
+        }}
+      >
+        <Fade in={!playerCardExpanded} unmountOnExit>
+          <Box
+            component="div"
+            sx={{
+              // pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+              height: "100%",
+            }}
+          >
+            {children}
+          </Box>
+        </Fade>
+        <PlayerCard
+          expand={playerCardExpanded}
+          onShrink={() => {
+            setPlayerCardExpanded(false)
+          }}
+          onExpand={() => {
+            setPlayerCardExpanded(true)
+          }}
+        />
+      </Box>
+    </SnackbarProvider>
+  )
+}
+
+export function AppLayout({ children }: { children: React.ReactNode }) {
+  const [audioDynamicsEffectAppeal, setAudioDynamicsEffectAppeal] =
+    useState<boolean>(false)
+
   useEffect(() => {
     registerServiceWorker({
       onNeedRefresh: updateSW => {
@@ -81,48 +139,18 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <SnackbarProvider
-      anchorOrigin={{
-        vertical: "bottom",
-        horizontal: "left",
-      }}
-      classes={{
-        containerAnchorOriginBottomLeft: snackbarContainerClass,
-      }}
-    >
-      <RouterProvider>
-        <NetworkMonitorProvider>
-          <FileStoreProvider>
-            <PlayerStoreProvider>
+    <RouterProvider>
+      <NetworkMonitorProvider>
+        <FileStoreProvider>
+          <PlayerStoreProvider>
+            <AudioDynamicsSettingsProvider>
               <AudioDynamicsProvider>
-                <ThemeChanger />
-                <DynamicBackground />
-                <AudioPlayer />
-                <Fade in={!playerCardExpanded} unmountOnExit>
-                  <Box
-                    component="div"
-                    sx={{
-                      // pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
-                      height: "100%",
-                    }}
-                  >
-                    {children}
-                  </Box>
-                </Fade>
-                <PlayerCard
-                  expand={playerCardExpanded}
-                  onShrink={() => {
-                    setPlayerCardExpanded(false)
-                  }}
-                  onExpand={() => {
-                    setPlayerCardExpanded(true)
-                  }}
-                />
+                <AppMain>{children}</AppMain>
               </AudioDynamicsProvider>
-            </PlayerStoreProvider>
-          </FileStoreProvider>
-        </NetworkMonitorProvider>
-      </RouterProvider>
-    </SnackbarProvider>
+            </AudioDynamicsSettingsProvider>
+          </PlayerStoreProvider>
+        </FileStoreProvider>
+      </NetworkMonitorProvider>
+    </RouterProvider>
   )
 }

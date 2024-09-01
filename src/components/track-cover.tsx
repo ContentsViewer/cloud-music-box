@@ -5,6 +5,7 @@ import React from "react"
 interface TrackCoverProps {
   coverUrl?: string
   sx?: SxProps<Theme>
+  onClick?: () => void
 }
 
 export const TrackCover = React.forwardRef(function TrackCover(
@@ -25,6 +26,7 @@ export const TrackCover = React.forwardRef(function TrackCover(
         // bgcolor: "rgba(142, 142, 142, 0.5)"
         bgcolor: "rgba(255, 255, 255, 0.15)",
       }}
+      onClick={props.onClick}
     >
       {props.coverUrl ? null : (
         <Audiotrack

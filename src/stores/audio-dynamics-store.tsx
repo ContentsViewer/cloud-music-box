@@ -16,20 +16,22 @@ export interface AudioDynamicsStateProps {
   frame: AudioFrame
 }
 
-export const AudioDynamicsStateContext = createContext<AudioDynamicsStateProps>({
-  frame: {
-    timeSeconds: 0,
-    pitch0: -1,
-    pitch1: -1,
-    rms0: 0,
-    rms1: 0,
-    sampleRate: 0,
-    samples0: new Float32Array(0),
-    samples1: new Float32Array(0),
-  },
-})
+export const AudioDynamicsStateContext = createContext<AudioDynamicsStateProps>(
+  {
+    frame: {
+      timeSeconds: 0,
+      pitch0: -1,
+      pitch1: -1,
+      rms0: 0,
+      rms1: 0,
+      sampleRate: 0,
+      samples0: new Float32Array(0),
+      samples1: new Float32Array(0),
+    },
+  }
+)
 
-type Action = {
+type AudioDynamicsAction = {
   type: "setFrame"
   payload: {
     frame: AudioFrame
@@ -37,7 +39,7 @@ type Action = {
 }
 
 export const AudioDynamicsDispatchContext = createContext<
-  React.Dispatch<Action>
+  React.Dispatch<AudioDynamicsAction>
 >(() => {})
 
 export const useAudioDynamicsStore = () => {
@@ -57,7 +59,10 @@ export const useAudioDynamicsStore = () => {
   return [state, actions] as const
 }
 
-const reducer = (state: AudioDynamicsStateProps, action: Action) => {
+const reducer = (
+  state: AudioDynamicsStateProps,
+  action: AudioDynamicsAction
+) => {
   switch (action.type) {
     case "setFrame":
       return {
