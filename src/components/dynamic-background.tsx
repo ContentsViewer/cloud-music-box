@@ -5,7 +5,7 @@ import {
 } from "../stores/audio-dynamics-store"
 import { Box } from "@mui/material"
 import { useThemeStore } from "../stores/theme-store"
-import { Canvas, useFrame } from "@react-three/fiber"
+import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import * as THREE from "three"
 import {
   MaterialDynamicColors,
@@ -13,6 +13,7 @@ import {
   Blend,
   Hct,
 } from "@material/material-color-utilities"
+import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 
 const noteFromPitch = (frequency: number) => {
   const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
@@ -82,6 +83,8 @@ const LissajousCurve = () => {
 
     const canvasSize = state.size
 
+    // console.log(state.viewport.dpr);
+
     const sampleRate = context.frame.sampleRate
 
     const startOffset = ~~(
@@ -113,6 +116,7 @@ const LissajousCurve = () => {
       noteColor.toInt(),
       particleBaseColor.toInt()
     )
+
     // console.log((pitchColor >> 16 & 255) / 255.0, (pitchColor >> 8 & 255) / 255.0, (pitchColor & 255) / 255.0)
 
     const positions = pointsRef.current.geometry.attributes.position.array
@@ -121,8 +125,8 @@ const LissajousCurve = () => {
       pointsRef.current.geometry.attributes.particleColor.array
 
     // console.log(context.particleTail)
-    let x, y, z;
-    z = 0;
+    let x, y, z
+    z = 0
     for (let i = 0; i < samplesCountToAppend; ++i) {
       const t = context.particleTail
       // console.log(t)
@@ -176,7 +180,8 @@ const LissajousCurve = () => {
     pointsRef.current.geometry.attributes.startTime.needsUpdate = true
     pointsRef.current.geometry.attributes.particleColor.needsUpdate = true
     shaderMaterialRef.current.uniforms.time.value = time
-    shaderMaterialRef.current.uniforms.aspect.value = canvasSize.width / canvasSize.height
+    shaderMaterialRef.current.uniforms.aspect.value =
+      canvasSize.width / canvasSize.height
   })
 
   const particles = useMemo(() => {
@@ -302,10 +307,7 @@ const LissajousCurve = () => {
               if (r > 0.25) {
                 pointSize = 3.0 + mix(0.0, 3.0, smoothstep(0.25, 1.0, r));
               }
-              // if (elapsed > 0.75) {
-              //   gl_PointSize = mix(pointSize, 0.0, smoothstep(0.75, 1.0, elapsed));
-              // }
-              gl_PointSize = pointSize;
+              gl_PointSize = pointSize / 2.0;
               // gl_Position = projectionMatrix * mvPosition;
               gl_Position = vec4(p, 1.0);
               vColor = particleColor;
@@ -317,23 +319,11 @@ const LissajousCurve = () => {
             uniform vec3 baseColor;
             void main() {
               vec3 c = baseColor;
-              // Merge the color with the base color
-              // vec3 mergedColor = mix(baseColor, c, 0.5);
               gl_FragColor = vec4(vColor, vAlpha);
-
-
-              // gl_FragColor = vec4(baseColor, vAlpha);
-              // gl_FragColor = vec4(1.0, 1.0, 1.0, vAlpha);
-              // gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
             }
           `,
               transparent: true,
               vertexColors: true,
-              // blending: THREE.CustomBlending,
-              // blendSrc: THREE.SrcAlphaFactor,
-              // blendDst: THREE.OneMinusSrcAlphaFactor,
-              // blendSrcAlpha: THREE.OneFactor,
-              // blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
             },
           ]}
         />
@@ -412,6 +402,8 @@ export const DynamicBackground = () => {
     return hexFromArgb(color)
   })()
 
+  const [audioDynamicsSettings, audioDynamicsSettingsActions] = useAudioDynamicsSettingsStore()
+
   // console.log(primaryColor)
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -440,7 +432,7 @@ export const DynamicBackground = () => {
           // backgroundImage: `radical-gradient(transparent, ${backgroundColor})`,
           background: `radial-gradient(circle at 76% 26%, transparent, ${backgroundColor})`,
           // background: `radial-gradient(circle at 64% 46%, transparent, ${backgroundColor})`,
-          zIndex: -1,
+          zIndex: -3,
         }}
       />
       <Box
@@ -453,20 +445,25 @@ export const DynamicBackground = () => {
           left: 0,
           background: `linear-gradient(transparent, ${primaryColor})`,
           opacity: 1.0,
-          zIndex: -1,
+          zIndex: -3,
         }}
       />
-      <div
-        style={{
+      <Box
+        component="div"
+        sx={{
           position: "fixed",
           top: 0,
           right: 0,
           bottom: 0,
           left: 0,
-          zIndex: -1,
-          pointerEvents: "none",
+          zIndex: audioDynamicsSettings.dynamicsEffectAppeal ? 0 : -2,
+          // pointerEvents: "none",
           display: isPageUnloading ? "none" : "block",
           // opacity: 0.8,
+        }}
+        onClick={() => { 
+          // console.log("click")
+          audioDynamicsSettingsActions.setDynamicsEffectAppeal(false)
         }}
       >
         <Canvas
@@ -476,18 +473,21 @@ export const DynamicBackground = () => {
           camera={{
             fov: 90,
             position: [0, 0, 0.5],
-            // rotation: [0, 0, Math.PI / 4]
             // rotation: [THREE.MathUtils.degToRad(30), 0, 0],
             near: 0.01,
           }}
-          // onCreated={() => {
-          //   setIsCanvasReady(true)
-          // }}
-          // style={{background: 'transparent'}}
+          dpr={1}
+          gl={canvas =>
+            new THREE.WebGLRenderer({
+              canvas,
+              alpha: true,
+              powerPreference: "default",
+            })
+          }
         >
           <LissajousCurve />
         </Canvas>
-      </div>
+      </Box>
     </div>
   )
 }
