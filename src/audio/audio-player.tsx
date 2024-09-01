@@ -161,6 +161,10 @@ const msSetPlayingTrack = (track: AudioTrack) => {
       new Blob([cover.data], { type: cover.format })
     )
     artwork.push({ src: coverUrl, sizes: "512x512", type: cover.format })
+  } else {
+    artwork.push({
+      src: "./track-cover-512x512.png", sizes: "512x512", type: "image/png"
+    })
   }
 
   ms.metadata = new MediaMetadata({
