@@ -81,6 +81,7 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
           opacity: audioDynamicsSettings.dynamicsEffectAppeal ? 0.4 : 1,
           scale: audioDynamicsSettings.dynamicsEffectAppeal ? "0.8" : "1",
           transition: "opacity 0.5s ease-in-out, scale 0.5s ease-in-out",
+          overflow: "hidden",
         }}
       >
         <Fade in={!playerCardExpanded} unmountOnExit>
