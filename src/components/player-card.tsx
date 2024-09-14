@@ -355,7 +355,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             justifyContent: "center",
             position: "relative",
             "@media (orientation: landscape)": {
-              ml: "calc(env(safe-area-inset-left, 0) + 64px)",
+              ml: "max(64px, env(safe-area-inset-left, 0))",
             },
             "@media (orientation: portrait)": {
               mt: 8,
@@ -399,7 +399,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             },
             "@media (orientation: landscape)": {
               pl: 0,
-              pr: "calc(env(safe-area-inset-right, 0) + 64px)",
+              pr: "max(64px, env(safe-area-inset-right, 0))",
             },
           }}
         >
