@@ -349,12 +349,14 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
           component="div"
           sx={{
             m: 5,
-            ml: "calc(env(safe-area-inset-left, 0) + 40px)",
             boxSizing: "border-box",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             position: "relative",
+            "@media (orientation: landscape)": {
+              ml: "calc(env(safe-area-inset-left, 0) + 64px)",
+            },
             "@media (orientation: portrait)": {
               mt: 8,
             },
@@ -389,15 +391,16 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             minWidth: 0,
             // width: "100%",
             "@media (orientation: portrait)": {
-              pl: 5,
               // alignSelf: "start",
               // alignSelf: "end",
               pb: 5,
+              pr: "calc(env(safe-area-inset-right, 0) + 40px)",
+              pl: "calc(env(safe-area-inset-left, 0) + 40px)",
             },
             "@media (orientation: landscape)": {
               pl: 0,
+              pr: "calc(env(safe-area-inset-right, 0) + 64px)",
             },
-            pr: "calc(env(safe-area-inset-right, 0) + 40px)",
           }}
         >
           <MarqueeText

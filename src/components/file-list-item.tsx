@@ -183,6 +183,7 @@ export const FileListItemAudioTrack = React.memo(
     const fileStoreActionsRef = useRef(fileStoreActions)
     fileStoreActionsRef.current = fileStoreActions
     const [routerState, routerActions] = useRouter()
+    // console.log("!!!")
 
     const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
 

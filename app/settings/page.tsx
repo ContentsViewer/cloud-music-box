@@ -29,6 +29,7 @@ import {
   DialogActions,
   Backdrop,
   CircularProgress,
+  Switch,
 } from "@mui/material"
 import Dialog from "@mui/material/Dialog"
 import DialogTitle from "@mui/material/DialogTitle"
@@ -183,6 +184,69 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
   )
 }
 
+function ScreenSettingsArea() {
+  const [themeStoreState] = useThemeStore()
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
+  const [isFullScreen, setIsFullScreen] = useState(false)
+
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
+  
+  const handleFullScreenToggle = () => {
+    toggleFullScreen();
+    setIsFullScreen(!isFullScreen);
+  };
+
+  useEffect(() => {
+    const handleFullScreenChange = () => {
+      setIsFullScreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullScreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullScreenChange);
+    };
+  }, []);
+
+  return (
+    <Box
+      component="div"
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        mt: 2,
+      }}
+    >
+      <Typography variant="h6">Screen</Typography>
+      <List>
+        <ListItem>
+          <ListItemText
+            primary="Full Screen"
+            secondary="Toggle full screen mode."
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
+          />
+          <Switch checked={isFullScreen} edge="end" onChange={handleFullScreenToggle} />
+        </ListItem>
+      </List>
+    </Box>
+  )
+}
+
 export default function Page() {
   const [routerState, routerActions] = useRouter()
   const [themeStoreState] = useThemeStore()
@@ -251,6 +315,7 @@ export default function Page() {
           }}
         >
           <StorageSettingsArea />
+          <ScreenSettingsArea />
           <Typography variant="h6" sx={{ mt: 2 }}>
             About
           </Typography>
