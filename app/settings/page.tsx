@@ -190,7 +190,12 @@ function ScreenSettingsArea() {
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
 
-  const [isFullScreen, setIsFullScreen] = useState(!!document.fullscreenElement);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
+  useEffect(() => {
+    setIsFullScreen(!!document.fullscreenElement);
+  }, [])
+
 
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
