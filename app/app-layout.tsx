@@ -78,8 +78,8 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
           position: "absolute",
 
           zIndex: audioDynamicsSettings.dynamicsEffectAppeal ? -1 : 0,
-          opacity: audioDynamicsSettings.dynamicsEffectAppeal ? 0.25 : 1,
-          scale: audioDynamicsSettings.dynamicsEffectAppeal ? "0.8" : "1",
+          // opacity: audioDynamicsSettings.dynamicsEffectAppeal ? 0.25 : 1,
+          scale: audioDynamicsSettings.dynamicsEffectAppeal ? "0.9" : "1",
           transition: "opacity 0.5s ease-in-out, scale 0.5s ease-in-out",
           overflow: "hidden",
         }}

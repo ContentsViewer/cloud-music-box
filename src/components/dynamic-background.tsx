@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AudioFrame,
@@ -14,6 +15,7 @@ import {
   Hct,
 } from "@material/material-color-utilities"
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
+import { css } from '@emotion/react'
 
 const noteFromPitch = (frequency: number) => {
   const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
@@ -417,50 +419,92 @@ export const DynamicBackground = () => {
 
   return (
     <div>
-      <Box
-        component="div"
+      <div
+        css={css`
+          position: fixed;
+          transition: background-color 800ms;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          opacity: 1.0;
+          z-index: -3;
+          background: radial-gradient(circle at 76% 26%, transparent, ${backgroundColor});
+        `}
+
         style={{ backgroundColor: pitchColor }}
-        sx={{
-          position: "fixed",
-          // mixBlendMode: "screen",
-          transition: "background-color 800ms",
-          top: 0,
-          right: 0,
-          bottom: 0,
-          left: 0,
-          opacity: 1.0,
-          // backgroundImage: `radical-gradient(transparent, ${backgroundColor})`,
-          background: `radial-gradient(circle at 76% 26%, transparent, ${backgroundColor})`,
-          // background: `radial-gradient(circle at 64% 46%, transparent, ${backgroundColor})`,
-          zIndex: -3,
-        }}
+
+        // component="div"
+        // sx={{
+        //   position: "fixed",
+        //   // mixBlendMode: "screen",
+        //   transition: "background-color 800ms",
+        //   top: 0,
+        //   right: 0,
+        //   bottom: 0,
+        //   left: 0,
+        //   opacity: 1.0,
+        //   // backgroundImage: `radical-gradient(transparent, ${backgroundColor})`,
+        //   background: `radial-gradient(circle at 76% 26%, transparent, ${backgroundColor})`,
+        //   // background: `radial-gradient(circle at 64% 46%, transparent, ${backgroundColor})`,
+        //   zIndex: -3,
+        // }}
       />
-      <Box
-        component="div"
-        sx={{
-          position: "fixed",
-          top: 0,
-          right: 0,
-          bottom: 0,
-          left: 0,
-          background: `linear-gradient(transparent, ${primaryColor})`,
-          opacity: 1.0,
-          zIndex: -3,
-        }}
+      <div
+        css={css`
+          position: fixed;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          background: linear-gradient(transparent, ${primaryColor});
+          opacity: 1.0;
+          z-index: -3;
+          `}
+
+        // component="div"
+        // sx={{
+        //   position: "fixed",
+        //   top: 0,
+        //   right: 0,
+        //   bottom: 0,
+        //   left: 0,
+        //   background: `linear-gradient(transparent, ${primaryColor})`,
+        //   opacity: 1.0,
+        //   zIndex: -3,
+        // }}
       />
-      <Box
-        component="div"
-        sx={{
-          position: "fixed",
-          top: 0,
-          right: 0,
-          bottom: 0,
-          left: 0,
-          zIndex: audioDynamicsSettings.dynamicsEffectAppeal ? 0 : -2,
-          // pointerEvents: "none",
-          display: isPageUnloading ? "none" : "block",
-          // opacity: 0.8,
-        }}
+      <div
+        css={css`
+          position: fixed;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          z-index: ${audioDynamicsSettings.dynamicsEffectAppeal ? 0 : -2};
+          display: ${isPageUnloading ? "none" : "block"};
+          background-color: ${audioDynamicsSettings.dynamicsEffectAppeal ? "rgba(0, 0, 0, 0.6)" : "transparent"};
+          transition: background-color 0.5s ease-in-out;
+          // backdrop-filter: blur(1px);
+          `}
+
+        // component="div"
+        // sx={{
+        //   position: "fixed",
+        //   top: 0,
+        //   right: 0,
+        //   bottom: 0,
+        //   left: 0,
+        //   zIndex: audioDynamicsSettings.dynamicsEffectAppeal ? 0 : -2,
+        //   // pointerEvents: "none",
+        //   display: isPageUnloading ? "none" : "block",
+        //   // opacity: 0.8,
+        //   // backdropFilter: "blur(10px) brightness(0.5)",
+        //   // backdropFilter: audioDynamicsSettings.dynamicsEffectAppeal ? "brightness(0.4)" : "none",
+        //   transition: "background-color 0.5s ease-in-out",
+        //   backgroundColor: audioDynamicsSettings.dynamicsEffectAppeal ? "rgba(0, 0, 0, 0.6)" : "transparent",
+        // }}
+
         onClick={() => { 
           // console.log("click")
           audioDynamicsSettingsActions.setDynamicsEffectAppeal(false)
@@ -487,7 +531,7 @@ export const DynamicBackground = () => {
         >
           <LissajousCurve />
         </Canvas>
-      </Box>
+      </div>
     </div>
   )
 }

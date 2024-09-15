@@ -37,6 +37,9 @@ export default withSerwist({
   env: {
     APP_VERSION: process.env.npm_package_version
   },
+  compiler: {
+    emotion: true
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.optimization.splitChunks = {

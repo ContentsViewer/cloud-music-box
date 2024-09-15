@@ -28,7 +28,8 @@
       ]
     },
     "types": [
-      "@serwist/next/typings"
+      "@serwist/next/typings",
+      "@emotion/react/types/css-prop"
     ],
   },
   "include": [
