@@ -33,6 +33,7 @@ import {
 } from "@mui/material"
 import Dialog from "@mui/material/Dialog"
 import DialogTitle from "@mui/material/DialogTitle"
+import { enqueueSnackbar } from "notistack"
 
 import { useEffect, useRef, useState } from "react"
 
@@ -201,6 +202,7 @@ function ScreenSettingsArea() {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch((err) => {
         console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+        enqueueSnackbar(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`, { variant: "error" });
       });
     } else {
       document.exitFullscreen();

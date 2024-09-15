@@ -24,7 +24,7 @@ import {
   SettingsRounded,
 } from "@mui/icons-material"
 import { useNetworkMonitor } from "../stores/network-monitor"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { AudioTrackFileItem, useFileStore } from "../stores/file-store"
 import { enqueueSnackbar } from "notistack"
 import * as mm from "music-metadata-browser"
@@ -175,76 +175,131 @@ export const FileListItemAudioTrack = React.memo(
     selected,
     onClick,
   }: FileListItemAudioTrackProps) {
-    const [fileStatus, setFileStatus] = useState<
-      "online" | "offline" | "local"
-    >("offline")
     const networkMonitor = useNetworkMonitor()
+
     const [fileStoreState, fileStoreActions] = useFileStore()
     const fileStoreActionsRef = useRef(fileStoreActions)
     fileStoreActionsRef.current = fileStoreActions
-    const [routerState, routerActions] = useRouter()
-    // console.log("!!!")
 
-    const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
+    const [, routerActions] = useRouter()
+    const routerActionsRef = useRef(routerActions)
+    routerActionsRef.current = routerActions
 
-    const title = file.metadata?.common.title || file.name
+    const [updatedFile, setUpdatedFile] = useState<AudioTrackFileItem>(file)
+
+    const [fileState, setFileState] = useState<{
+      coverUrl: string | undefined
+      hasBlob: boolean
+      currentFile: AudioTrackFileItem
+    }>({
+      coverUrl: undefined,
+      hasBlob: false,
+      currentFile: file,
+    })
 
     useEffect(() => {
-      const cover = mm.selectCover(file.metadata?.common.picture)
-      if (cover) {
-        const url = URL.createObjectURL(
-          new Blob([cover.data], { type: cover.format })
-        )
-        setCoverUrl(url)
-        return () => URL.revokeObjectURL(url)
-      }
-    }, [file.metadata?.common.picture])
+      // console.log("AAA", updatedFile.id)
+      const newFileState = {
+        coverUrl: undefined,
+        hasBlob: false,
+        currentFile: updatedFile,
+      } as typeof fileState
 
-    useEffect(() => {
       fileStoreActionsRef.current
-        .hasTrackBlobInLocal(file.id)
+        .hasTrackBlobInLocal(updatedFile.id)
         .then(hasBlob => {
-          setFileStatus(
-            hasBlob ? "local" : networkMonitor.isOnline ? "online" : "offline"
+          newFileState.hasBlob = hasBlob || false
+          const cover = mm.selectCover(
+            newFileState.currentFile.metadata?.common.picture
           )
+          if (!cover) {
+            return
+          }
+
+          const url = URL.createObjectURL(
+            new Blob([cover.data], { type: cover.format })
+          )
+
+          newFileState.coverUrl = url
+          setFileState(newFileState)
         })
         .catch(error => {
           console.error(error)
           enqueueSnackbar(`${error}`, { variant: "error" })
         })
-    }, [networkMonitor.isOnline, file])
 
-    const isSyncing = fileStoreState.syncingTrackFiles[file.id]
-
-    const disabled = fileStatus === "offline" || isSyncing
-
-    return (
-      <FileListItemBasic
-        name={title}
-        icon={
-          <ListItemAvatar>
-            <TrackCover coverUrl={coverUrl} />
-          </ListItemAvatar>
+      return () => {
+        if (newFileState.coverUrl) {
+          URL.revokeObjectURL(newFileState.coverUrl)
         }
-        fileStatus={isSyncing ? "downloading" : fileStatus}
-        selected={selected}
-        disabled={disabled}
-        onClick={onClick}
-        secondaryText={file.metadata?.common.artists?.join(", ") || ""}
-        menuItems={[
-          <MenuItem
-            key="go-to-album"
-            onClick={() => {
-              let albumName = file.metadata?.common.album
-              if (albumName === undefined) albumName = "Unknown Album"
-              albumName = albumName.replace(/\0+$/, "")
-              routerActions.goAlbum(albumName)
-            }}
-          >
-            <ListItemText>Open Album</ListItemText>
-          </MenuItem>,
-        ]}
-      />
-    )
+      }
+    }, [updatedFile])
+
+    const isSyncingLast = useRef(false)
+    const isSyncing = fileStoreState.syncingTrackFiles[file.id] || false
+
+    useEffect(() => {
+      if (isSyncingLast.current && !isSyncing) {
+        // console.log("###", file.id)
+        fileStoreActionsRef.current
+          .getFileById(file.id)
+          .then(updatedFile => {
+            if (!updatedFile) return
+            if (updatedFile.type !== "audio-track") return
+            setUpdatedFile(updatedFile as AudioTrackFileItem)
+          })
+          .catch(error => {
+            console.error(error)
+            enqueueSnackbar(`${error}`, { variant: "error" })
+          })
+      }
+      isSyncingLast.current = isSyncing
+    }, [isSyncing, file])
+
+    const item = useMemo(() => {
+      const file = fileState.currentFile
+      // console.log("!!!", file.id, isSyncing, networkMonitor.isOnline, selected)
+      const title = file.metadata?.common.title || file.name
+      const artists = file.metadata?.common.artists?.join(", ") || ""
+      const fileStatus = (() => {
+        if (isSyncing) return "downloading"
+        if (fileState.hasBlob) return "local"
+        if (networkMonitor.isOnline) return "online"
+        return "offline"
+      })()
+
+      const disabled = fileStatus === "offline" || isSyncing
+
+      return (
+        <FileListItemBasic
+          name={title}
+          icon={
+            <ListItemAvatar>
+              <TrackCover coverUrl={fileState.coverUrl} />
+            </ListItemAvatar>
+          }
+          fileStatus={fileStatus}
+          selected={selected}
+          disabled={disabled}
+          onClick={onClick}
+          secondaryText={artists}
+          menuItems={[
+            <MenuItem
+              key="go-to-album"
+              onClick={() => {
+                let albumName = file.metadata?.common.album
+                if (albumName === undefined) albumName = "Unknown Album"
+                albumName = albumName.replace(/\0+$/, "")
+                routerActionsRef.current.goAlbum(albumName)
+              }}
+            >
+              <ListItemText>Open Album</ListItemText>
+            </MenuItem>,
+          ]}
+        />
+      )
+    }, [isSyncing, selected, onClick, networkMonitor.isOnline, fileState])
+
+    return item
   }
 )
