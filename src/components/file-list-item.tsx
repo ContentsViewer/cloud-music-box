@@ -12,7 +12,6 @@ import {
   Menu,
   MenuItem,
 } from "@mui/material"
-import FolderIcon from "@mui/icons-material/Folder"
 import {
   ArrowDownward,
   Audiotrack,

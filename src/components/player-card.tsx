@@ -30,7 +30,14 @@ import {
   hexFromArgb,
   Hct,
 } from "@material/material-color-utilities"
-import { MouseEventHandler, useEffect, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  MouseEventHandler,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
@@ -465,21 +472,25 @@ interface PlayerCardProps {
 }
 
 export const PlayerCard = (props: PlayerCardProps) => {
-  const [playerState, playerActions] = usePlayerStore()
+  const [playerState] = usePlayerStore()
+
+  const activeTrack = playerState.activeTrack
+
+  return <PlayerCardInner {...props} activeTrack={activeTrack} />
+}
+
+interface PlayerCardInnerProps extends PlayerCardProps {
+  activeTrack: AudioTrack | null
+}
+
+const PlayerCardInner = memo(function PlayerCardInner({
+  activeTrack,
+  ...props
+}: PlayerCardInnerProps) {
   const [themeStoreState] = useThemeStore()
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
   const cardRef = useRef<HTMLDivElement>(null)
-  const coverOnShrinkRef = useRef<HTMLDivElement>(null)
   const coverOnExpandRef = useRef<HTMLDivElement>(null)
-  const [coverRect, setCoverRect] = useState<{
-    x: Number
-    y: Number
-    width: Number
-    height: Number
-  } | null>(null)
-  const theme = useTheme()
-
-  const activeTrack = playerState.activeTrack
 
   const title =
     activeTrack?.file.metadata?.common.title ||
@@ -611,4 +622,4 @@ export const PlayerCard = (props: PlayerCardProps) => {
       </Box>
     </div>
   )
-}
+})
