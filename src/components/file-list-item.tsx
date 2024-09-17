@@ -198,7 +198,6 @@ export const FileListItemAudioTrack = React.memo(
     })
 
     useEffect(() => {
-      // console.log("AAA", updatedFile.id)
       const newFileState = {
         coverUrl: undefined,
         hasBlob: false,
@@ -209,18 +208,14 @@ export const FileListItemAudioTrack = React.memo(
         .hasTrackBlobInLocal(updatedFile.id)
         .then(hasBlob => {
           newFileState.hasBlob = hasBlob || false
-          const cover = mm.selectCover(
-            newFileState.currentFile.metadata?.common.picture
-          )
-          if (!cover) {
-            return
+          const cover = mm.selectCover(updatedFile.metadata?.common.picture)
+          if (cover) {
+            const url = URL.createObjectURL(
+              new Blob([cover.data], { type: cover.format })
+            )
+            newFileState.coverUrl = url
           }
 
-          const url = URL.createObjectURL(
-            new Blob([cover.data], { type: cover.format })
-          )
-
-          newFileState.coverUrl = url
           setFileState(newFileState)
         })
         .catch(error => {
