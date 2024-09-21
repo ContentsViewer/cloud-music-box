@@ -18,7 +18,6 @@ import {
   SxProps,
   Theme,
   alpha,
-  useTheme,
   ButtonBase,
   AppBar,
 } from "@mui/material"
@@ -30,14 +29,7 @@ import {
   hexFromArgb,
   Hct,
 } from "@material/material-color-utilities"
-import {
-  memo,
-  MouseEventHandler,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { memo, MouseEventHandler, useEffect, useRef, useState } from "react"
 import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
@@ -475,27 +467,33 @@ export const PlayerCard = (props: PlayerCardProps) => {
   const [playerState] = usePlayerStore()
 
   const activeTrack = playerState.activeTrack
+  const isActiveTrackLoading = playerState.isActiveTrackLoading
 
-  return <PlayerCardInner {...props} activeTrack={activeTrack} />
+  return (
+    <PlayerCardInner
+      {...props}
+      activeTrack={activeTrack}
+      isActiveTrackLoading={isActiveTrackLoading}
+    />
+  )
 }
 
 interface PlayerCardInnerProps extends PlayerCardProps {
   activeTrack: AudioTrack | null
+  isActiveTrackLoading: boolean
 }
 
 const PlayerCardInner = memo(function PlayerCardInner({
   activeTrack,
+  isActiveTrackLoading,
   ...props
 }: PlayerCardInnerProps) {
   const [themeStoreState] = useThemeStore()
+
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
+
   const cardRef = useRef<HTMLDivElement>(null)
   const coverOnExpandRef = useRef<HTMLDivElement>(null)
-
-  const title =
-    activeTrack?.file.metadata?.common.title ||
-    activeTrack?.file.name ||
-    "No track playing"
 
   useEffect(() => {
     if (coverUrl) {
@@ -515,7 +513,12 @@ const PlayerCardInner = memo(function PlayerCardInner({
       }
     }
   }, [activeTrack?.file.metadata?.common.picture])
-
+  
+  const title =
+  activeTrack?.file.metadata?.common.title ||
+  activeTrack?.file.name ||
+    "No track playing"
+  
   const primaryBackgroundColor = (() => {
     const hct = Hct.fromInt(
       MaterialDynamicColors.primaryContainer
@@ -599,12 +602,6 @@ const PlayerCardInner = memo(function PlayerCardInner({
           <Box
             component="div"
             sx={{
-              //position: "fixed",
-              //top: 0,
-              //left: 0,
-              //right: 0,
-              //bottom: 0,
-              //transformOrigin: "bottom",
               width: "100%",
               height: "100%",
               pointerEvents: "auto",
