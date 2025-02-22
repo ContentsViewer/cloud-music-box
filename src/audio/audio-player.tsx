@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePlayerStore, AudioTrack } from "../stores/player-store"
 import { enqueueSnackbar } from "notistack"
-import { useFileStore } from "../stores/file-store"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
 import { useAudioDynamicsStore } from "../stores/audio-dynamics-store"
@@ -193,10 +192,6 @@ export const AudioPlayer = () => {
   const [, dynamicThemeActions] = useAudioDynamicsStore()
   const dynamicThemeActionsRef = useRef(dynamicThemeActions)
 
-  const fileStore = useFileStore()
-  const fileStoreRef = useRef(fileStore)
-  fileStoreRef.current = fileStore
-
   const audioRef = useRef<HTMLAudioElement>(null)
   const sourceRef = useRef<HTMLSourceElement>(null)
 
@@ -345,8 +340,20 @@ export const AudioPlayer = () => {
       activeTrack?.file.metadata?.common.title ||
       activeTrack?.file.name ||
       "Unknown"
+    console.log(title)
 
-    enqueueSnackbar(`Playing ${title}`)
+    enqueueSnackbar(
+      <span>
+        Playing{" "}
+        <span
+          style={{
+            fontWeight: "bold",
+          }}
+        >
+          {title}
+        </span>
+      </span>
+    )
   }, [
     playerState.isActiveTrackLoading,
     playerState.isPlaying,

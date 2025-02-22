@@ -24,7 +24,7 @@ import {
 } from "@mui/icons-material"
 import { useNetworkMonitor } from "../stores/network-monitor"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AudioTrackFileItem, useFileStore } from "../stores/file-store"
+import { useFileStore } from "../stores/file-store"
 import { enqueueSnackbar } from "notistack"
 import * as mm from "music-metadata-browser"
 import React from "react"
@@ -35,6 +35,7 @@ import {
   hexFromArgb,
 } from "@material/material-color-utilities"
 import { useRouter } from "../router"
+import { AudioTrackFileItem } from "../drive-clients/base-drive-client"
 
 interface FileListItemBasicProps {
   name: string
@@ -177,8 +178,6 @@ export const FileListItemAudioTrack = React.memo(
     const networkMonitor = useNetworkMonitor()
 
     const [fileStoreState, fileStoreActions] = useFileStore()
-    const fileStoreActionsRef = useRef(fileStoreActions)
-    fileStoreActionsRef.current = fileStoreActions
 
     const [, routerActions] = useRouter()
     const routerActionsRef = useRef(routerActions)
@@ -203,7 +202,7 @@ export const FileListItemAudioTrack = React.memo(
         currentFile: updatedFile,
       } as typeof fileState
 
-      fileStoreActionsRef.current
+      fileStoreActions
         .hasTrackBlobInLocal(updatedFile.id)
         .then(hasBlob => {
           newFileState.hasBlob = hasBlob || false
@@ -235,7 +234,7 @@ export const FileListItemAudioTrack = React.memo(
     useEffect(() => {
       if (isSyncingLast.current && !isSyncing) {
         // console.log("###", file.id)
-        fileStoreActionsRef.current
+        fileStoreActions
           .getFileById(file.id)
           .then(updatedFile => {
             if (!updatedFile) return

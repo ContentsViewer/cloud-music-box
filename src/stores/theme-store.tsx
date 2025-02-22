@@ -1,6 +1,6 @@
 "use client"
 
-import { Roboto } from "next/font/google"
+import { Roboto, Noto_Sans_JP } from "next/font/google"
 import { createTheme, responsiveFontSizes } from "@mui/material/styles"
 import { ThemeProvider } from "@mui/material/styles"
 import { useTheme } from "@mui/material/styles"
@@ -18,6 +18,11 @@ import { GlobalStyles } from "@mui/material"
 import { extractColorFromImage } from "../theming/color-from-image"
 
 const roboto = Roboto({
+  weight: ["300", "400", "500", "700"],
+  subsets: ["latin"],
+  display: "swap",
+})
+const notoSans = Noto_Sans_JP({
   weight: ["300", "400", "500", "700"],
   subsets: ["latin"],
   display: "swap",
@@ -127,7 +132,7 @@ export const ThemeStoreProvider = ({
         },
       },
       typography: {
-        fontFamily: roboto.style.fontFamily,
+        fontFamily: notoSans.style.fontFamily,
       },
     })
   )

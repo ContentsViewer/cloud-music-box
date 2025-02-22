@@ -29,8 +29,6 @@ interface RenderingContext {
   currentPitch: number
 }
 
-interface LissajousCurveProps {}
-
 const LissajousCurve = () => {
   const [audioDynamicsState] = useAudioDynamicsStore()
   const [themeStoreState] = useThemeStore()

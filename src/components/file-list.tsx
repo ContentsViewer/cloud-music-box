@@ -1,11 +1,5 @@
 "use client"
 
-import {
-  AudioTrackFileItem,
-  BaseFileItem,
-  FolderItem,
-  useFileStore,
-} from "../stores/file-store"
 import { useRouter } from "../router"
 import { FileListItemAudioTrack, FileListItemBasic } from "./file-list-item"
 import { AudioTrack, usePlayerStore } from "../stores/player-store"
@@ -15,6 +9,12 @@ import { useNetworkMonitor } from "../stores/network-monitor"
 import { List, ListItemIcon, SxProps } from "@mui/material"
 import { useCallback, useEffect, useMemo, useRef } from "react"
 import React from "react"
+import {
+  AudioTrackFileItem,
+  BaseFileItem,
+  FolderItem,
+} from "../drive-clients/base-drive-client"
+import { SerializedStyles } from "@emotion/react"
 
 const FileListItem = React.memo(function FileListItem({
   file,
@@ -83,10 +83,31 @@ const FileListItem = React.memo(function FileListItem({
   )
 })
 
+const FileListInner = React.memo(function FileListInner({
+  files,
+  playTrack,
+}: {
+  files?: BaseFileItem[]
+  playTrack: (file: AudioTrackFileItem) => void
+}) {
+  return (
+    <List>
+      {files?.map(file => (
+        <FileListItem
+          key={file.id}
+          file={file}
+          playTrack={playTrack}
+          activeTrack={null}
+        />
+      ))}
+    </List>
+  )
+})
+
 export interface FileListProps {
   folderId?: string
   files?: BaseFileItem[]
-  sx?: SxProps
+  cssStyle?: SerializedStyles
 }
 
 export function FileList(props: FileListProps) {
@@ -112,15 +133,8 @@ export function FileList(props: FileListProps) {
   )
 
   return (
-    <List sx={props.sx}>
-      {props.files?.map(file => (
-        <FileListItem
-          key={file.id}
-          file={file}
-          playTrack={playTrack}
-          activeTrack={playerStoreState.activeTrack}
-        />
-      ))}
-    </List>
+    <div css={props.cssStyle}>
+      <FileListInner files={props.files} playTrack={playTrack} />
+    </div>
   )
 }

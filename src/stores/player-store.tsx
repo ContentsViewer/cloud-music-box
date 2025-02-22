@@ -73,8 +73,6 @@ export const usePlayerStore = () => {
   const state = useContext(PlayerStateContext)
   const dispatch = useContext(PlayerDispatchContext)
   const [, fileStoreActions] = useFileStore()
-  const fileStoreActionsRef = useRef(fileStoreActions)
-  fileStoreActionsRef.current = fileStoreActions
 
   const playTrack = (
     index: number,
@@ -90,7 +88,7 @@ export const usePlayerStore = () => {
       })
     }
 
-    cacheBlobs(index, currentTracks, fileStoreActionsRef.current, dispatch)
+    cacheBlobs(index, currentTracks, fileStoreActions, dispatch)
 
     const track = currentTracks[index]
     const isActiveTrackLoading = !track.blob

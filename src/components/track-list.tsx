@@ -20,7 +20,6 @@ import {
   Menu,
   MenuItem,
 } from "@mui/material"
-import { AudioTrackFileItem } from "../stores/file-store"
 import React, { useCallback, useMemo, useRef, useState } from "react"
 import { usePlayerStore } from "../stores/player-store"
 import { useThemeStore } from "../stores/theme-store"
@@ -30,19 +29,24 @@ import {
 } from "@material/material-color-utilities"
 import { MoreVert } from "@mui/icons-material"
 import { useRouter } from "../router"
+import { AudioTrackFileItem } from "../drive-clients/base-drive-client"
+import { SerializedStyles } from "@emotion/react"
 
 interface TrackListItemProps {
   track: AudioTrackFileItem
   activeTrack: AudioTrackFileItem | undefined
   playTrack?: (track: AudioTrackFileItem) => void
-  menuItems?: React.ReactNode
+  onMenuClick: (
+    event: React.MouseEvent<HTMLButtonElement>,
+    track: AudioTrackFileItem
+  ) => void
 }
 
 const TrackListItem = React.memo(function TrackListItem({
   track,
   activeTrack,
   playTrack,
-  menuItems,
+  onMenuClick,
 }: TrackListItemProps) {
   const [themeStoreState] = useThemeStore()
 
@@ -57,8 +61,6 @@ const TrackListItem = React.memo(function TrackListItem({
   )
   const selected = activeTrack?.id === track.id
 
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
-
   return (
     <ListItem
       secondaryAction={
@@ -69,23 +71,11 @@ const TrackListItem = React.memo(function TrackListItem({
             }}
             edge="end"
             onClick={event => {
-              setAnchorEl(event.currentTarget)
+              onMenuClick(event, track)
             }}
-            disabled={menuItems === undefined}
           >
-            {/* <MoreHoriz /> */}
             <MoreVert />
           </IconButton>
-          <Menu
-            anchorEl={anchorEl}
-            keepMounted
-            open={Boolean(anchorEl)}
-            onClose={() => {
-              setAnchorEl(null)
-            }}
-          >
-            {menuItems}
-          </Menu>
         </div>
       }
       disablePadding
@@ -126,21 +116,73 @@ const TrackListItem = React.memo(function TrackListItem({
   )
 })
 
+const TrackListInner = React.memo(function TrackListInner({
+  tracks,
+  activeTrack,
+  playTrack,
+}: {
+  tracks?: AudioTrackFileItem[]
+  activeTrack?: AudioTrackFileItem
+  playTrack: (track: AudioTrackFileItem) => void
+}) {
+  const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null)
+  const refMenuTrack = useRef<AudioTrackFileItem | null>(null)
+  const [, routerActions] = useRouter()
+
+  const onMenuClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>, track: AudioTrackFileItem) => {
+      setMenuAnchorEl(event.currentTarget)
+      refMenuTrack.current = track
+    },
+    []
+  )
+
+  return (
+    <List>
+      {tracks?.map(track => (
+        <TrackListItem
+          key={track.id}
+          track={track}
+          activeTrack={activeTrack}
+          playTrack={playTrack}
+          onMenuClick={onMenuClick}
+        />
+      ))}
+      <Menu
+        anchorEl={menuAnchorEl}
+        open={Boolean(menuAnchorEl)}
+        onClose={() => setMenuAnchorEl(null)}
+      >
+        <MenuItem>
+          <ListItemText
+            onClick={() => {
+              const parentId = refMenuTrack.current?.parentId
+              if (!parentId) return
+              routerActions.goFile(parentId)
+            }}
+          >
+            Open Files
+          </ListItemText>
+        </MenuItem>
+      </Menu>
+    </List>
+  )
+})
+
 interface TrackListProps {
   tracks: AudioTrackFileItem[] | undefined
   albumId?: string
-  sx?: SxProps<Theme>
+  cssStyle?: SerializedStyles
 }
 
 export const TrackList = React.memo(function TrackList({
   tracks,
   albumId,
-  sx,
+  cssStyle,
 }: TrackListProps) {
   const [playerStoreState, playerActions] = usePlayerStore()
   const playerActionsRef = useRef(playerActions)
   playerActionsRef.current = playerActions
-  const [routerState, routerActions] = useRouter()
 
   const tracksSorted = useMemo(() => {
     return tracks?.sort((a, b) => {
@@ -172,36 +214,14 @@ export const TrackList = React.memo(function TrackList({
     },
     [tracksSorted, albumId]
   )
-  const trackListItems = useMemo(() => {
-    // console.log("!!!!!")
-    return tracksSorted?.map(track => {
-      return (
-        <TrackListItem
-          key={track.id}
-          track={track}
-          activeTrack={playerStoreState.activeTrack?.file}
-          playTrack={playTrack}
-          menuItems={[
-            <MenuItem
-              key="go-to-file"
-              onClick={() => {
-                const parentId = track.parentId
-                if (!parentId) return
-                routerActions.goFile(parentId)
-              }}
-            >
-              <ListItemText>Open Files</ListItemText>
-            </MenuItem>,
-          ]}
-        />
-      )
-    })
-  }, [
-    tracksSorted,
-    playerStoreState.activeTrack?.file,
-    playTrack,
-    routerActions,
-  ])
 
-  return <List sx={{ ...sx }}>{trackListItems}</List>
+  return (
+    <div css={cssStyle}>
+      <TrackListInner
+        tracks={tracksSorted}
+        activeTrack={playerStoreState.activeTrack?.file}
+        playTrack={playTrack}
+      />
+    </div>
+  )
 })

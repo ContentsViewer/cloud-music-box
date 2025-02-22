@@ -10,6 +10,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -107,181 +108,142 @@ export const FileStoreDispatchContext = createContext<
 export const useFileStore = () => {
   const state = useContext(FileStoreStateContext)
   const dispatch = useContext(FileStoreDispatchContext)
+  const refState = useRef(state)
+  refState.current = state
 
-  const actions = {
-    getFileById: async (id: string) => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      if (!state.fileDb) {
-        throw new Error("File database not initialized")
-      }
-      {
-        const item = await getFileItemFromIdb(state.fileDb, id)
-        if (item) return item
-      }
-      if (!state.driveClient) {
-        throw new Error("Drive client not connected")
-      }
-
-      const remoteFile = await state.driveClient.getFile(id)
-      const file = await mergeAndSyncFileItem(remoteFile, state.fileDb)
-      return file
-    },
-    getChildrenLocal: async (id: string) => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      if (!state.fileDb) {
-        throw new Error("File database not initialized")
-      }
-
-      const currentFolder = (await getFileItemFromIdb(
-        state.fileDb,
-        id
-      )) as FolderItem
-      // if (currentFolder.type !== "folder") {
-      //   throw new Error("Item is not a folder")
-      // }
-
-      const childrenIds = currentFolder.childrenIds
-      let children: BaseFileItem[] | undefined
-      if (childrenIds) {
-        const childrenPromise: Promise<BaseFileItem | undefined>[] =
-          childrenIds.map(childId => {
-            if (!state.fileDb) throw new Error("File database not initialized")
-            return getFileItemFromIdb(state.fileDb, childId)
-          })
-        children = (await Promise.all(childrenPromise)).filter(
-          child => child !== undefined
-        ) as BaseFileItem[]
-      }
-      return children
-    },
-    getChildrenRemote: async (id: string) => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      if (!state.fileDb) {
-        throw new Error("File database not initialized")
-      }
-      if (!state.driveClient) {
-        throw new Error("Drive client not connected")
-      }
-      const currentFolder = (await getFileItemFromIdb(
-        state.fileDb,
-        id
-      )) as FolderItem
-
-      const remoteChildren = await state.driveClient.getChildren(id)
-      const children = await Promise.all(
-        remoteChildren.map((item: any) => {
-          if (!state.fileDb) throw new Error("File database not initialized")
-          return mergeAndSyncFileItem(item, state.fileDb)
-        })
-      )
-
-      if (currentFolder) {
-        const childrenIds = children.map(child => child.id)
-        currentFolder.childrenIds = childrenIds
-        state.fileDb
-          .transaction("files", "readwrite")
-          .objectStore("files")
-          .put(currentFolder)
-      }
-
-      return children
-    },
-    hasTrackBlobInLocal: async (id: string) => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      if (!state.fileDb) {
-        throw new Error("File database not initialized")
-      }
-
-      const count = await getIdbRequest(
-        state.fileDb.transaction("blobs").objectStore("blobs").count(id)
-      )
-      return count > 0
-    },
-    requestDownloadTrack: async (id: string) => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      const { fileDb, driveClient } = state
-      if (!fileDb) {
-        throw new Error("File database not initialized")
-      }
-      const count = await getIdbRequest(
-        fileDb.transaction("blobs").objectStore("blobs").count(id)
-      )
-      if (count > 0) return
-
-      const promise = new Promise<void>((resolve, reject) => {
-        const task: SyncTask = {
-          fileId: id,
-          resolve: () => {
-            resolve()
-          },
-          reject: error => {
-            reject(error)
-          },
+  const actions = useMemo(() => {
+    return {
+      getFileById: async (id: string) => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+        {
+          const item = await getFileItemFromIdb(refState.current.fileDb, id)
+          if (item) return item
+        }
+        if (!refState.current.driveClient) {
+          throw new Error("Drive client not connected")
         }
 
-        // console.log("PUSH(req)", id)
+        const remoteFile = await refState.current.driveClient.getFile(id)
+        const file = await mergeAndSyncFileItem(
+          remoteFile,
+          refState.current.fileDb
+        )
+        return file
+      },
+      getChildrenLocal: async (id: string) => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
 
-        dispatch({
-          type: "setSyncingTrackFile",
-          payload: {
-            id,
-            syncing: true,
-          },
-        })
-
-        dispatch({
-          type: "pushSyncTask",
-          payload: [task],
-        })
-      })
-      await promise
-      return
-    },
-    getTrackContent: async (id: string) => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      const { fileDb } = state
-      if (!fileDb) {
-        throw new Error("File database not initialized")
-      }
-
-      {
-        const track = (await getFileItemFromIdb(
-          fileDb,
+        const currentFolder = (await getFileItemFromIdb(
+          refState.current.fileDb,
           id
-        )) as AudioTrackFileItem
-        if (track.type !== "audio-track") {
-          throw new Error("Item is not a track")
-        }
-        const blob = (await getIdbRequest(
-          fileDb.transaction("blobs", "readonly").objectStore("blobs").get(id)
-        )) as Blob | undefined
-        if (blob) {
-          markBlobAccessed(fileDb, id, blob)
-          return { blob, file: track }
-        }
-      }
+        )) as FolderItem
+        // if (currentFolder.type !== "folder") {
+        //   throw new Error("Item is not a folder")
+        // }
 
-      const promise = new Promise<{ blob?: Blob; file?: AudioTrackFileItem }>(
-        (resolve, reject) => {
+        const childrenIds = currentFolder.childrenIds
+        let children: BaseFileItem[] | undefined
+        if (childrenIds) {
+          const childrenPromise: Promise<BaseFileItem | undefined>[] =
+            childrenIds.map(childId => {
+              if (!refState.current.fileDb)
+                throw new Error("File database not initialized")
+              return getFileItemFromIdb(refState.current.fileDb, childId)
+            })
+          children = (await Promise.all(childrenPromise)).filter(
+            child => child !== undefined
+          ) as BaseFileItem[]
+        }
+        return children
+      },
+      getChildrenRemote: async (id: string) => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+        if (!refState.current.driveClient) {
+          throw new Error("Drive client not connected")
+        }
+        const currentFolder = (await getFileItemFromIdb(
+          refState.current.fileDb,
+          id
+        )) as FolderItem
+
+        const remoteChildren = await refState.current.driveClient.getChildren(
+          id
+        )
+        const children = await Promise.all(
+          remoteChildren.map((item: any) => {
+            if (!refState.current.fileDb)
+              throw new Error("File database not initialized")
+            return mergeAndSyncFileItem(item, refState.current.fileDb)
+          })
+        )
+
+        if (currentFolder) {
+          const childrenIds = children.map(child => child.id)
+          currentFolder.childrenIds = childrenIds
+          refState.current.fileDb
+            .transaction("files", "readwrite")
+            .objectStore("files")
+            .put(currentFolder)
+        }
+
+        return children
+      },
+      hasTrackBlobInLocal: async (id: string) => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        const count = await getIdbRequest(
+          refState.current.fileDb
+            .transaction("blobs")
+            .objectStore("blobs")
+            .count(id)
+        )
+        return count > 0
+      },
+      requestDownloadTrack: async (id: string) => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        const { fileDb, driveClient } = refState.current
+        if (!fileDb) {
+          throw new Error("File database not initialized")
+        }
+        const count = await getIdbRequest(
+          fileDb.transaction("blobs").objectStore("blobs").count(id)
+        )
+        if (count > 0) return
+
+        const promise = new Promise<void>((resolve, reject) => {
           const task: SyncTask = {
             fileId: id,
-            resolve,
-            reject,
+            resolve: () => {
+              resolve()
+            },
+            reject: error => {
+              reject(error)
+            },
           }
 
-          // console.log("PUSH", id)
+          // console.log("PUSH(req)", id)
 
           dispatch({
             type: "setSyncingTrackFile",
@@ -295,70 +257,123 @@ export const useFileStore = () => {
             type: "pushSyncTask",
             payload: [task],
           })
+        })
+        await promise
+        return
+      },
+      getTrackContent: async (id: string) => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
         }
-      )
+        const { fileDb } = refState.current
+        if (!fileDb) {
+          throw new Error("File database not initialized")
+        }
 
-      const { file, blob } = await promise
-      if (!file || !blob) {
-        throw new Error("File or blob not found")
-      }
-      return { blob, file }
-    },
-    getAlbumById: async (id: string) => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      if (!state.fileDb) {
-        throw new Error("File database not initialized")
-      }
+        {
+          const track = (await getFileItemFromIdb(
+            fileDb,
+            id
+          )) as AudioTrackFileItem
+          if (track.type !== "audio-track") {
+            throw new Error("Item is not a track")
+          }
+          const blob = (await getIdbRequest(
+            fileDb.transaction("blobs", "readonly").objectStore("blobs").get(id)
+          )) as Blob | undefined
+          if (blob) {
+            markBlobAccessed(fileDb, id, blob)
+            return { blob, file: track }
+          }
+        }
 
-      const album = await getAlbumItemFromIdb(state.fileDb, id)
-      return album
-    },
-    getAlbumIds: async () => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      if (!state.fileDb) {
-        throw new Error("File database not initialized")
-      }
+        const promise = new Promise<{ blob?: Blob; file?: AudioTrackFileItem }>(
+          (resolve, reject) => {
+            const task: SyncTask = {
+              fileId: id,
+              resolve,
+              reject,
+            }
 
-      const albumIds = await getIdbRequest<string[]>(
-        state.fileDb
-          .transaction("albums")
-          .objectStore("albums")
-          .getAllKeys() as IDBRequest<string[]>
-      )
+            // console.log("PUSH", id)
 
-      return albumIds
-    },
-    setBlobsStorageMaxBytes: (bytes: number) => {
-      dispatch({ type: "setBlobsStorageMaxBytes", payload: bytes })
-    },
-    clearAllLocalBlobs: async () => {
-      if (!state.configured) {
-        throw new Error("File store not configured")
-      }
-      if (!state.fileDb) {
-        throw new Error("File database not initialized")
-      }
+            dispatch({
+              type: "setSyncingTrackFile",
+              payload: {
+                id,
+                syncing: true,
+              },
+            })
 
-      await getIdbRequest(
-        state.fileDb
-          .transaction("blobs", "readwrite")
-          .objectStore("blobs")
-          .clear()
-      )
-      await getIdbRequest(
-        state.fileDb
-          .transaction("blobs-meta", "readwrite")
-          .objectStore("blobs-meta")
-          .clear()
-      )
-      localStorage.setItem("blobsStorageUsageBytes", "0")
-      dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
-    },
-  }
+            dispatch({
+              type: "pushSyncTask",
+              payload: [task],
+            })
+          }
+        )
+
+        const { file, blob } = await promise
+        if (!file || !blob) {
+          throw new Error("File or blob not found")
+        }
+        return { blob, file }
+      },
+      getAlbumById: async (id: string) => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        const album = await getAlbumItemFromIdb(refState.current.fileDb, id)
+        return album
+      },
+      getAlbumIds: async () => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        const albumIds = await getIdbRequest<string[]>(
+          refState.current.fileDb
+            .transaction("albums")
+            .objectStore("albums")
+            .getAllKeys() as IDBRequest<string[]>
+        )
+
+        return albumIds
+      },
+      setBlobsStorageMaxBytes: (bytes: number) => {
+        dispatch({ type: "setBlobsStorageMaxBytes", payload: bytes })
+      },
+      clearAllLocalBlobs: async () => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        await getIdbRequest(
+          refState.current.fileDb
+            .transaction("blobs", "readwrite")
+            .objectStore("blobs")
+            .clear()
+        )
+        await getIdbRequest(
+          refState.current.fileDb
+            .transaction("blobs-meta", "readwrite")
+            .objectStore("blobs-meta")
+            .clear()
+        )
+        localStorage.setItem("blobsStorageUsageBytes", "0")
+        dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
+      },
+    }
+  }, [])
 
   return [state, actions] as const
 }

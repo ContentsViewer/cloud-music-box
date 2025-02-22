@@ -119,7 +119,9 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
           position: "absolute",
 
           zIndex: audioDynamicsSettings.dynamicsEffectAppeal ? -1 : 0,
-          // opacity: audioDynamicsSettings.dynamicsEffectAppeal ? 0.25 : 1,
+          opacity: audioDynamicsSettings.dynamicsEffectAppeal ? 0.5 : 1,
+          filter: audioDynamicsSettings.dynamicsEffectAppeal ? "blur(10px)" : "none",
+          
           scale: audioDynamicsSettings.dynamicsEffectAppeal ? "0.9" : "1",
           transition: "opacity 0.5s ease-in-out, scale 0.5s ease-in-out",
           overflow: "hidden",
@@ -151,9 +153,6 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
 }
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  const [audioDynamicsEffectAppeal, setAudioDynamicsEffectAppeal] =
-    useState<boolean>(false)
-
   useEffect(() => {
     registerServiceWorker({
       onNeedRefresh: updateSW => {
