@@ -145,6 +145,7 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
       <Dialog
         open={clearLocalDataDialogOpen}
         onClose={handleCloseClearLocalDataDialog}
+        sx={{ "& .MuiDialog-paper": { borderRadius: 3 } }}
       >
         <DialogTitle>Clear Local Data</DialogTitle>
         <DialogContent>
@@ -191,40 +192,44 @@ function ScreenSettingsArea() {
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
 
-  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false)
 
   useEffect(() => {
-    setIsFullScreen(!!document.fullscreenElement);
+    setIsFullScreen(!!document.fullscreenElement)
   }, [])
-
 
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch((err) => {
-        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
-        enqueueSnackbar(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`, { variant: "error" });
-      });
+      document.documentElement.requestFullscreen().catch(err => {
+        console.error(
+          `Error attempting to enable full-screen mode: ${err.message} (${err.name})`
+        )
+        enqueueSnackbar(
+          `Error attempting to enable full-screen mode: ${err.message} (${err.name})`,
+          { variant: "error" }
+        )
+      })
     } else {
-      document.exitFullscreen();
+      document.exitFullscreen()
     }
-  };
-  
+  }
+
   const handleFullScreenToggle = () => {
-    toggleFullScreen();
-    setIsFullScreen(!isFullScreen);
-  };
+    toggleFullScreen()
+    setIsFullScreen(!isFullScreen)
+  }
 
   useEffect(() => {
     const handleFullScreenChange = () => {
-      setIsFullScreen(!!document.fullscreenElement);
-    };
+      setIsFullScreen(!!document.fullscreenElement)
+    }
 
-    document.addEventListener("fullscreenchange", handleFullScreenChange);
+    document.addEventListener("fullscreenchange", handleFullScreenChange)
 
     return () => {
-      document.removeEventListener("fullscreenchange", handleFullScreenChange);
-    };
-  }, []);
+      document.removeEventListener("fullscreenchange", handleFullScreenChange)
+    }
+  }, [])
 
   return (
     <Box
@@ -247,7 +252,11 @@ function ScreenSettingsArea() {
               },
             }}
           />
-          <Switch checked={isFullScreen} edge="end" onChange={handleFullScreenToggle} />
+          <Switch
+            checked={isFullScreen}
+            edge="end"
+            onChange={handleFullScreenToggle}
+          />
         </ListItem>
       </List>
     </Box>

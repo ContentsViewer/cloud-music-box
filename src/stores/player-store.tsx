@@ -8,8 +8,9 @@ import React, {
   useRef,
   useState,
 } from "react"
-import { AudioTrackFileItem, useFileStore } from "./file-store"
+import { useFileStore } from "./file-store"
 import { enqueueSnackbar } from "notistack"
+import { AudioTrackFileItem } from "../drive-clients/base-drive-client"
 
 /**
  * Represents an audio track that can be played.

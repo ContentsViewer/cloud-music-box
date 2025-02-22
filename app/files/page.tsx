@@ -108,7 +108,7 @@ export default function Page() {
   }, [fileStoreState.configured, folderId])
 
   useEffect(() => {
-    if (!fileStoreState.driveClient || !folderId) {
+    if (fileStoreState.driveStatus != "online" || !folderId) {
       return
     }
 
@@ -136,7 +136,7 @@ export default function Page() {
     return () => {
       isCancelled = true
     }
-  }, [fileStoreState.driveClient, folderId])
+  }, [fileStoreState.driveStatus, folderId])
 
   const handleMoreClose = () => {
     setAnchorEl(null)

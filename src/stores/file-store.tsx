@@ -5,7 +5,6 @@ import {
   InteractionRequiredAuthError,
   PublicClientApplication,
 } from "@azure/msal-browser"
-import { Client, ResponseType } from "@microsoft/microsoft-graph-client"
 import { SnackbarKey, closeSnackbar, enqueueSnackbar } from "notistack"
 import {
   createContext,
@@ -19,28 +18,16 @@ import { useNetworkMonitor } from "./network-monitor"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
 import { Button } from "@mui/material"
-
-export interface BaseFileItem {
-  name: string
-  id: string
-  type: "file" | "folder" | "audio-track"
-  parentId?: string
-}
-
-export interface FileItem extends BaseFileItem {
-  type: "file"
-}
-
-export interface FolderItem extends BaseFileItem {
-  type: "folder"
-  childrenIds?: string[]
-}
-
-export interface AudioTrackFileItem extends BaseFileItem {
-  type: "audio-track"
-  mimeType: string
-  metadata?: mm.IAudioMetadata
-}
+import {
+  BaseFileItem,
+  FolderItem,
+  AudioTrackFileItem,
+} from "../drive-clients/base-drive-client"
+import { BaseDriveClient } from "../drive-clients/base-drive-client"
+import {
+  OneDriveClient,
+  createOneDriveClient,
+} from "../drive-clients/onedrive-client"
 
 interface SyncTask {
   fileId: string
@@ -54,13 +41,14 @@ export interface AlbumItem {
   cover?: Blob
 }
 
+type DriveStatus = "not-configured" | "no-account" | "online" | "offline"
+
 interface FileStoreStateProps {
-  fileDb: IDBDatabase | undefined
-  driveClient: Client | undefined
-  pca: PublicClientApplication | undefined
-  rootFolderId: string | undefined
   configured: boolean
-  driveConfigureStatus: "not-configured" | "no-account" | "configured"
+  fileDb: IDBDatabase | undefined
+  driveClient: BaseDriveClient | undefined
+  driveStatus: DriveStatus
+  rootFolderId: string | undefined
 
   syncingTrackFiles: { [key: string]: boolean }
   syncQueue: SyncTask[]
@@ -78,18 +66,16 @@ interface BlobsMetaRecord {
 export const FileStoreStateContext = createContext<FileStoreStateProps>({
   fileDb: undefined,
   driveClient: undefined,
-  pca: undefined,
   rootFolderId: undefined,
   configured: false,
   syncingTrackFiles: {},
   syncQueue: [],
-  driveConfigureStatus: "not-configured",
+  driveStatus: "not-configured",
 })
 
 type FileStoreAction =
   | { type: "setFileDb"; payload: IDBDatabase }
-  | { type: "setDriveClient"; payload?: Client }
-  | { type: "setPca"; payload: PublicClientApplication }
+  | { type: "setDriveClient"; payload?: BaseDriveClient }
   | { type: "setRootFolderId"; payload: string | undefined }
   | { type: "setConfigured"; payload: boolean }
   | {
@@ -108,8 +94,8 @@ type FileStoreAction =
       }
     }
   | {
-      type: "setDriveConfigureStatus"
-      payload: "not-configured" | "no-account" | "configured"
+      type: "setDriveStatus"
+      payload: DriveStatus
     }
   | { type: "setBlobsStorageMaxBytes"; payload: number }
   | { type: "setBlobsStorageUsageBytes"; payload: number }
@@ -134,16 +120,13 @@ export const useFileStore = () => {
         const item = await getFileItemFromIdb(state.fileDb, id)
         if (item) return item
       }
-
       if (!state.driveClient) {
         throw new Error("Drive client not connected")
       }
 
-      const response = await state.driveClient
-        .api(`/me/drive/items/${id}`)
-        .get()
-      const item = await makeFileItemFromResponseAndSync(response, state.fileDb)
-      return item
+      const remoteFile = await state.driveClient.getFile(id)
+      const file = await mergeAndSyncFileItem(remoteFile, state.fileDb)
+      return file
     },
     getChildrenLocal: async (id: string) => {
       if (!state.configured) {
@@ -190,17 +173,13 @@ export const useFileStore = () => {
         id
       )) as FolderItem
 
-      const response = await state.driveClient
-        .api(`/me/drive/items/${id}/children`)
-        .get()
-      const children = (
-        await Promise.all(
-          response.value.map((item: any) => {
-            if (!state.fileDb) throw new Error("File database not initialized")
-            return makeFileItemFromResponseAndSync(item, state.fileDb)
-          })
-        )
-      ).filter(child => child !== undefined) as BaseFileItem[]
+      const remoteChildren = await state.driveClient.getChildren(id)
+      const children = await Promise.all(
+        remoteChildren.map((item: any) => {
+          if (!state.fileDb) throw new Error("File database not initialized")
+          return mergeAndSyncFileItem(item, state.fileDb)
+        })
+      )
 
       if (currentFolder) {
         const childrenIds = children.map(child => child.id)
@@ -364,11 +343,21 @@ export const useFileStore = () => {
         throw new Error("File database not initialized")
       }
 
-      await getIdbRequest(state.fileDb.transaction("blobs", "readwrite").objectStore("blobs").clear())
-      await getIdbRequest(state.fileDb.transaction("blobs-meta", "readwrite").objectStore("blobs-meta").clear())
+      await getIdbRequest(
+        state.fileDb
+          .transaction("blobs", "readwrite")
+          .objectStore("blobs")
+          .clear()
+      )
+      await getIdbRequest(
+        state.fileDb
+          .transaction("blobs-meta", "readwrite")
+          .objectStore("blobs-meta")
+          .clear()
+      )
       localStorage.setItem("blobsStorageUsageBytes", "0")
       dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
-    }
+    },
   }
 
   return [state, actions] as const
@@ -409,58 +398,21 @@ function getAlbumItemFromIdb(db: IDBDatabase, id: string): Promise<AlbumItem> {
   })
 }
 
-const audioFormatMapping: { [key: string]: { mimeType: string } } = {
-  aac: { mimeType: "audio/aac" },
-  mp3: { mimeType: "audio/mpeg" },
-  ogg: { mimeType: "audio/ogg" },
-  wav: { mimeType: "audio/wav" },
-  flac: { mimeType: "audio/flac" },
-  m4a: { mimeType: "audio/mp4" },
-}
-
-async function makeFileItemFromResponseAndSync(
-  responseItem: any,
+async function mergeAndSyncFileItem(
+  fileItem: BaseFileItem,
   db: IDBDatabase
-): Promise<BaseFileItem | undefined> {
-  let dbItem = await getFileItemFromIdb(db, responseItem.id)
-  if (responseItem.folder) {
-    dbItem = {
-      ...dbItem,
-      name: responseItem.name,
-      id: responseItem.id,
-      type: "folder",
-      parentId: responseItem.parentReference.id,
-    } as FolderItem
-  }
-  if (responseItem.file) {
-    const ext: string = responseItem.name.split(".").pop()
-    const audioMimeType = audioFormatMapping[ext]?.mimeType
+): Promise<BaseFileItem> {
+  const dbItem = await getFileItemFromIdb(db, fileItem.id)
+  const merged = { ...dbItem }
 
-    if (audioMimeType !== undefined) {
-      dbItem = {
-        ...dbItem,
-        name: responseItem.name,
-        id: responseItem.id,
-        type: "audio-track",
-        mimeType: audioMimeType,
-        parentId: responseItem.parentReference.id,
-      } as AudioTrackFileItem
-    } else {
-      dbItem = {
-        ...dbItem,
-        name: responseItem.name,
-        id: responseItem.id,
-        type: "file",
-        parentId: responseItem.parentReference.id,
-      } as FileItem
+  ;(Object.keys(fileItem) as Array<keyof BaseFileItem>).forEach(key => {
+    if (fileItem[key] !== undefined) {
+      ;(merged as any)[key] = fileItem[key]
     }
-  }
-  if (dbItem === undefined) {
-    return undefined
-  }
+  })
 
-  db.transaction("files", "readwrite").objectStore("files").put(dbItem)
-  return dbItem as BaseFileItem
+  db.transaction("files", "readwrite").objectStore("files").put(merged)
+  return merged as BaseFileItem
 }
 
 function getIdbRequest<T>(request: IDBRequest<T>) {
@@ -549,8 +501,6 @@ const reducer = (
       return { ...state, fileDb: action.payload }
     case "setDriveClient":
       return { ...state, driveClient: action.payload }
-    case "setPca":
-      return { ...state, pca: action.payload }
     case "setRootFolderId":
       return { ...state, rootFolderId: action.payload }
     case "setConfigured":
@@ -578,8 +528,8 @@ const reducer = (
       )
       return { ...state, syncQueue }
     }
-    case "setDriveConfigureStatus": {
-      return { ...state, driveConfigureStatus: action.payload }
+    case "setDriveStatus": {
+      return { ...state, driveStatus: action.payload }
     }
     case "setBlobsStorageMaxBytes": {
       return { ...state, blobsStorageMaxBytes: action.payload }
@@ -600,12 +550,11 @@ export const FileStoreProvider = ({
   const [state, dispatch] = useReducer(reducer, {
     fileDb: undefined,
     driveClient: undefined,
-    pca: undefined,
     rootFolderId: undefined,
     configured: false,
     syncingTrackFiles: {},
     syncQueue: [],
-    driveConfigureStatus: "not-configured",
+    driveStatus: "not-configured",
   })
 
   const syncPromiseRef = useRef<Promise<void>>(Promise.resolve())
@@ -621,20 +570,9 @@ export const FileStoreProvider = ({
     }
 
     const init = async () => {
-      const pca = new PublicClientApplication({
-        auth: {
-          clientId: "28af6fb9-c605-4ad3-8039-3e90df0933cb",
-          redirectUri: `${window.location.origin}${
-            process.env.NEXT_PUBLIC_BASE_PATH || ""
-          }/redirect`,
-        },
-        cache: {
-          cacheLocation: "localStorage",
-        },
-      })
+      const onedriveClient = await createOneDriveClient()
 
-      await pca.initialize()
-      dispatch({ type: "setPca", payload: pca })
+      dispatch({ type: "setDriveClient", payload: onedriveClient })
 
       let fileDb: IDBDatabase | undefined = undefined
       try {
@@ -719,11 +657,11 @@ export const FileStoreProvider = ({
       }
 
       {
-        const driveAccountJson = window.localStorage.getItem("drive-account")
-        if (driveAccountJson === null) {
-          dispatch({ type: "setDriveConfigureStatus", payload: "no-account" })
+        const accountInfo = onedriveClient.accountInfo
+        if (accountInfo === undefined) {
+          dispatch({ type: "setDriveStatus", payload: "no-account" })
         } else {
-          dispatch({ type: "setDriveConfigureStatus", payload: "configured" })
+          dispatch({ type: "setDriveStatus", payload: "offline" })
         }
       }
     }
@@ -742,71 +680,45 @@ export const FileStoreProvider = ({
     }
   }, [])
 
-  const clientConfiguring = useRef(false)
+  const refClientConfiguring = useRef(false)
 
   useEffect(() => {
-    if (clientConfiguring.current) return
+    if (refClientConfiguring.current) return
     if (!state.configured) return
-    if (!networkMonitor.isOnline) {
-      // If offline, client should be disconnected.
-      dispatch({ type: "setDriveClient", payload: undefined })
+
+    const driveClient = state.driveClient
+    if (!driveClient) return
+    if (state.driveStatus !== "online" && state.driveStatus !== "offline") {
       return
     }
-    const pca = state.pca
 
-    if (!pca) return
-    if (state.driveClient) return
+    if (!networkMonitor.isOnline) {
+      // If offline, client should be disconnected.
+      // dispatch({ type: "setDriveClient", payload: undefined })
+      dispatch({ type: "setDriveStatus", payload: "offline" })
+      return
+    }
 
-    clientConfiguring.current = true
+    if (state.driveStatus === "online") return
 
-    let accessToken: string | null = null
-    let account: AccountInfo | null = null
+    refClientConfiguring.current = true
 
-    pca
-      .handleRedirectPromise()
-      .then(response => {
-        if (!response) return
-        window.localStorage.setItem(
-          "drive-account",
-          JSON.stringify(response.account)
-        )
-        accessToken = response.accessToken
-        // console.log("Redirect")
-      })
-      .catch(error => {
-        console.error(error)
-        enqueueSnackbar(`${error}`, { variant: "error" })
-      })
-      .then(() => {
-        if (accessToken !== null) return
-        const activeAccountJson = window.localStorage.getItem("drive-account")
-        if (activeAccountJson === null) {
-          return
-        }
-        account = JSON.parse(activeAccountJson) as AccountInfo
-
-        const silentRequest = {
-          scopes: ["Files.Read", "Sites.Read.All"],
-          account: account,
-        }
-        // console.log("Silent")
-        return pca.acquireTokenSilent(silentRequest)
-      })
-      .then(response => {
-        if (!response) return
-        accessToken = response.accessToken
-        window.localStorage.setItem(
-          "drive-account",
-          JSON.stringify(response.account)
-        )
-      })
-      .catch(error => {
-        console.error(error)
+    const process = async () => {
+      try {
+        await driveClient.connect()
+        enqueueSnackbar("Drive Client Connected")
+      } catch (error) {
         if (error instanceof InteractionRequiredAuthError) {
           // pca.acquireTokenRedirect({ scopes: ["Files.Read", "Sites.Read.All"] })
           // return
         }
+
         const action = (snackbarId: SnackbarKey) => {
+          // FIXME: Remove dependency on OneDriveClient
+          const onedriveClient = driveClient as OneDriveClient
+          const pca = onedriveClient.pca
+          const account = onedriveClient.accountInfo
+
           return (
             <>
               <Button
@@ -839,43 +751,26 @@ export const FileStoreProvider = ({
           action,
           persist: true,
         })
-      })
-      .then(() => {
-        if (accessToken === null) return
-        dispatch({ type: "setDriveConfigureStatus", payload: "configured" })
-        const client = Client.init({
-          authProvider: done => {
-            done(null, accessToken)
-          },
-        })
-        dispatch({ type: "setDriveClient", payload: client })
-        enqueueSnackbar("Drive Client Connected", { variant: "success" })
-        clientConfiguring.current = false
-      })
-      .catch(error => {
+
+        refClientConfiguring.current = false
+        return
+      }
+
+      try {
+        const rootFolderId = await driveClient.getRootFolderId()
+        window.localStorage.setItem("rootFolderId", rootFolderId)
+        dispatch({ type: "setRootFolderId", payload: rootFolderId })
+      } catch (error) {
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
-        clientConfiguring.current = false
-      })
-  }, [networkMonitor, state.configured, state.pca, state.driveClient])
+      }
 
-  useEffect(() => {
-    if (state.driveClient === undefined) return
+      dispatch({ type: "setDriveStatus", payload: "online" })
+      refClientConfiguring.current = false
+    }
 
-    const driveClient = state.driveClient
-    driveClient
-      .api("/me/drive/root")
-      .get()
-      .then(response => {
-        const rootId = response.id
-        window.localStorage.setItem("rootFolderId", rootId)
-        dispatch({ type: "setRootFolderId", payload: rootId })
-      })
-      .catch(error => {
-        console.error(error)
-        enqueueSnackbar(`${error}`, { variant: "error" })
-      })
-  }, [state.driveClient, state.fileDb])
+    process()
+  }, [networkMonitor, state.configured, state.driveClient, state.driveStatus])
 
   useEffect(() => {
     const syncQueue = state.syncQueue
@@ -896,17 +791,8 @@ export const FileStoreProvider = ({
           // console.log("START", fileId)
           if (!driveClient) throw new Error("Drive client not connected")
 
-          return driveClient
-            .api(
-              `/me/drive/items/${fileId}?select=id,@microsoft.graph.downloadUrl`
-            )
-            .get()
+          return driveClient.fetchFileBlob(fileId)
         })
-        .then(response => {
-          const downloadUrl = response["@microsoft.graph.downloadUrl"]
-          return fetch(downloadUrl)
-        })
-        .then(response => response.blob())
         .then(blob => {
           return mm.parseBlob(blob).then(metadata => {
             return { blob, metadata }

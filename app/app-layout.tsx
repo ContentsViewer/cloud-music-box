@@ -5,8 +5,9 @@ import { PlayerCard } from "@/src/components/player-card"
 import { FileStoreProvider } from "@/src/stores/file-store"
 import { PlayerStoreProvider, usePlayerStore } from "@/src/stores/player-store"
 import { DynamicBackground } from "@/src/components/dynamic-background"
-import { Box, Fade, Button } from "@mui/material"
+import { Box, Fade, Button, styled } from "@mui/material"
 import {
+  MaterialDesignContent,
   SnackbarKey,
   SnackbarProvider,
   closeSnackbar,
@@ -21,6 +22,41 @@ import { AudioDynamicsProvider } from "@/src/stores/audio-dynamics-store"
 import { css } from "@emotion/css"
 import { registerServiceWorker } from "./register-sw"
 import { AudioDynamicsSettingsProvider, useAudioDynamicsSettingsStore } from "@/src/stores/audio-dynamics-settings"
+import { Hct, MaterialDynamicColors, hexFromArgb } from "@material/material-color-utilities"
+
+
+const StyledMaterialDesignContent = styled(MaterialDesignContent)(() => {
+  const [themeState] = useThemeStore()
+  const sourceColor = themeState.sourceColor
+  const surface = MaterialDynamicColors.inverseSurface.getArgb(
+    themeState.scheme
+  )
+  const onSurface = MaterialDynamicColors.inverseOnSurface.getArgb(
+    themeState.scheme
+  )
+  // console.log("!!!!", surface)
+  // const surface = hexFromArgb(MaterialDynamicColors.errorContainer.getArgb(themeState.scheme))
+  // const onSurface = hexFromArgb(MaterialDynamicColors.onErrorContainer.getArgb(themeState.scheme))
+  // const errorSource = Hct.from(25, 100, 10).toInt()
+  const errorSource = MaterialDynamicColors.error.getHct(themeState.scheme)
+
+  // const errorSurface = hexFromArgb(Blend.harmonize(errorSource, sourceColor))
+  // const errorOnSurface = hexFromArgb(Blend.harmonize(errorSource, sourceColor))
+  const errorSurface = Hct.from(errorSource.hue, 10, 20).toInt()
+  const errorOnSurface = Hct.from(errorSource.hue, 10, 80).toInt()
+  // const errorSurface = TonalPalette.fromHct(errorSource).tone(40)
+  // const errorOnSurface = TonalPalette.fromHct(errorSource).tone(90)
+  return {
+    "&.notistack-MuiContent-error": {
+      backgroundColor: hexFromArgb(errorSurface),
+      color: hexFromArgb(errorOnSurface),
+    },
+    "&.notistack-MuiContent-default": {
+      backgroundColor: hexFromArgb(surface),
+      color: hexFromArgb(onSurface),
+    },
+  }
+})
 
 const ThemeChanger = () => {
   const [playerState] = usePlayerStore()
@@ -65,6 +101,11 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
       }}
       classes={{
         containerAnchorOriginBottomLeft: snackbarContainerClass,
+      }}
+      Components={{
+        success: StyledMaterialDesignContent,
+        error: StyledMaterialDesignContent,
+        default: StyledMaterialDesignContent,
       }}
     >
       <ThemeChanger />
@@ -131,7 +172,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           )
         }
         enqueueSnackbar("A New Version is Available.", {
-          variant: "info",
           action,
           persist: true,
         })
