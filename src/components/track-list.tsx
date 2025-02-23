@@ -181,8 +181,6 @@ export const TrackList = React.memo(function TrackList({
   cssStyle,
 }: TrackListProps) {
   const [playerStoreState, playerActions] = usePlayerStore()
-  const playerActionsRef = useRef(playerActions)
-  playerActionsRef.current = playerActions
 
   const tracksSorted = useMemo(() => {
     return tracks?.sort((a, b) => {
@@ -201,12 +199,11 @@ export const TrackList = React.memo(function TrackList({
       const tracks = tracksSorted
 
       if (!tracks) return
-      if (!playerActionsRef.current) return
       if (!albumId) return
 
       const index = tracks.findIndex(t => t.id === file.id)
 
-      playerActionsRef.current.playTrack(
+      playerActions.playTrack(
         index,
         tracks,
         `/albums#${encodeURIComponent(albumId)}`

@@ -186,8 +186,6 @@ const msSetPlayingTrack = (track: AudioTrack) => {
 
 export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore()
-  const playerActionsRef = useRef(playerActions)
-  playerActionsRef.current = playerActions
 
   const [, dynamicThemeActions] = useAudioDynamicsStore()
   const dynamicThemeActionsRef = useRef(dynamicThemeActions)
@@ -211,16 +209,16 @@ export const AudioPlayer = () => {
 
     const onError = (error: any) => {
       console.error(error)
-      playerActionsRef.current.pause()
+      playerActions.pause()
       enqueueSnackbar(`${error}`, { variant: "error" })
     }
 
     const onDurationChange = () => {
-      playerActionsRef.current.setDuration(audio.duration)
+      playerActions.setDuration(audio.duration)
     }
 
     const onTimeUpdate = () => {
-      playerActionsRef.current.setCurrentTime(audio.currentTime)
+      playerActions.setCurrentTime(audio.currentTime)
 
       audioAnalyser
         .requestAnalyze(audio.currentTime)
@@ -237,7 +235,7 @@ export const AudioPlayer = () => {
 
     const onEnded = () => {
       console.log("Track ended")
-      playerActionsRef.current.playNextTrack()
+      playerActions.playNextTrack()
     }
 
     audio.addEventListener("error", onError)
@@ -329,7 +327,7 @@ export const AudioPlayer = () => {
         audioAnalyser.setBuffer(blob)
       })
       .catch(error => {
-        playerActionsRef.current.pause()
+        playerActions.pause()
 
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
@@ -384,20 +382,20 @@ export const AudioPlayer = () => {
 
     ms.setActionHandler("play", () => {
       console.log("Play")
-      playerActionsRef.current.play()
+      playerActions.play()
     })
     ms.setActionHandler("pause", () => {
       console.log("Pause")
-      playerActionsRef.current.pause()
+      playerActions.pause()
     })
 
     ms.setActionHandler("previoustrack", () => {
       console.log("Click previous track")
-      playerActionsRef.current.playPreviousTrack()
+      playerActions.playPreviousTrack()
     })
     ms.setActionHandler("nexttrack", () => {
       console.log("Click next track")
-      playerActionsRef.current.playNextTrack()
+      playerActions.playNextTrack()
     })
 
     ms.setActionHandler("seekbackward", null)
@@ -407,7 +405,7 @@ export const AudioPlayer = () => {
       console.log("Seek to", details)
       if (details.fastSeek) return
       if (details.seekTime === undefined) return
-      playerActionsRef.current.changeCurrentTime(details.seekTime)
+      playerActions.changeCurrentTime(details.seekTime)
     })
 
     return () => {

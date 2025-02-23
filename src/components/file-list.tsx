@@ -111,19 +111,16 @@ export interface FileListProps {
 }
 
 export function FileList(props: FileListProps) {
-  const [playerStoreState, playerActions] = usePlayerStore()
-  const playerActionsRef = useRef(playerActions)
-  playerActionsRef.current = playerActions
+  const [, playerActions] = usePlayerStore()
 
   const playTrack = useCallback(
     (file: AudioTrackFileItem) => {
       if (!props.files) return
-      if (!playerActionsRef.current) return
       const tracks = props.files.filter(
         f => f.type === "audio-track"
       ) as AudioTrackFileItem[]
       const index = tracks.findIndex(t => t.id === file.id)
-      playerActionsRef.current.playTrack(
+      playerActions.playTrack(
         index,
         tracks,
         `/files#${props.folderId}`
