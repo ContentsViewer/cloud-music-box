@@ -60,9 +60,7 @@ const StyledMaterialDesignContent = styled(MaterialDesignContent)(() => {
 
 const ThemeChanger = () => {
   const [playerState] = usePlayerStore()
-  const [theme, themeActions] = useThemeStore()
-  const themeActionsRef = useRef(themeActions)
-  themeActionsRef.current = themeActions
+  const [, themeStoreActions] = useThemeStore()
 
   useEffect(() => {
     if (!playerState.activeTrack) return
@@ -74,9 +72,9 @@ const ThemeChanger = () => {
 
     if (cover) {
       const blob = new Blob([cover.data], { type: cover.format })
-      themeActionsRef.current.applyThemeFromImage(blob)
+      themeStoreActions.applyThemeFromImage(blob)
     } else {
-      themeActionsRef.current.resetSourceColor()
+      themeStoreActions.resetSourceColor()
     }
   }, [playerState.activeTrack, playerState.isActiveTrackLoading])
 

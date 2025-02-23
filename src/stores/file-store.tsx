@@ -1,9 +1,7 @@
 "use client"
 
 import {
-  AccountInfo,
   InteractionRequiredAuthError,
-  PublicClientApplication,
 } from "@azure/msal-browser"
 import { SnackbarKey, closeSnackbar, enqueueSnackbar } from "notistack"
 import {

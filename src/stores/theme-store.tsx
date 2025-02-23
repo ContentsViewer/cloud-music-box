@@ -13,7 +13,14 @@ import {
   MaterialDynamicColors,
   rgbaFromArgb,
 } from "@material/material-color-utilities"
-import { Dispatch, createContext, useContext, useReducer } from "react"
+import {
+  Dispatch,
+  createContext,
+  useContext,
+  useMemo,
+  useReducer,
+  useRef,
+} from "react"
 import { GlobalStyles } from "@mui/material"
 import { extractColorFromImage } from "../theming/color-from-image"
 
@@ -50,26 +57,31 @@ export const ThemeDispatchContext = createContext<Dispatch<Action>>(() => {})
 export const useThemeStore = () => {
   const state = useContext(ThemeStateContext)
   const dispatch = useContext(ThemeDispatchContext)
+  const refState = useRef(state)
+  refState.current = state
 
-  const actions = {
-    applyThemeFromImage: async (blob: Blob) => {
-      const sourceColor = await extractColorFromImage(blob)
-      // console.log(rgbaFromArgb(sourceColor))
-      const scheme = new SchemeContent(Hct.fromInt(sourceColor), true, 0.3)
-      dispatch({ type: "setTheme", payload: { scheme, sourceColor } })
-    },
-    resetSourceColor: () => {
-      const scheme = new SchemeContent(
-        Hct.fromInt(defaultSourceColor),
-        true,
-        0.3
-      )
-      dispatch({
-        type: "setTheme",
-        payload: { scheme: scheme, sourceColor: defaultSourceColor },
-      })
-    },
-  }
+  const actions = useMemo(() => {
+    return {
+      applyThemeFromImage: async (blob: Blob) => {
+        const sourceColor = await extractColorFromImage(blob)
+        // console.log(rgbaFromArgb(sourceColor))
+        const scheme = new SchemeContent(Hct.fromInt(sourceColor), true, 0.3)
+        dispatch({ type: "setTheme", payload: { scheme, sourceColor } })
+      },
+      resetSourceColor: () => {
+        const scheme = new SchemeContent(
+          Hct.fromInt(defaultSourceColor),
+          true,
+          0.3
+        )
+        dispatch({
+          type: "setTheme",
+          payload: { scheme: scheme, sourceColor: defaultSourceColor },
+        })
+      },
+    }
+  }, [])
+
   return [state, actions] as const
 }
 
