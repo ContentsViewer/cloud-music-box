@@ -34,8 +34,10 @@ import {
 import Dialog from "@mui/material/Dialog"
 import DialogTitle from "@mui/material/DialogTitle"
 import { enqueueSnackbar } from "notistack"
+import { css } from "@emotion/react"
 
 import { useEffect, useRef, useState } from "react"
+import Script from "next/script"
 
 function formatBytes(bytes: number, decimals = 2) {
   if (bytes === 0) return "0 Bytes"
@@ -278,6 +280,9 @@ export default function Page() {
   const colorSurfaceContainer = hexFromArgb(
     MaterialDynamicColors.surfaceContainer.getArgb(themeStoreState.scheme)
   )
+  const colorOutlineVariant = hexFromArgb(
+    MaterialDynamicColors.outlineVariant.getArgb(themeStoreState.scheme)
+  )
 
   return (
     <Box
@@ -405,6 +410,43 @@ export default function Page() {
               </Link>
             </Box>
           </Paper>
+          <div
+            css={css({
+              display: "flex",
+              flexDirection: "column",
+              // justifyContent: "center",
+              marginTop: "128px",
+              marginBottom: "32px",
+              border: `1px solid ${colorOutlineVariant}`,
+              borderRadius: "24px",
+              padding: "16px",
+              color: colorOnSurfaceVariant,
+              alignSelf: "center",
+            })}
+          >
+            <Typography variant="body2">
+              If you like this app, please consider buying me a coffee.
+              <br /> Thank you!
+            </Typography>
+            <div
+              css={css({
+                marginTop: "16px",
+                display: "flex",
+                justifyContent: "flex-end",
+              })}
+            >
+              <a
+                href="https://www.buymeacoffee.com/contentsviewer"
+                target="_blank"
+              >
+                <img
+                  src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png"
+                  alt="Buy Me A Coffee"
+                  style={{ height: "60px", width: "217px" }}
+                />
+              </a>
+            </div>
+          </div>
         </Box>
       </Box>
     </Box>
