@@ -70,7 +70,9 @@ const TrackListItem = React.memo(function TrackListItem({
               color: colorOnSurfaceVariant,
             }}
             edge="end"
-            onClick={event => {
+            onClick={(
+              event: React.MouseEvent<HTMLButtonElement, MouseEvent>
+            ) => {
               onMenuClick(event, track)
             }}
           >
@@ -152,17 +154,16 @@ const TrackListInner = React.memo(function TrackListInner({
         anchorEl={menuAnchorEl}
         open={Boolean(menuAnchorEl)}
         onClose={() => setMenuAnchorEl(null)}
+        keepMounted
       >
-        <MenuItem>
-          <ListItemText
-            onClick={() => {
-              const parentId = refMenuTrack.current?.parentId
-              if (!parentId) return
-              routerActions.goFile(parentId)
-            }}
-          >
-            Open Files
-          </ListItemText>
+        <MenuItem
+          onClick={() => {
+            const parentId = refMenuTrack.current?.parentId
+            if (!parentId) return
+            routerActions.goFile(parentId)
+          }}
+        >
+          <ListItemText>Open Files</ListItemText>
         </MenuItem>
       </Menu>
     </List>

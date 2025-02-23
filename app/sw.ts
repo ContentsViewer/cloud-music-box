@@ -238,7 +238,7 @@ const defaultCache: RuntimeCaching[] =
                 // キャッシュ内の全エントリを確認
                 const cache = await caches.open("serwist-precache");
                 const keys = await cache.keys();
-                console.log('Available Cache Keys:', keys.map(k => k.url));
+                // console.log('Available Cache Keys:', keys.map(k => k.url));
             
                 // パス名が一致するキャッシュエントリを探す
                 const matchingKey = keys.find(key => {
