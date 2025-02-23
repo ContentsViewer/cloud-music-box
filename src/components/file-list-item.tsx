@@ -14,17 +14,14 @@ import {
 } from "@mui/material"
 import {
   ArrowDownward,
-  Audiotrack,
-  MoreHoriz,
   CloudOff,
   CloudQueue,
   Inventory,
   MoreVert,
-  SettingsRounded,
 } from "@mui/icons-material"
 import { useNetworkMonitor } from "../stores/network-monitor"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AudioTrackFileItem, useFileStore } from "../stores/file-store"
+import { useFileStore } from "../stores/file-store"
 import { enqueueSnackbar } from "notistack"
 import * as mm from "music-metadata-browser"
 import React from "react"
@@ -35,6 +32,8 @@ import {
   hexFromArgb,
 } from "@material/material-color-utilities"
 import { useRouter } from "../router"
+import { AudioTrackFileItem } from "../drive-clients/base-drive-client"
+
 
 interface FileListItemBasicProps {
   name: string
@@ -45,7 +44,7 @@ interface FileListItemBasicProps {
   fileStatus: "online" | "offline" | "local" | "downloading"
   selected?: boolean
   children?: React.ReactNode
-  menuItems?: React.ReactNode
+  onClickMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void
 }
 
 export function FileListItemBasic({
@@ -57,7 +56,7 @@ export function FileListItemBasic({
   fileStatus,
   selected,
   children,
-  menuItems,
+  onClickMenu,
 }: FileListItemBasicProps) {
   const [themeStoreState] = useThemeStore()
   const colorOnSurfaceVariant = hexFromArgb(
@@ -70,8 +69,6 @@ export function FileListItemBasic({
     MaterialDynamicColors.onSurface.getArgb(themeStoreState.scheme)
   )
 
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
-
   return (
     <ListItem
       secondaryAction={
@@ -81,24 +78,13 @@ export function FileListItemBasic({
               color: colorOnSurfaceVariant,
             }}
             edge="end"
-            onClick={event => {
-              setAnchorEl(event.currentTarget)
+            onClick={(event: React.MouseEvent<HTMLButtonElement, MouseEvent>) => { 
+              onClickMenu && onClickMenu(event)
             }}
-            disabled={menuItems === undefined}
+            disabled={onClickMenu === undefined}
           >
-            {/* <MoreHoriz /> */}
             <MoreVert />
           </IconButton>
-          <Menu
-            anchorEl={anchorEl}
-            keepMounted
-            open={Boolean(anchorEl)}
-            onClose={() => {
-              setAnchorEl(null)
-            }}
-          >
-            {menuItems}
-          </Menu>
         </div>
       }
       disablePadding
@@ -166,6 +152,7 @@ interface FileListItemAudioTrackProps {
   file: AudioTrackFileItem
   selected?: boolean
   onClick?: (event: any) => void
+  onClickMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void
 }
 
 export const FileListItemAudioTrack = React.memo(
@@ -173,12 +160,11 @@ export const FileListItemAudioTrack = React.memo(
     file,
     selected,
     onClick,
+    onClickMenu
   }: FileListItemAudioTrackProps) {
     const networkMonitor = useNetworkMonitor()
 
     const [fileStoreState, fileStoreActions] = useFileStore()
-    const fileStoreActionsRef = useRef(fileStoreActions)
-    fileStoreActionsRef.current = fileStoreActions
 
     const [, routerActions] = useRouter()
     const routerActionsRef = useRef(routerActions)
@@ -203,7 +189,7 @@ export const FileListItemAudioTrack = React.memo(
         currentFile: updatedFile,
       } as typeof fileState
 
-      fileStoreActionsRef.current
+      fileStoreActions
         .hasTrackBlobInLocal(updatedFile.id)
         .then(hasBlob => {
           newFileState.hasBlob = hasBlob || false
@@ -235,7 +221,7 @@ export const FileListItemAudioTrack = React.memo(
     useEffect(() => {
       if (isSyncingLast.current && !isSyncing) {
         // console.log("###", file.id)
-        fileStoreActionsRef.current
+        fileStoreActions
           .getFileById(file.id)
           .then(updatedFile => {
             if (!updatedFile) return
@@ -277,22 +263,10 @@ export const FileListItemAudioTrack = React.memo(
           disabled={disabled}
           onClick={onClick}
           secondaryText={artists}
-          menuItems={[
-            <MenuItem
-              key="go-to-album"
-              onClick={() => {
-                let albumName = file.metadata?.common.album
-                if (albumName === undefined) albumName = "Unknown Album"
-                albumName = albumName.replace(/\0+$/, "")
-                routerActionsRef.current.goAlbum(albumName)
-              }}
-            >
-              <ListItemText>Open Album</ListItemText>
-            </MenuItem>,
-          ]}
+          onClickMenu={onClickMenu}
         />
       )
-    }, [isSyncing, selected, onClick, networkMonitor.isOnline, fileState])
+    }, [isSyncing, selected, onClick, networkMonitor.isOnline, fileState, onClickMenu])
 
     return item
   }

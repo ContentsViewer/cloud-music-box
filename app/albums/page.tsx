@@ -3,11 +3,7 @@ import { AlbumCover } from "@/src/components/album-cover"
 import AppTopBar from "@/src/components/app-top-bar"
 import { MarqueeText } from "@/src/components/marquee-text"
 import { useRouter } from "@/src/router"
-import {
-  AlbumItem,
-  AudioTrackFileItem,
-  useFileStore,
-} from "@/src/stores/file-store"
+import { AlbumItem, useFileStore } from "@/src/stores/file-store"
 import { useThemeStore } from "@/src/stores/theme-store"
 import { TrackList } from "@/src/components/track-list"
 import { Theme } from "@emotion/react"
@@ -38,8 +34,10 @@ import {
 } from "@mui/material"
 import React, { useCallback, useMemo, useRef } from "react"
 import { useEffect, useState } from "react"
+import { SerializedStyles, css } from "@emotion/react"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
 import { usePlayerStore } from "@/src/stores/player-store"
+import { AudioTrackFileItem } from "@/src/drive-clients/base-drive-client"
 
 const AlbumCard = React.memo(function AlbumCard({
   albumItem,
@@ -203,8 +201,6 @@ const AlbumListPage = React.memo(function AlbumListPage(
   props: AlbumListPageProps
 ) {
   const [fileStoreState, fileStoreActions] = useFileStore()
-  const fileStoreActionsRef = useRef(fileStoreActions)
-  fileStoreActionsRef.current = fileStoreActions
 
   const [playerState] = usePlayerStore()
   const activeAlbumId = useMemo(() => {
@@ -227,11 +223,11 @@ const AlbumListPage = React.memo(function AlbumListPage(
     let isCanceled = false
 
     const getAlbums = async () => {
-      const albumIds = await fileStoreActionsRef.current.getAlbumIds()
+      const albumIds = await fileStoreActions.getAlbumIds()
       if (isCanceled) return
       const albums = await Promise.all(
         albumIds.map(async albumId => {
-          return await fileStoreActionsRef.current.getAlbumById(albumId)
+          return await fileStoreActions.getAlbumById(albumId)
         })
       )
       if (isCanceled) return
@@ -392,7 +388,14 @@ const AlbumPage = React.memo(function AlbumPage({
         </Box>
       </Box>
       {/* <Divider /> */}
-      <TrackList sx={{ px: 0 }} tracks={tracks} albumId={albumItem?.name} />
+      <TrackList
+        cssStyle={css({
+          paddingLeft: 0,
+          paddingRight: 0,
+        })}
+        tracks={tracks}
+        albumId={albumItem?.name}
+      />
     </Box>
   )
 })

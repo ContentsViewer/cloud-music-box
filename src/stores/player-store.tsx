@@ -5,11 +5,13 @@ import React, {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react"
-import { AudioTrackFileItem, useFileStore } from "./file-store"
+import { useFileStore } from "./file-store"
 import { enqueueSnackbar } from "notistack"
+import { AudioTrackFileItem } from "../drive-clients/base-drive-client"
 
 /**
  * Represents an audio track that can be played.
@@ -71,101 +73,105 @@ export const PlayerDispatchContext = createContext<Dispatch<Action>>(() => {})
 export const usePlayerStore = () => {
   const state = useContext(PlayerStateContext)
   const dispatch = useContext(PlayerDispatchContext)
+  const refState = useRef(state)
+  refState.current = state
+
   const [, fileStoreActions] = useFileStore()
-  const fileStoreActionsRef = useRef(fileStoreActions)
-  fileStoreActionsRef.current = fileStoreActions
 
-  const playTrack = (
-    index: number,
-    files?: AudioTrackFileItem[],
-    playSourceUrl?: string
-  ) => {
-    let currentTracks = state.tracks
-    if (files) {
-      currentTracks = files.map(file => {
-        return {
-          file,
-        }
-      })
-    }
-
-    cacheBlobs(index, currentTracks, fileStoreActionsRef.current, dispatch)
-
-    const track = currentTracks[index]
-    const isActiveTrackLoading = !track.blob
-
-    dispatch({
-      type: "playTrack",
-      payload: {
-        index,
-        tracks: currentTracks,
-        isActiveTrackLoading,
-        playSourceUrl: playSourceUrl || state.playSourceUrl,
-      },
-    })
-  }
-
-  const actions = {
-    play: () => dispatch({ type: "play" }),
-    pause: () => dispatch({ type: "pause" }),
-    playTrack: (
+  const actions = useMemo(() => {
+    const playTrack = (
       index: number,
       files?: AudioTrackFileItem[],
       playSourceUrl?: string
     ) => {
-      return playTrack(index, files, playSourceUrl)
-    },
-    playNextTrack: () => {
-      console.log("Playing next track", state)
-      if (state.tracks.length === 0) {
-        return
+      let currentTracks = refState.current.tracks
+      if (files) {
+        currentTracks = files.map(file => {
+          return {
+            file,
+          }
+        })
       }
 
-      if (state.activeTrackIndex === -1) {
-        return playTrack(0)
-      }
+      cacheBlobs(index, currentTracks, fileStoreActions, dispatch)
 
-      const isTheLastTrack = state.tracks.length === state.activeTrackIndex + 1
+      const track = currentTracks[index]
+      const isActiveTrackLoading = !track.blob
 
-      const newIndex = isTheLastTrack ? 0 : state.activeTrackIndex + 1
-      return playTrack(newIndex)
-    },
-    playPreviousTrack: () => {
-      if (state.tracks.length === 0) {
-        return
-      }
-
-      let newIndex = state.activeTrackIndex
-
-      if (newIndex === -1) {
-        newIndex = 0
-      }
-
-      if (state.currentTime < 4) {
-        const isTheFirstTrack = state.activeTrackIndex === 0
-        newIndex = isTheFirstTrack
-          ? state.tracks.length - 1
-          : state.activeTrackIndex - 1
-      }
-
-      return playTrack(newIndex)
-    },
-    setCurrentTime: (currentTime: number) => {
       dispatch({
-        type: "setCurrentTime",
-        payload: { currentTime, changed: false },
+        type: "playTrack",
+        payload: {
+          index,
+          tracks: currentTracks,
+          isActiveTrackLoading,
+          playSourceUrl: playSourceUrl || refState.current.playSourceUrl,
+        },
       })
-    },
-    changeCurrentTime: (currentTime: number) => {
-      dispatch({
-        type: "setCurrentTime",
-        payload: { currentTime, changed: true },
-      })
-    },
-    setDuration: (duration: number) => {
-      dispatch({ type: "setDuration", payload: { duration } })
-    },
-  }
+    }
+
+    return {
+      play: () => dispatch({ type: "play" }),
+      pause: () => dispatch({ type: "pause" }),
+      playTrack: (
+        index: number,
+        files?: AudioTrackFileItem[],
+        playSourceUrl?: string
+      ) => {
+        return playTrack(index, files, playSourceUrl)
+      },
+      playNextTrack: () => {
+        console.log("Playing next track", refState.current)
+        if (refState.current.tracks.length === 0) {
+          return
+        }
+
+        if (refState.current.activeTrackIndex === -1) {
+          return playTrack(0)
+        }
+
+        const isTheLastTrack =
+          refState.current.tracks.length === refState.current.activeTrackIndex + 1
+
+        const newIndex = isTheLastTrack ? 0 : refState.current.activeTrackIndex + 1
+        return playTrack(newIndex)
+      },
+      playPreviousTrack: () => {
+        if (refState.current.tracks.length === 0) {
+          return
+        }
+
+        let newIndex = refState.current.activeTrackIndex
+
+        if (newIndex === -1) {
+          newIndex = 0
+        }
+
+        if (refState.current.currentTime < 4) {
+          const isTheFirstTrack = refState.current.activeTrackIndex === 0
+          newIndex = isTheFirstTrack
+            ? refState.current.tracks.length - 1
+            : refState.current.activeTrackIndex - 1
+        }
+
+        return playTrack(newIndex)
+      },
+      setCurrentTime: (currentTime: number) => {
+        dispatch({
+          type: "setCurrentTime",
+          payload: { currentTime, changed: false },
+        })
+      },
+      changeCurrentTime: (currentTime: number) => {
+        dispatch({
+          type: "setCurrentTime",
+          payload: { currentTime, changed: true },
+        })
+      },
+      setDuration: (duration: number) => {
+        dispatch({ type: "setDuration", payload: { duration } })
+      },
+    }
+  }, [])
 
   return [state, actions] as const
 }

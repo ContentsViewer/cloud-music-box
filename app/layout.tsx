@@ -5,6 +5,8 @@ import { CssBaseline } from "@mui/material"
 import { AppLayout } from "./app-layout"
 import { ThemeStoreProvider } from "@/src/stores/theme-store"
 import type { Viewport, Metadata } from "next"
+import { GA_MEASUREMENT_ID } from "@/src/gtag"
+import { GoogleAnalytics } from "@next/third-parties/google"
 
 export const viewport: Viewport = {
   viewportFit: "cover",
@@ -19,6 +21,7 @@ export const metadata: Metadata = {
   },
 }
 
+// https://nextjs.org/docs/messages/next-script-for-ga
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -37,6 +40,7 @@ export default function RootLayout({
           </ThemeStoreProvider>
         </AppRouterCacheProvider>
       </body>
+      <GoogleAnalytics gaId={GA_MEASUREMENT_ID} />
     </html>
   )
 }

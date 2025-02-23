@@ -1,10 +1,6 @@
 "use client"
 
-import {
-  AudioTrackFileItem,
-  BaseFileItem,
-  useFileStore,
-} from "@/src/stores/file-store"
+import { useFileStore } from "@/src/stores/file-store"
 import { enqueueSnackbar } from "notistack"
 import { useEffect, useRef, useState } from "react"
 import { FileList } from "@/src/components/file-list"
@@ -42,11 +38,14 @@ import { useNetworkMonitor } from "@/src/stores/network-monitor"
 import { MarqueeText } from "@/src/components/marquee-text"
 import AppTopBar from "@/src/components/app-top-bar"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
+import {
+  AudioTrackFileItem,
+  BaseFileItem,
+} from "@/src/drive-clients/base-drive-client"
+import { SerializedStyles, css } from "@emotion/react"
 
 export default function Page() {
   const [fileStoreState, fileStoreActions] = useFileStore()
-  const fileStoreActionsRef = useRef(fileStoreActions)
-  fileStoreActionsRef.current = fileStoreActions
 
   const networkMonitor = useNetworkMonitor()
   const scrollTargetRef = useRef<Node | undefined>(undefined)
@@ -80,17 +79,13 @@ export default function Page() {
       if (!folderId) {
         return
       }
-      const currentFile = await fileStoreActionsRef.current.getFileById(
-        folderId
-      )
+      const currentFile = await fileStoreActions.getFileById(folderId)
       if (isCancelled) return
       if (!currentFile) return
       setCurrentFile(currentFile)
 
       try {
-        const localFiles = await fileStoreActionsRef.current.getChildrenLocal(
-          folderId
-        )
+        const localFiles = await fileStoreActions.getChildrenLocal(folderId)
         if (isCancelled) return
         // console.log("LOCAL")
         if (localFiles) {
@@ -108,7 +103,7 @@ export default function Page() {
   }, [fileStoreState.configured, folderId])
 
   useEffect(() => {
-    if (!fileStoreState.driveClient || !folderId) {
+    if (fileStoreState.driveStatus != "online" || !folderId) {
       return
     }
 
@@ -117,9 +112,7 @@ export default function Page() {
     const getFiles = async () => {
       try {
         setRemoteFetching(true)
-        const remoteFiles = await fileStoreActionsRef.current.getChildrenRemote(
-          folderId
-        )
+        const remoteFiles = await fileStoreActions.getChildrenRemote(folderId)
         if (isCancelled) return
         // console.log("REMOTE")
         if (remoteFiles) {
@@ -136,7 +129,7 @@ export default function Page() {
     return () => {
       isCancelled = true
     }
-  }, [fileStoreState.driveClient, folderId])
+  }, [fileStoreState.driveStatus, folderId])
 
   const handleMoreClose = () => {
     setAnchorEl(null)
@@ -146,7 +139,7 @@ export default function Page() {
     handleMoreClose()
     if (!files) return
 
-    const fileStoreAction = fileStoreActionsRef.current
+    const fileStoreAction = fileStoreActions
 
     const audioFiles = files.filter(
       file => file.type === "audio-track"
@@ -302,7 +295,7 @@ export default function Page() {
         }}
       >
         <FileList
-          sx={{ maxWidth: "1040px", margin: "0 auto", width: "100%" }}
+          cssStyle={css({ maxWidth: "1040px", margin: "0 auto", width: "100%" })}
           files={files}
           folderId={folderId}
         />

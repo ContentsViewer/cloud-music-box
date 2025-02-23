@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AudioFrame,
@@ -15,7 +14,7 @@ import {
   Hct,
 } from "@material/material-color-utilities"
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
-import { css } from '@emotion/react'
+import { css } from "@emotion/react"
 
 const noteFromPitch = (frequency: number) => {
   const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
@@ -28,8 +27,6 @@ interface RenderingContext {
   particleTail: number
   currentPitch: number
 }
-
-interface LissajousCurveProps {}
 
 const LissajousCurve = () => {
   const [audioDynamicsState] = useAudioDynamicsStore()
@@ -253,8 +250,47 @@ const LissajousCurve = () => {
                 0.0, 0.0, 1.0
               );
               vec3 p = position;
+              
               float r = length(p.xy);
-              float scale = pow(r, 1.0 / 2.2) / r;
+              
+              // 普通のgamma補正
+              //float scale = pow(r, 1.0 / 2.2) / r;
+
+              // ゴールド・ラショ（黄金比）や分野で知られる無理数を元にしたランダム生成の解説 (波形の紋が失われてしまう)
+              //float randOffset = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
+              //float scale = pow(r + randOffset * 0.2, 1.0 / 2.2) / r;
+
+              //  float edge = smoothstep(0.9, 1.1, r);
+              //  float scale = pow(r * (1.0 + edge * 0.2), 1.0 / 2.2) / r;
+
+              // エッジ周辺のノイズを追加
+              float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
+              float edge = smoothstep(0.8, 1.2, r);  // 範囲を広げる
+              float noiseEffect = (noise - 0.5) * 0.4;  // ノイズの影響を強める
+
+              // スケールにノイズを組み込む
+              float scale = pow(r * (1.0 + edge * (0.3 + noiseEffect)), 1.0 / 2.2) / r;
+
+              //float distortion = sin(r * 6.28318) * 0.1;
+              //float scale = pow(r + distortion, 1.0 / 2.2) / r;
+
+              // 1. 微小な高周波ノイズ
+              //float microNoise = sin(r * 40.0) * 0.02;
+              //float scale = pow(r + microNoise, 1.0 / 2.2) / r;
+
+              // 2. 距離による段階的な歪み
+              // float ripple = smoothstep(0.8, 1.0, r) * sin(r * 20.0) * 0.03;
+              // float scale = pow(r + ripple, 1.0 / 2.2) / r;
+
+              // 3. 方向性のある微小な歪み
+              // float angle = atan(p.y, p.x);
+              //float directionalRipple = sin(angle * 12.0 + r * 30.0) * 0.02;
+              //float scale = pow(r + directionalRipple, 1.0 / 2.2) / r;
+              
+              // パーリンノイズ風の効果 (波形の紋が失われてしまう)
+              //float noise = fract(sin(dot(p.xy, vec2(15.4891, 89.453))) * 43758.5453);
+              //float scale = pow(r + noise * 0.3, 1.0 / 2.2) / r;
+
               p.xy *= scale;
 
               // if (p.x < 0.0) {
@@ -305,11 +341,34 @@ const LissajousCurve = () => {
               // gl_PointSize = 2.0 + 2.0 * smoothstep(0.0, 1.0, effectScale);
               // gl_PointSize = 2.0 + 2.0 * effectScale;
               // gl_PointSize = 4.0 * effectScale;
-              float pointSize = 3.0;
+
+              float pointSize = 4.0;
               if (r > 0.25) {
-                pointSize = 3.0 + mix(0.0, 3.0, smoothstep(0.25, 1.0, r));
+                pointSize = 4.0 + mix(0.0, 4.0, smoothstep(0.25, 1.0, r));
               }
+                
+              // 1. 距離とノイズの組み合わせ
+                          
+              //float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
+              //float pointSize = 2.0 + noise * 2.0 + smoothstep(0.5, 1.0, r) * 2.0;
+
+              // 2. 同心円状のサイズ変化    
+              // float wave = sin(r * 10.0) * 0.5 + 0.5;
+              // float pointSize = 2.0 + wave * 3.0;
+
+              // gl_PointSize = pointSize;
+
+              // レンズフレア効果
+              float flareNoise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
+              if (r > 0.85 && flareNoise > 0.95) {
+                  // 境界付近の一部の粒子だけを大きくする
+                  float flareIntensity = smoothstep(0.85, 1.0, r) * smoothstep(0.85, 1.0, flareNoise);
+                  
+                  pointSize = mix(pointSize, 24.0, flareIntensity);
+              }
+
               gl_PointSize = pointSize / 2.0;
+              // gl_PointSize = pointSize;
               // gl_Position = projectionMatrix * mvPosition;
               gl_Position = vec4(p, 1.0);
               vColor = particleColor;
@@ -320,8 +379,16 @@ const LissajousCurve = () => {
             varying vec3 vColor;
             uniform vec3 baseColor;
             void main() {
-              vec3 c = baseColor;
-              gl_FragColor = vec4(vColor, vAlpha);
+              vec2 center = vec2(0.5, 0.5);
+              vec2 coord = gl_PointCoord - center;
+              float dist = length(coord) * 2.0;
+              // エッジをよりシャープに
+              float alpha = step(dist, 0.95) * vAlpha;
+              // または少しだけぼかす場合
+              // float alpha = smoothstep(0.95, 1.0, 1.0 - dist) * vAlpha;
+    
+              gl_FragColor = vec4(vColor, alpha);
+              // gl_FragColor = vec4(vColor, vAlpha);
             }
           `,
               transparent: true,
@@ -404,7 +471,8 @@ export const DynamicBackground = () => {
     return hexFromArgb(color)
   })()
 
-  const [audioDynamicsSettings, audioDynamicsSettingsActions] = useAudioDynamicsSettingsStore()
+  const [audioDynamicsSettings, audioDynamicsSettingsActions] =
+    useAudioDynamicsSettingsStore()
 
   // console.log(primaryColor)
   useEffect(() => {
@@ -427,11 +495,14 @@ export const DynamicBackground = () => {
           right: 0;
           bottom: 0;
           left: 0;
-          opacity: 1.0;
+          opacity: 1;
           z-index: -3;
-          background: radial-gradient(circle at 76% 26%, transparent, ${backgroundColor});
+          background: radial-gradient(
+            circle at 76% 26%,
+            transparent,
+            ${backgroundColor}
+          );
         `}
-
         style={{ backgroundColor: pitchColor }}
 
         // component="div"
@@ -458,9 +529,9 @@ export const DynamicBackground = () => {
           bottom: 0;
           left: 0;
           background: linear-gradient(transparent, ${primaryColor});
-          opacity: 1.0;
+          opacity: 1;
           z-index: -3;
-          `}
+        `}
 
         // component="div"
         // sx={{
@@ -483,11 +554,12 @@ export const DynamicBackground = () => {
           left: 0;
           z-index: ${audioDynamicsSettings.dynamicsEffectAppeal ? 0 : -2};
           display: ${isPageUnloading ? "none" : "block"};
-          background-color: ${audioDynamicsSettings.dynamicsEffectAppeal ? "rgba(0, 0, 0, 0.6)" : "transparent"};
+          background-color: ${audioDynamicsSettings.dynamicsEffectAppeal
+            ? "rgba(0, 0, 0, 0.6)"
+            : "transparent"};
           transition: background-color 0.5s ease-in-out;
           // backdrop-filter: blur(1px);
-          `}
-
+        `}
         // component="div"
         // sx={{
         //   position: "fixed",
@@ -505,7 +577,7 @@ export const DynamicBackground = () => {
         //   backgroundColor: audioDynamicsSettings.dynamicsEffectAppeal ? "rgba(0, 0, 0, 0.6)" : "transparent",
         // }}
 
-        onClick={() => { 
+        onClick={() => {
           // console.log("click")
           audioDynamicsSettingsActions.setDynamicsEffectAppeal(false)
         }}

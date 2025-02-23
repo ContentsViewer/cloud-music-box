@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePlayerStore, AudioTrack } from "../stores/player-store"
 import { enqueueSnackbar } from "notistack"
-import { useFileStore } from "../stores/file-store"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
 import { useAudioDynamicsStore } from "../stores/audio-dynamics-store"
@@ -118,22 +117,29 @@ const makeAudioAnalyser = () => {
       sourceNode.connect(audioContext.destination)
       sourceNode.start(0, start, 1)
 
-      return audioContext
-        .startRendering()
-        .then(renderedBuffer => {
-          const samples0 = renderedBuffer.getChannelData(0)
-          const samples1 = renderedBuffer.getChannelData(1)
-          const [pitch0, rms0] = autoCorrelate(samples0.slice(0, bufferLength), sampleRate)
-          const [pitch1, rms1] = autoCorrelate(samples1.slice(0, bufferLength), sampleRate)
-          return {
-            timeSeconds: start,
-            pitch0, pitch1,
-            rms0, rms1,
-            sampleRate: renderedBuffer.sampleRate,
-            samples0, samples1
-          }
-        })
-    }
+      return audioContext.startRendering().then(renderedBuffer => {
+        const samples0 = renderedBuffer.getChannelData(0)
+        const samples1 = renderedBuffer.getChannelData(1)
+        const [pitch0, rms0] = autoCorrelate(
+          samples0.slice(0, bufferLength),
+          sampleRate
+        )
+        const [pitch1, rms1] = autoCorrelate(
+          samples1.slice(0, bufferLength),
+          sampleRate
+        )
+        return {
+          timeSeconds: start,
+          pitch0,
+          pitch1,
+          rms0,
+          rms1,
+          sampleRate: renderedBuffer.sampleRate,
+          samples0,
+          samples1,
+        }
+      })
+    },
   }
 }
 
@@ -163,7 +169,9 @@ const msSetPlayingTrack = (track: AudioTrack) => {
     artwork.push({ src: coverUrl, sizes: "512x512", type: cover.format })
   } else {
     artwork.push({
-      src: "./track-cover-512x512.png", sizes: "512x512", type: "image/png"
+      src: "./track-cover-512x512.png",
+      sizes: "512x512",
+      type: "image/png",
     })
   }
 
@@ -178,15 +186,9 @@ const msSetPlayingTrack = (track: AudioTrack) => {
 
 export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore()
-  const playerActionsRef = useRef(playerActions)
-  playerActionsRef.current = playerActions
 
   const [, dynamicThemeActions] = useAudioDynamicsStore()
   const dynamicThemeActionsRef = useRef(dynamicThemeActions)
-
-  const fileStore = useFileStore()
-  const fileStoreRef = useRef(fileStore)
-  fileStoreRef.current = fileStore
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const sourceRef = useRef<HTMLSourceElement>(null)
@@ -207,21 +209,23 @@ export const AudioPlayer = () => {
 
     const onError = (error: any) => {
       console.error(error)
-      playerActionsRef.current.pause()
+      playerActions.pause()
       enqueueSnackbar(`${error}`, { variant: "error" })
     }
 
     const onDurationChange = () => {
-      playerActionsRef.current.setDuration(audio.duration)
+      playerActions.setDuration(audio.duration)
     }
 
     const onTimeUpdate = () => {
-      playerActionsRef.current.setCurrentTime(audio.currentTime)
+      playerActions.setCurrentTime(audio.currentTime)
 
-      audioAnalyser.requestAnalyze(audio.currentTime)
-        .then(frame => { 
+      audioAnalyser
+        .requestAnalyze(audio.currentTime)
+        .then(frame => {
           dynamicThemeActionsRef.current.setFrame(frame)
-        }).catch(error => {
+        })
+        .catch(error => {
           console.warn("Failed to analyze audio", error)
         })
     }
@@ -231,7 +235,7 @@ export const AudioPlayer = () => {
 
     const onEnded = () => {
       console.log("Track ended")
-      playerActionsRef.current.playNextTrack()
+      playerActions.playNextTrack()
     }
 
     audio.addEventListener("error", onError)
@@ -286,11 +290,13 @@ export const AudioPlayer = () => {
       return
     }
 
+    const activeTrack = playerState.activeTrack
+
     if (
-      playerState.activeTrack &&
-      playerState.activeTrack.file.id !== activeAudioTrackRef.current?.file.id
+      activeTrack &&
+      activeTrack.file.id !== activeAudioTrackRef.current?.file.id
     ) {
-      activeAudioTrackRef.current = playerState.activeTrack
+      activeAudioTrackRef.current = activeTrack
 
       // Unload previous track
       if (source.src) {
@@ -300,35 +306,52 @@ export const AudioPlayer = () => {
         URL.revokeObjectURL(previousSrc)
       }
 
-      assert(playerState.activeTrack?.blob)
-      const src = URL.createObjectURL(playerState.activeTrack.blob)
+      assert(activeTrack?.blob)
+      const src = URL.createObjectURL(activeTrack.blob)
 
       source.src = src
       // safari(iOS) cannot detect the mime type(especially flac) from the binary.
-      source.type = playerState.activeTrack.file.mimeType
+      source.type = activeTrack.file.mimeType
 
       console.log("Setting source", src, source.type)
       audio.load()
-      msSetPlayingTrack(playerState.activeTrack)
+      msSetPlayingTrack(activeTrack)
     }
 
     audio
       .play()
       .then(() => {
         console.log("Played")
-        const blob = playerState.activeTrack?.blob
+        const blob = activeTrack?.blob
         if (!blob) return
         audioAnalyser.setBuffer(blob)
       })
       .catch(error => {
-        playerActionsRef.current.pause()
+        playerActions.pause()
 
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
       })
     console.log("To Playing")
 
-    enqueueSnackbar("Playing", { variant: "info" })
+    const title =
+      activeTrack?.file.metadata?.common.title ||
+      activeTrack?.file.name ||
+      "Unknown"
+    console.log(title)
+
+    enqueueSnackbar(
+      <span>
+        Playing{" "}
+        <span
+          style={{
+            fontWeight: "bold",
+          }}
+        >
+          {title}
+        </span>
+      </span>
+    )
   }, [
     playerState.isActiveTrackLoading,
     playerState.isPlaying,
@@ -359,20 +382,20 @@ export const AudioPlayer = () => {
 
     ms.setActionHandler("play", () => {
       console.log("Play")
-      playerActionsRef.current.play()
+      playerActions.play()
     })
     ms.setActionHandler("pause", () => {
       console.log("Pause")
-      playerActionsRef.current.pause()
+      playerActions.pause()
     })
 
     ms.setActionHandler("previoustrack", () => {
       console.log("Click previous track")
-      playerActionsRef.current.playPreviousTrack()
+      playerActions.playPreviousTrack()
     })
     ms.setActionHandler("nexttrack", () => {
       console.log("Click next track")
-      playerActionsRef.current.playNextTrack()
+      playerActions.playNextTrack()
     })
 
     ms.setActionHandler("seekbackward", null)
@@ -382,7 +405,7 @@ export const AudioPlayer = () => {
       console.log("Seek to", details)
       if (details.fastSeek) return
       if (details.seekTime === undefined) return
-      playerActionsRef.current.changeCurrentTime(details.seekTime)
+      playerActions.changeCurrentTime(details.seekTime)
     })
 
     return () => {

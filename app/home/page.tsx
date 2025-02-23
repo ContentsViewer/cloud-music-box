@@ -39,11 +39,13 @@ import {
 import React from "react"
 import { useEffect, useRef, useState, ReactNode } from "react"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
+import { OneDriveClient } from "@/src/drive-clients/onedrive-client"
 
 const LoginPage = () => {
   const [fileStoreState] = useFileStore()
 
-  const pca = fileStoreState.pca
+  const driveClient = fileStoreState.driveClient as OneDriveClient | undefined
+  const pca = driveClient?.pca
   if (!pca) return null
 
   const accounts = pca.getAllAccounts()
@@ -145,7 +147,7 @@ const CardButton = React.memo(function CardButton({
     >
       <CardActionArea onClick={onClick}>
         <Box
-            component="div"
+          component="div"
           sx={{
             p: 2,
             display: "flex",
@@ -172,12 +174,8 @@ export default function Page() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const scrollTargetRef = useRef<Node | undefined>(undefined)
 
-  useEffect(() => {
-    if (fileStoreState.driveConfigureStatus !== "no-account") return
-    console.log("no account")
-  }, [fileStoreState])
-
-  const driveConfigureStatus = fileStoreState.driveConfigureStatus
+  const driveStatus = fileStoreState.driveStatus
+  // console.log(driveStatus)
 
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
@@ -250,8 +248,8 @@ export default function Page() {
           pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
         }}
       >
-        {driveConfigureStatus ===
-        "not-configured" ? null : driveConfigureStatus === "no-account" ? (
+        {driveStatus === "not-configured" ? null : driveStatus ===
+          "no-account" ? (
           <LoginPage />
         ) : (
           <Box
