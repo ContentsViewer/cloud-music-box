@@ -29,6 +29,7 @@ const FileListItem = React.memo(function FileListItem({
   const [, routerActions] = useRouter()
 
   const isOnline = networkMonitor.isOnline
+  console.log("isOnline", isOnline)
 
   const playTrackWrapped = useCallback(() => {
     playTrack(file as AudioTrackFileItem)

@@ -227,9 +227,48 @@ const defaultCache: RuntimeCaching[] =
       },
       {
         matcher: ({ request, url: { pathname }, sameOrigin }) => request.headers.get("RSC") === "1" && sameOrigin && !pathname.startsWith("/api/"),
-        handler: new NetworkFirst({
-          cacheName: PAGES_CACHE_NAME.rsc,
-        }),
+        handler: new CacheFirst({
+          cacheName: "serwist-precache",
+          plugins: [
+            {
+              cacheKeyWillBeUsed: async ({ request }) => {
+                const url = new URL(request.url);
+                console.log('Original Request URL:', url.toString());
+      
+                // キャッシュ内の全エントリを確認
+                const cache = await caches.open("serwist-precache");
+                const keys = await cache.keys();
+                console.log('Available Cache Keys:', keys.map(k => k.url));
+            
+                // パス名が一致するキャッシュエントリを探す
+                const matchingKey = keys.find(key => {
+                  const keyUrl = new URL(key.url);
+                  return keyUrl.pathname === url.pathname;
+                });
+
+                if (matchingKey) {
+                  console.log('Found matching cache key:', matchingKey.url);
+                  // リクエストヘッダーを保持しながら、URLのみを置き換える
+                  return new Request(matchingKey.url, {
+                    headers: request.headers,
+                    method: request.method,
+                    mode: request.mode,
+                    credentials: request.credentials
+                  });
+                }
+
+                // マッチするキャッシュが見つからない場合
+                url.searchParams.delete('_rsc');
+                const newRequest = new Request(url.toString(), request);
+                console.log('No cache match, using:', newRequest.url);
+                return newRequest;
+              }
+            }
+          ]
+        })
+        // handler: new NetworkFirst({
+        //   cacheName: PAGES_CACHE_NAME.rsc,
+        // }),
       },
       {
         matcher: ({ request, url: { pathname }, sameOrigin }) =>
@@ -268,6 +307,9 @@ const defaultCache: RuntimeCaching[] =
 
 const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
+  precacheOptions: {
+    cacheName: "serwist-precache",
+  },
   // skipWaiting: true,
   // clientsClaim: true,
   navigationPreload: true,
