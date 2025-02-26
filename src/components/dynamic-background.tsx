@@ -3,7 +3,6 @@ import {
   AudioFrame,
   useAudioDynamicsStore,
 } from "../stores/audio-dynamics-store"
-import { Box } from "@mui/material"
 import { useThemeStore } from "../stores/theme-store"
 import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import * as THREE from "three"
@@ -124,28 +123,28 @@ const LissajousCurve = () => {
       pointsRef.current.geometry.attributes.particleColor.array
 
     // console.log(context.particleTail)
-    let x, y, z
-    z = 0
+    let x, y, z, t
+    // z = 0
     for (let i = 0; i < samplesCountToAppend; ++i) {
-      const t = context.particleTail
+      t = context.particleTail
       // console.log(t)
       x = samples1[startOffset + i] // R
       // y = samples1[startOffset + i + ~~(sampleRate / 2 / 8)] // L
       // y = samples1[startOffset + i + 6] // L
       y = samples0[startOffset + i + 6] // L
       // y = samples0[startOffset + i] // L
-      // const z = context.frame.pitch0 / 10000
 
-      // if (x < 0) {
-      //   x = -Math.pow(-x, 1.0 / 2.2)
-      // } else {
-      //   x = Math.pow(x, 1.0 / 2.2)
-      // }
-      // if (y < 0) {
-      //   y = -Math.pow(-y, 1.0 / 2.2)
-      // } else {
-      //   y = Math.pow(y, 1.0 / 2.2)
-      // }
+      // z = samples1[startOffset + i] - samples0[startOffset + i]
+      // z = samples1[startOffset + i + 12] // L
+      z = samples0[startOffset + i + 12] - samples1[startOffset + i + 12]
+
+      // l = samples0[startOffset + i]
+      // r = samples1[startOffset + i]
+      // mid = (l + r) / 2 - (l - r) / 2
+
+      // z = samples1[startOffset + i] - samples0[startOffset + i]
+      // console.log(z)
+
       positions[t * 3 + 0] = x
       // positions[t * 3 + 0] = Math.pow(x, 1.0 / 2.2)
       positions[t * 3 + 1] = y
@@ -162,18 +161,6 @@ const LissajousCurve = () => {
 
       context.particleTail = (t + 1) % particleCount
     }
-    // console.log(samples0[startOffset], samples1[startOffset], samples0, startOffset)
-
-    // console.log(context.particleTail)
-
-    // const scale = 1
-    // for (let i = 0; i < 1024; i++) {
-    //   const t = (i / 1024) * 2 * Math.PI
-    //   positions[i * 3 + 0] = Math.sin(t * 2 + time) * scale
-    //   positions[i * 3 + 1] = Math.sin(t * 3 + time) * scale
-    //   positions[i * 3 + 2] = Math.sin(t * 4 + time) * scale
-    //   startTimeArray[i] = time
-    // }
 
     pointsRef.current.geometry.attributes.position.needsUpdate = true
     pointsRef.current.geometry.attributes.startTime.needsUpdate = true
@@ -293,17 +280,6 @@ const LissajousCurve = () => {
 
               p.xy *= scale;
 
-              // if (p.x < 0.0) {
-              //   p.x = -pow(-p.x, 1.0 / 2.2);
-              // } else {
-              //   p.x = pow(p.x, 1.0 / 2.2);
-              // }
-              // if (p.y < 0.0) {
-              //   p.y = -pow(-p.y, 1.0 / 2.2);
-              // } else {
-              //   p.y = pow(p.y, 1.0 / 2.2);
-              // }
-
               // float signX = sign(p.x);
               // // p.x = abs(p.x) * signX;     
               // p.x = pow(abs(p.x), 1.0 / 2.2) * signX;
@@ -312,41 +288,16 @@ const LissajousCurve = () => {
               // p.y = pow(abs(p.y), 1.0 / 2.2) * signY;
 
               p = rotationMatrix * p;
-              const float SQRT2 = 1.414214;
-              // p.y += SQRT2 * 0.1 * sin(2.0 * 3.14159265359 * p.x + time);
-              // p.y = (p.y + SQRT2) * 0.5 - 1.0;
-              // p.y = (p.y + SQRT2) * 0.5;
-              // p.y = pow(p.y, 0.5) - 1.0;
-              // p.y = log(p.y + 1.0) - 0.5;
-              // p.y = p.y * p.y * p.y * p.y;
-              
-              // float scale = 2.0;
-              // p *= 1.5;
-              
-              // if (p.y < 0.0) {
-              //   p.y = 2.0 + p.y;
-              //   p.x = -p.x;
-              // }
-              // p.y = p.y - 1.0;
 
               if (aspect < 1.0) {
                 p.x /= aspect;
               }
 
-              // p.x = p.x * 2.0;
-
-              // vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
-              // gl_PointSize = 2.0;
-              // gl_PointSize = 2.0 + 5.0 * (1.0 - step(0.01, elapsed / 0.5));
-              // gl_PointSize = 2.0 + 2.0 * smoothstep(0.0, 1.0, effectScale);
-              // gl_PointSize = 2.0 + 2.0 * effectScale;
-              // gl_PointSize = 4.0 * effectScale;
-
               float pointSize = 4.0;
               if (r > 0.25) {
                 pointSize = 4.0 + mix(0.0, 4.0, smoothstep(0.25, 1.0, r));
               }
-                
+
               // 1. 距離とノイズの組み合わせ
                           
               //float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
@@ -356,20 +307,25 @@ const LissajousCurve = () => {
               // float wave = sin(r * 10.0) * 0.5 + 0.5;
               // float pointSize = 2.0 + wave * 3.0;
 
-              // gl_PointSize = pointSize;
-
               // レンズフレア効果
               float flareNoise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
               if (r > 0.85 && flareNoise > 0.95) {
                   // 境界付近の一部の粒子だけを大きくする
                   float flareIntensity = smoothstep(0.85, 1.0, r) * smoothstep(0.85, 1.0, flareNoise);
                   
-                  pointSize = mix(pointSize, 24.0, flareIntensity);
+                  pointSize = mix(pointSize, 32.0, flareIntensity);
               }
+
+              float depth = pow((position.z + 1.0) / 2.0, 1.0 / 2.2); // 0 ~ 1
+              // pointSize = pointSize + (0.0 + depth * 10.0);
+              p.y += position.z * 1.0;
+              // p.y += 1.0;
+              p.y *= 0.6;
+              p.x *= 0.8;
+              p.z = 0.0;
 
               gl_PointSize = pointSize / 2.0;
               // gl_PointSize = pointSize;
-              // gl_Position = projectionMatrix * mvPosition;
               gl_Position = vec4(p, 1.0);
               vColor = particleColor;
             }
