@@ -1,6 +1,6 @@
-import { AccountInfo, PublicClientApplication } from '@azure/msal-browser';
+import { AccountInfo, InteractionRequiredAuthError, PublicClientApplication } from '@azure/msal-browser';
 import { AUDIO_FORMAT_MAPPING, AudioTrackFileItem, BaseDriveClient, BaseFileItem, FileItem, FolderItem } from './base-drive-client';
-import { Client, ResponseType } from '@microsoft/microsoft-graph-client';
+import { Client } from '@microsoft/microsoft-graph-client';
 
 
 export interface OneDriveClient extends BaseDriveClient {
@@ -60,6 +60,51 @@ export async function createOneDriveClient(): Promise<OneDriveClient> {
             }
         }
         throw new Error("Unknown item type")
+    }
+
+    async function handleTokenRefresh(error: any) {
+        if (error.statusCode === 401 && accountInfo) {
+            try {
+                const silentRequest = {
+                    scopes: ["Files.Read", "Sites.Read.All"],
+                    account: accountInfo,
+                    forceRefresh: true
+                };
+                const response = await pca.acquireTokenSilent(silentRequest);
+                accessToken = response.accessToken;
+
+                console.log("Token refreshed successfully");
+
+                // Initialize the Graph client with the new token
+                nativeClient = Client.init({
+                    authProvider: (done) => {
+                        done(null, accessToken || null);
+                    }
+                });
+
+                return true; // Successfully refreshed the token
+            } catch (error) {
+                if (error instanceof InteractionRequiredAuthError) {
+                    throw new Error("User interaction required");
+                }
+                throw error;
+            }
+        }
+        return false; // No need to refresh the token
+    }
+
+    // Wraps an API call with token refresh logic
+    async function withAutoRefresh<T>(apiCall: () => Promise<T>): Promise<T> {
+        try {
+            return await apiCall();
+        } catch (error: any) {
+            console.warn("API call failed", error);
+            if (await handleTokenRefresh(error)) {
+                // Retry the API call after token refresh
+                return await apiCall();
+            }
+            throw error;
+        }
     }
 
     const init = async () => {
@@ -125,18 +170,19 @@ export async function createOneDriveClient(): Promise<OneDriveClient> {
             if (!nativeClient) {
                 throw new Error("Not connected")
             }
-            const responseRootFolderId = await nativeClient
+            const response = await withAutoRefresh(() => nativeClient!
                 .api("/me/drive/root")
                 .get()
-            return responseRootFolderId.id
+            )
+            return response.id
         },
         async getFile(fileId: string) {
             if (!nativeClient) {
                 throw new Error("Not connected")
             }
-            const response = await nativeClient
-                .api(`/me/drive/items/${fileId}`)
-                .get()
+            const response = await withAutoRefresh(() =>
+                nativeClient!.api(`/me/drive/items/${fileId}`).get()
+            )
             return createFileItemFromGraphItem(response)
         },
         async getChildren(folderId: string) {
@@ -146,9 +192,10 @@ export async function createOneDriveClient(): Promise<OneDriveClient> {
 
             const response: {
                 value: any[]
-            } = await nativeClient
+            } = await withAutoRefresh(async () => nativeClient!
                 .api(`/me/drive/items/${folderId}/children`)
                 .get()
+            )
             return response.value.map((item: any) => {
                 return createFileItemFromGraphItem(item)
             })
@@ -159,11 +206,11 @@ export async function createOneDriveClient(): Promise<OneDriveClient> {
             }
             // > To download files in a JavaScript app, you can't use the /content API, because this responds with a 302 redirect
             // https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0&tabs=http
-            const responseDownloadUrl = await nativeClient
+            const responseDownloadUrl = await withAutoRefresh(() => nativeClient!
                 .api(
                     `/me/drive/items/${fileId}?select=id,@microsoft.graph.downloadUrl`
                 )
-                .get()
+                .get())
             const downloadUrl = responseDownloadUrl["@microsoft.graph.downloadUrl"]
             const responseBlob = await fetch(downloadUrl)
             return await responseBlob.blob()
