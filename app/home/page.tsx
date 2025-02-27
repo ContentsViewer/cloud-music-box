@@ -137,12 +137,12 @@ const CardButton = React.memo(function CardButton({
 }) {
   const [themeStoreState] = useThemeStore()
   const colorSurfaceContainer = hexFromArgb(
-    MaterialDynamicColors.surfaceContainer.getArgb(themeStoreState.scheme)
+    MaterialDynamicColors.surfaceContainerHighest.getArgb(themeStoreState.scheme)
   )
   return (
     <Card
       sx={{
-        backgroundColor: alpha(colorSurfaceContainer, 0.5),
+        background: alpha(colorSurfaceContainer, 0.5),
       }}
     >
       <CardActionArea onClick={onClick}>

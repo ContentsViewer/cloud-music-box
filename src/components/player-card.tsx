@@ -513,23 +513,29 @@ const PlayerCardInner = memo(function PlayerCardInner({
       }
     }
   }, [activeTrack?.file.metadata?.common.picture])
-  
-  const title =
-  activeTrack?.file.metadata?.common.title ||
-  activeTrack?.file.name ||
-    "No track playing"
-  
-  const primaryBackgroundColor = (() => {
-    const hct = Hct.fromInt(
-      MaterialDynamicColors.primaryContainer
-        .getHct(themeStoreState.scheme)
-        .toInt()
-    )
 
-    hct.tone /= 2
-    hct.chroma /= 2
-    return hexFromArgb(hct.toInt())
-  })()
+  const title =
+    activeTrack?.file.metadata?.common.title ||
+    activeTrack?.file.name ||
+    "No track playing"
+
+  // const primaryBackgroundColor = (() => {
+  //   const hct = Hct.fromInt(
+  //     MaterialDynamicColors.primaryContainer
+  //       .getHct(themeStoreState.scheme)
+  //       .toInt()
+  //   )
+
+  //   hct.tone /= 2
+  //   hct.chroma /= 2
+  //   return hexFromArgb(hct.toInt())
+  // })()
+
+  const colorSurfaceContainerHighest = hexFromArgb(
+    MaterialDynamicColors.surfaceContainerHighest.getArgb(
+      themeStoreState.scheme
+    )
+  )
 
   return (
     <div>
@@ -558,10 +564,10 @@ const PlayerCardInner = memo(function PlayerCardInner({
             sx={{
               display: "flex",
               flexDirection: "column",
-
               backdropFilter: "blur(16px)",
               maxWidth: 640,
-              backgroundColor: alpha(primaryBackgroundColor, 0.5),
+              // backgroundColor: alpha(colorSurfaceContainerHighest, 0.5),
+              background: alpha(colorSurfaceContainerHighest, 0.5),
               borderRadius: 4,
               m: "auto",
               pointerEvents: "auto",
