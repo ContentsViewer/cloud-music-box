@@ -1,4 +1,5 @@
 import {
+    sourceColorFromImage,
     argbFromRgb,
     QuantizerCelebi,
     Score,
@@ -26,10 +27,12 @@ const extractColorFromImage = async (blob: Blob): Promise<number> => {
         const g = imageBytes[i + 1]
         const b = imageBytes[i + 2]
         const a = imageBytes[i + 3]
-        if (a >= 255) {
-            const argb = argbFromRgb(r, g, b)
-            pixels.push(argb)
+        if (a < 255) {
+            // Skip transparent pixels
+            continue
         }
+        const argb = argbFromRgb(r, g, b)
+        pixels.push(argb)
     }
     // Convert Pixels to Material Colors
     const result = QuantizerCelebi.quantize(pixels, 128)

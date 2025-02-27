@@ -6,12 +6,17 @@ import { ThemeProvider } from "@mui/material/styles"
 import { useTheme } from "@mui/material/styles"
 import {
   hexFromArgb,
-  SchemeContent,
   sourceColorFromImage,
   DynamicScheme,
   Hct,
   MaterialDynamicColors,
   rgbaFromArgb,
+  SchemeTonalSpot,
+  SchemeFidelity,
+  SchemeExpressive,
+  SchemeVibrant,
+  SchemeAndroid,
+  SchemeNeutral,
 } from "@material/material-color-utilities"
 import {
   Dispatch,
@@ -41,9 +46,23 @@ interface ThemeStateProps {
 }
 
 const defaultSourceColor = 0x163447
+// const defaultSourceColor = 0xFF8D95
+const defaultContrastLevel = 0.0
+
+const DefaultSchemeType = SchemeTonalSpot
+// const DefaultSchemeType = SchemeNeutral
+// const DefaultSchemeType = SchemeAndroid
+// const DefaultSchemeType = SchemeFidelity
+// const DefaultSchemeType = SchemeVibrant
+// const DefaultSchemeType = SchemeExpressive
+
 
 export const ThemeStateContext = createContext<ThemeStateProps>({
-  scheme: new SchemeContent(Hct.fromInt(defaultSourceColor), true, 0.3),
+  scheme: new DefaultSchemeType(
+    Hct.fromInt(defaultSourceColor),
+    true,
+    defaultContrastLevel
+  ),
   sourceColor: defaultSourceColor,
 })
 
@@ -65,14 +84,22 @@ export const useThemeStore = () => {
       applyThemeFromImage: async (blob: Blob) => {
         const sourceColor = await extractColorFromImage(blob)
         // console.log(rgbaFromArgb(sourceColor))
-        const scheme = new SchemeContent(Hct.fromInt(sourceColor), true, 0.3)
+        const scheme = new DefaultSchemeType(
+          Hct.fromInt(sourceColor),
+          true,
+          defaultContrastLevel
+        )
+        // console.log(hexFromArgb(sourceColor))
+        // console.log("!!", 
+        //   hexFromArgb(MaterialDynamicColors.primary.getArgb(scheme))
+        // )
         dispatch({ type: "setTheme", payload: { scheme, sourceColor } })
       },
       resetSourceColor: () => {
-        const scheme = new SchemeContent(
+        const scheme = new DefaultSchemeType(
           Hct.fromInt(defaultSourceColor),
           true,
-          0.3
+          defaultContrastLevel
         )
         dispatch({
           type: "setTheme",
@@ -108,7 +135,11 @@ export const ThemeStoreProvider = ({
   children: React.ReactNode
 }) => {
   const [state, dispatch] = useReducer(reducer, {
-    scheme: new SchemeContent(Hct.fromInt(defaultSourceColor), true, 0.3),
+    scheme: new DefaultSchemeType(
+      Hct.fromInt(defaultSourceColor),
+      true,
+      defaultContrastLevel
+    ),
     sourceColor: defaultSourceColor,
   })
 
