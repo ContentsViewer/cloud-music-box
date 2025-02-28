@@ -1,8 +1,5 @@
 "use client"
 
-import {
-  InteractionRequiredAuthError,
-} from "@azure/msal-browser"
 import { SnackbarKey, closeSnackbar, enqueueSnackbar } from "notistack"
 import {
   createContext,
@@ -16,17 +13,13 @@ import {
 import { useNetworkMonitor } from "./network-monitor"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
-import { Button } from "@mui/material"
 import {
   BaseFileItem,
   FolderItem,
   AudioTrackFileItem,
 } from "../drive-clients/base-drive-client"
 import { BaseDriveClient } from "../drive-clients/base-drive-client"
-import {
-  OneDriveClient,
-  createOneDriveClient,
-} from "../drive-clients/onedrive-client"
+import { createOneDriveClient } from "../drive-clients/onedrive-client"
 
 interface SyncTask {
   fileId: string
@@ -721,50 +714,7 @@ export const FileStoreProvider = ({
         await driveClient.connect()
         enqueueSnackbar("Drive Client Connected")
       } catch (error) {
-        if (error instanceof InteractionRequiredAuthError) {
-          // pca.acquireTokenRedirect({ scopes: ["Files.Read", "Sites.Read.All"] })
-          // return
-        }
-
-        const action = (snackbarId: SnackbarKey) => {
-          // FIXME: Remove dependency on OneDriveClient
-          const onedriveClient = driveClient as OneDriveClient
-          const pca = onedriveClient.pca
-          const account = onedriveClient.accountInfo
-
-          return (
-            <>
-              <Button
-                color="error"
-                onClick={() => {
-                  if (!pca) return
-                  if (!account) return
-                  pca.acquireTokenRedirect({
-                    scopes: ["Files.Read", "Sites.Read.All"],
-                    account: account,
-                  })
-                  closeSnackbar(snackbarId)
-                }}
-              >
-                Log In Cloud
-              </Button>
-              <Button
-                color="error"
-                onClick={() => {
-                  closeSnackbar(snackbarId)
-                }}
-              >
-                Dismiss
-              </Button>
-            </>
-          )
-        }
-        enqueueSnackbar(`${error}`, {
-          variant: "error",
-          action,
-          persist: true,
-        })
-
+        enqueueSnackbar(`${error}`, { variant: "error" })
         refClientConfiguring.current = false
         return
       }

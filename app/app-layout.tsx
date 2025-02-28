@@ -21,9 +21,15 @@ import * as mm from "music-metadata-browser"
 import { AudioDynamicsProvider } from "@/src/stores/audio-dynamics-store"
 import { css } from "@emotion/css"
 import { registerServiceWorker } from "./register-sw"
-import { AudioDynamicsSettingsProvider, useAudioDynamicsSettingsStore } from "@/src/stores/audio-dynamics-settings"
-import { Hct, MaterialDynamicColors, hexFromArgb } from "@material/material-color-utilities"
-
+import {
+  AudioDynamicsSettingsProvider,
+  useAudioDynamicsSettingsStore,
+} from "@/src/stores/audio-dynamics-settings"
+import {
+  Hct,
+  MaterialDynamicColors,
+  hexFromArgb,
+} from "@material/material-color-utilities"
 
 const StyledMaterialDesignContent = styled(MaterialDesignContent)(() => {
   const [themeState] = useThemeStore()
@@ -58,6 +64,16 @@ const StyledMaterialDesignContent = styled(MaterialDesignContent)(() => {
   }
 })
 
+const InverseColorButton = styled(Button)(() => {
+  const [themeState] = useThemeStore()
+  const colorPrimaryInverse = MaterialDynamicColors.inversePrimary.getArgb(
+    themeState.scheme
+  )
+  return {
+    color: hexFromArgb(colorPrimaryInverse),
+  }
+})
+
 const ThemeChanger = () => {
   const [playerState] = usePlayerStore()
   const [, themeStoreActions] = useThemeStore()
@@ -89,7 +105,7 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
       env(safe-area-inset-bottom, 0) + ${playerCardExpanded ? "0" : "136"}px
     );
   `
-  const [audioDynamicsSettings,] = useAudioDynamicsSettingsStore();
+  const [audioDynamicsSettings] = useAudioDynamicsSettingsStore()
 
   return (
     <SnackbarProvider
@@ -118,8 +134,10 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
 
           zIndex: audioDynamicsSettings.dynamicsEffectAppeal ? -1 : 0,
           opacity: audioDynamicsSettings.dynamicsEffectAppeal ? 0.5 : 1,
-          filter: audioDynamicsSettings.dynamicsEffectAppeal ? "blur(10px)" : "none",
-          
+          filter: audioDynamicsSettings.dynamicsEffectAppeal
+            ? "blur(10px)"
+            : "none",
+
           scale: audioDynamicsSettings.dynamicsEffectAppeal ? "0.9" : "1",
           transition: "opacity 0.5s ease-in-out, scale 0.5s ease-in-out",
           overflow: "hidden",
@@ -157,14 +175,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         const action = (snackbarId: SnackbarKey) => {
           return (
             <>
-              <Button
+              <InverseColorButton
                 onClick={() => {
                   updateSW()
                   closeSnackbar(snackbarId)
                 }}
               >
                 Reload
-              </Button>
+              </InverseColorButton>
             </>
           )
         }
