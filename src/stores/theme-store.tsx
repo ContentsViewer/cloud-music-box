@@ -47,7 +47,7 @@ interface ThemeStateProps {
 
 const defaultSourceColor = 0x163447
 // const defaultSourceColor = 0xFF8D95
-const defaultContrastLevel = 0.0
+const defaultContrastLevel = 0.6
 
 const DefaultSchemeType = SchemeTonalSpot
 // const DefaultSchemeType = SchemeNeutral
