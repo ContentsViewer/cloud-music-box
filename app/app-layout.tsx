@@ -135,7 +135,8 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
           zIndex: audioDynamicsSettings.dynamicsEffectAppeal ? -1 : 0,
           opacity: audioDynamicsSettings.dynamicsEffectAppeal ? 0.5 : 1,
           filter: audioDynamicsSettings.dynamicsEffectAppeal
-            ? "blur(10px)"
+            ? "blur(calc(1vmin + 5px))"
+              // "blur(10px)"
             : "none",
 
           scale: audioDynamicsSettings.dynamicsEffectAppeal ? "0.9" : "1",
