@@ -39,3 +39,5 @@ next-env.d.ts
 *.drawio.dtmp
 
 .vscode
+
+/public/sw.js
