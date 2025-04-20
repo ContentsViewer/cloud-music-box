@@ -40,7 +40,8 @@ const LissajousCurve = () => {
   }, [])
   // const particleCount = 44100
   const particleCount = 22050
-  const linePointCount = 22050 // 線で結ぶ点の数
+  // const linePointCount = 22050 // 線で結ぶ点の数
+  const linePointCount = 4096 // 線で結ぶ点の数
 
   useEffect(() => {
     const frame = audioDynamicsState.frame
@@ -164,6 +165,8 @@ const LissajousCurve = () => {
     }
 
     // 線の頂点データを更新
+    const lineStartTimesArray = lineRef.current.geometry.attributes.startTime.array;
+    const lineColorsArray = lineRef.current.geometry.attributes.lineColor.array;
     for (let i = 0; i < linePointCount; ++i) {
       const index = (context.particleTail - i + particleCount) % particleCount
       lineVertices[i * 3 + 0] = positions[index * 3 + 0]
@@ -171,11 +174,9 @@ const LissajousCurve = () => {
       lineVertices[i * 3 + 2] = positions[index * 3 + 2]
       
       // 時間情報を更新
-      const lineStartTimesArray = lineRef.current.geometry.attributes.startTime.array;
       lineStartTimesArray[i] = startTimeArray[index];
       
       // 色情報を更新
-      const lineColorsArray = lineRef.current.geometry.attributes.lineColor.array;
       lineColorsArray[i * 3 + 0] = particleColors[index * 3 + 0];
       lineColorsArray[i * 3 + 1] = particleColors[index * 3 + 1];
       lineColorsArray[i * 3 + 2] = particleColors[index * 3 + 2];
@@ -258,10 +259,15 @@ const LissajousCurve = () => {
                     vAlpha = alpha * 0.2;
                     
                     // 点群と同様のスケール変換を適用
-                    float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
-                    float edge = smoothstep(0.8, 1.2, r);
-                    float noiseEffect = (noise - 0.5) * 0.4;
-                    float scale = pow(r * (1.0 + edge * (0.3 + noiseEffect)), 1.0 / 2.2) / r;
+
+                    // 普通のgamma補正
+                    float scale = pow(r, 1.0 / 2.2) / r;
+
+                    // float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
+                    // float edge = smoothstep(0.8, 1.2, r);
+                    // float noiseEffect = (noise - 0.5) * 0.4;
+                    // float scale = pow(r * (1.0 + edge * (0.3 + noiseEffect)), 1.0 / 2.2) / r;
+
                     p.xy *= scale;
                     
                     // 45度回転する行列
@@ -385,7 +391,7 @@ const LissajousCurve = () => {
               float r = length(p.xy);
               
               // 普通のgamma補正
-              //float scale = pow(r, 1.0 / 2.2) / r;
+              float scale = pow(r, 1.0 / 2.2) / r;
 
               // ゴールド・ラショ（黄金比）や分野で知られる無理数を元にしたランダム生成の解説 (波形の紋が失われてしまう)
               //float randOffset = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
@@ -394,13 +400,13 @@ const LissajousCurve = () => {
               //  float edge = smoothstep(0.9, 1.1, r);
               //  float scale = pow(r * (1.0 + edge * 0.2), 1.0 / 2.2) / r;
 
-              // エッジ周辺のノイズを追加
-              float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
-              float edge = smoothstep(0.8, 1.2, r);  // 範囲を広げる
-              float noiseEffect = (noise - 0.5) * 0.4;  // ノイズの影響を強める
+              // // エッジ周辺のノイズを追加
+              // float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
+              // float edge = smoothstep(0.8, 1.2, r);  // 範囲を広げる
+              // float noiseEffect = (noise - 0.5) * 0.4;  // ノイズの影響を強める
 
-              // スケールにノイズを組み込む
-              float scale = pow(r * (1.0 + edge * (0.3 + noiseEffect)), 1.0 / 2.2) / r;
+              // // スケールにノイズを組み込む
+              // float scale = pow(r * (1.0 + edge * (0.3 + noiseEffect)), 1.0 / 2.2) / r;
 
               //float distortion = sin(r * 6.28318) * 0.1;
               //float scale = pow(r + distortion, 1.0 / 2.2) / r;
