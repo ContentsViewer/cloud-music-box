@@ -14,8 +14,9 @@ const makeAudioAnalyser = () => {
   let audioBuffer: AudioBuffer
   let isAnalyzing = false
   const bufferLength = 2048
-  // const sampleRate = 44100
-  const sampleRate = 22050
+  const sampleRate = 44100
+  // const sampleRate = 22050
+  // const sampleRate = 8000
   const fft = new FFT(bufferLength)
   const spectrum = fft.createComplexArray()
   const powerSpectrum = new Float32Array(bufferLength)

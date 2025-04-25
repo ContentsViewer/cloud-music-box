@@ -14,6 +14,15 @@ import {
 } from "@material/material-color-utilities"
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
+import { extend, Object3DNode } from "@react-three/fiber"
+
+extend({ Line_: THREE.Line })
+
+declare module "@react-three/fiber" {
+  interface ThreeElements {
+    line_: Object3DNode<THREE.Line, typeof THREE.Line>
+  }
+}
 
 const noteFromPitch = (frequency: number) => {
   const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
@@ -31,13 +40,17 @@ const LissajousCurve = () => {
   const [audioDynamicsState] = useAudioDynamicsStore()
   const [themeStoreState] = useThemeStore()
   const pointsRef = useRef<THREE.Points>(null)
+  const lineRef = useRef<THREE.Line>(null)
   const shaderMaterialRef = useRef<THREE.ShaderMaterial>(null)
+  const lineShaderMaterialRef = useRef<THREE.ShaderMaterial>(null) // 線用のシェーダーマテリアル
 
   const context = useMemo<RenderingContext>(() => {
     return { time: 0, particleStart: 0, particleTail: 0, currentPitch: 440 }
   }, [])
   // const particleCount = 44100
   const particleCount = 22050
+  // const linePointCount = 22050 // 線で結ぶ点の数
+  const linePointCount = 4096 // 線で結ぶ点の数
 
   useEffect(() => {
     const frame = audioDynamicsState.frame
@@ -51,6 +64,9 @@ const LissajousCurve = () => {
   }, [audioDynamicsState.frame])
 
   const vertices = useMemo(() => new Float32Array(particleCount * 3), [])
+  const lineVertices = useMemo(() => new Float32Array(linePointCount * 3), []) // 線用の頂点データ
+  const lineStartTimes = useMemo(() => new Float32Array(linePointCount), []) // 線用の時間データ
+  const lineColors = useMemo(() => new Float32Array(linePointCount * 3), []) // 線用の色データ
   const startTimes = useMemo(() => new Float32Array(particleCount), [])
   const particleColors = useMemo(() => new Float32Array(particleCount * 3), [])
   const particleBaseColor = useMemo(() => {
@@ -76,6 +92,7 @@ const LissajousCurve = () => {
     const time = state.clock.getElapsedTime()
 
     if (!pointsRef.current) return
+    if (!lineRef.current) return
     if (!shaderMaterialRef.current) return
     if (!context.frame) return
 
@@ -89,13 +106,6 @@ const LissajousCurve = () => {
       (context.time - context.frame.timeSeconds) *
       sampleRate
     )
-    // if (startOffset == 0) {
-    //   console.log("AAAA")
-    // }
-    // if (startOffset > 44100 / 2) {
-    //   console.log(startOffset)
-    // }
-    // console.log(startOffset)
 
     context.time += deltaTime
     const samplesCountToAppend = ~~(deltaTime * sampleRate)
@@ -118,6 +128,7 @@ const LissajousCurve = () => {
     // console.log((pitchColor >> 16 & 255) / 255.0, (pitchColor >> 8 & 255) / 255.0, (pitchColor & 255) / 255.0)
 
     const positions = pointsRef.current.geometry.attributes.position.array
+    const linePositions = lineRef.current.geometry.attributes.position.array // 線用の頂点データ
     const startTimeArray = pointsRef.current.geometry.attributes.startTime.array
     const particleColors =
       pointsRef.current.geometry.attributes.particleColor.array
@@ -162,48 +173,201 @@ const LissajousCurve = () => {
       context.particleTail = (t + 1) % particleCount
     }
 
+    // 線の頂点データを更新
+    const lineStartTimesArray =
+      lineRef.current.geometry.attributes.startTime.array
+    const lineColorsArray = lineRef.current.geometry.attributes.lineColor.array
+    for (let i = 0; i < linePointCount; ++i) {
+      const index = (context.particleTail - i + particleCount) % particleCount
+      lineVertices[i * 3 + 0] = positions[index * 3 + 0]
+      lineVertices[i * 3 + 1] = positions[index * 3 + 1]
+      lineVertices[i * 3 + 2] = positions[index * 3 + 2]
+
+      // 時間情報を更新
+      lineStartTimesArray[i] = startTimeArray[index]
+
+      // 色情報を更新
+      lineColorsArray[i * 3 + 0] = particleColors[index * 3 + 0]
+      lineColorsArray[i * 3 + 1] = particleColors[index * 3 + 1]
+      lineColorsArray[i * 3 + 2] = particleColors[index * 3 + 2]
+    }
+
     pointsRef.current.geometry.attributes.position.needsUpdate = true
     pointsRef.current.geometry.attributes.startTime.needsUpdate = true
     pointsRef.current.geometry.attributes.particleColor.needsUpdate = true
+    lineRef.current.geometry.attributes.position.needsUpdate = true
+    lineRef.current.geometry.attributes.startTime.needsUpdate = true // 時間属性の更新を通知
+    lineRef.current.geometry.attributes.lineColor.needsUpdate = true // 色属性の更新を通知
+
+    // シェーダーマテリアルのuniforms更新
     shaderMaterialRef.current.uniforms.time.value = time
     shaderMaterialRef.current.uniforms.aspect.value =
       canvasSize.width / canvasSize.height
+
+    if (lineShaderMaterialRef.current) {
+      lineShaderMaterialRef.current.uniforms.time.value = time
+      lineShaderMaterialRef.current.uniforms.aspect.value =
+        canvasSize.width / canvasSize.height
+      lineShaderMaterialRef.current.uniforms.baseColor.value = new THREE.Color(
+        0xffffff
+      )
+    }
   })
 
   const particles = useMemo(() => {
     return (
-      <points ref={pointsRef}>
-        <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            count={particleCount}
-            itemSize={3}
-            array={vertices}
-          />
-          <bufferAttribute
-            attach="attributes-startTime"
-            count={particleCount}
-            itemSize={1}
-            array={startTimes}
-          />
-          <bufferAttribute
-            attach="attributes-particleColor"
-            count={particleCount}
-            itemSize={3}
-            array={particleColors}
-          />
-        </bufferGeometry>
-        <shaderMaterial
-          ref={shaderMaterialRef}
-          attach="material"
-          args={[
-            {
-              uniforms: {
-                time: { value: 0 },
-                baseColor: { value: new THREE.Color(0xffffff) },
-                aspect: { value: 1 },
+      <>
+        <line_ ref={lineRef}>
+          <bufferGeometry>
+            <bufferAttribute
+              attach="attributes-position"
+              count={linePointCount}
+              itemSize={3}
+              array={lineVertices}
+            />
+            <bufferAttribute
+              attach="attributes-startTime"
+              count={linePointCount}
+              itemSize={1}
+              array={lineStartTimes}
+            />
+            <bufferAttribute
+              attach="attributes-lineColor"
+              count={linePointCount}
+              itemSize={3}
+              array={lineColors}
+            />
+          </bufferGeometry>
+          <shaderMaterial
+            ref={lineShaderMaterialRef}
+            attach="material"
+            args={[
+              {
+                uniforms: {
+                  time: { value: 0 },
+                  baseColor: { value: new THREE.Color(0xffffff) },
+                  aspect: { value: 1 },
+                },
+                vertexShader: `
+                  attribute float startTime;
+                  attribute vec3 lineColor;
+                  uniform float time;
+                  uniform float aspect;
+                  varying vec3 vColor;
+                  varying float vAlpha;
+
+                  void main() {
+                    vec3 p = position;
+                    float r = length(p.xy);
+                    
+                    // 時間経過によるフェード効果
+                    float elapsed = clamp((time - startTime) / (4096.0 / 22050.0), 0.0, 1.0);
+                    float alpha = 1.0;
+                    if (elapsed < 0.1) {
+                      alpha = mix(1.0, 0.6, smoothstep(0.0, 0.1, elapsed));
+                    } else if (elapsed <= 0.5) {
+                      alpha = mix(0.6, 0.4, smoothstep(0.1, 0.5, elapsed));
+                    } else {
+                      alpha = mix(0.4, 0.0, smoothstep(0.5, 1.0, elapsed)); 
+                    }
+                    vAlpha = alpha * 0.2;
+                    
+                    // 点群と同様のスケール変換を適用
+
+                    // 普通のgamma補正
+                    float scale = pow(r, 1.0 / 2.2) / r;
+
+                    // float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
+                    // float edge = smoothstep(0.8, 1.2, r);
+                    // float noiseEffect = (noise - 0.5) * 0.4;
+                    // float scale = pow(r * (1.0 + edge * (0.3 + noiseEffect)), 1.0 / 2.2) / r;
+
+                    p.xy *= scale;
+                    
+                    // 45度回転する行列
+                    mat3 rotationMatrix = mat3(
+                      cos(0.785398), sin(0.785398), 0.0,
+                      -sin(0.785398), cos(0.785398), 0.0,
+                      0.0, 0.0, 1.0
+                    );
+                    p = rotationMatrix * p;
+                    
+                    // アスペクト比の調整
+                    if (aspect < 1.0) {
+                      p.x /= aspect;
+                    }
+                    
+                    // Z座標の処理（点群と同様）
+                    p.y += position.z * 1.0;
+                    p.y *= 0.6;
+                    p.x *= 0.8;
+                    p.z = 0.0;
+                    
+                    gl_Position = vec4(p, 1.0);
+                    vColor = lineColor;
+                  }
+                `,
+                fragmentShader: `
+                  uniform vec3 baseColor;
+                  varying vec3 vColor;
+                  varying float vAlpha;
+                  
+                  void main() {
+                    gl_FragColor = vec4(vColor, vAlpha);
+                    return;
+                    // ビネット効果の実装
+                    // gl_FragCoordは現在のピクセル位置
+                    // 画面中央からの距離に基づいて濃さを計算
+                    vec2 center = vec2(0.5, 0.5);
+                    vec2 normalizedCoord = gl_FragCoord.xy / vec2(1920.0, 1080.0); // 適切な解像度に合わせて調整
+                    float dist = length(normalizedCoord - center);
+                    
+                    // 中央が薄く、端が濃い効果
+                    float vignette = smoothstep(0.3, 1.0, dist);
+                    
+                    // // 元の色に適用
+                    // vec3 color = vColor * (1.0 - vignette * 0.7);
+                
+                    gl_FragColor = vec4(vColor, vAlpha * (pow(vignette, 1.0 / 2.2)));
+                  }
+                `,
+                transparent: true,
               },
-              vertexShader: `
+            ]}
+          />
+        </line_>
+        <points ref={pointsRef}>
+          <bufferGeometry>
+            <bufferAttribute
+              attach="attributes-position"
+              count={particleCount}
+              itemSize={3}
+              array={vertices}
+            />
+            <bufferAttribute
+              attach="attributes-startTime"
+              count={particleCount}
+              itemSize={1}
+              array={startTimes}
+            />
+            <bufferAttribute
+              attach="attributes-particleColor"
+              count={particleCount}
+              itemSize={3}
+              array={particleColors}
+            />
+          </bufferGeometry>
+          <shaderMaterial
+            ref={shaderMaterialRef}
+            attach="material"
+            args={[
+              {
+                uniforms: {
+                  time: { value: 0 },
+                  baseColor: { value: new THREE.Color(0xffffff) },
+                  aspect: { value: 1 },
+                },
+                vertexShader: `
             attribute float startTime;
             attribute vec3 particleColor;
             uniform float time;
@@ -212,7 +376,7 @@ const LissajousCurve = () => {
             varying vec3 vColor;
 
             void main() {
-              float elapsed = clamp((time - startTime) / 1.0, 0.0, 1.0);
+              float elapsed = clamp((time - startTime) / (22050.0 / 22050.0), 0.0, 1.0);
               float effectScale = pow(1.0 - elapsed, 1.0 / 2.2);
               // vAlpha = 0.5 - clamp(elapsed, 0.0, 0.5);
               // elapsed = pow(elapsed, 1.0 / 2.2);
@@ -241,7 +405,7 @@ const LissajousCurve = () => {
               float r = length(p.xy);
               
               // 普通のgamma補正
-              //float scale = pow(r, 1.0 / 2.2) / r;
+              float scale = pow(r, 1.0 / 2.2) / r;
 
               // ゴールド・ラショ（黄金比）や分野で知られる無理数を元にしたランダム生成の解説 (波形の紋が失われてしまう)
               //float randOffset = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
@@ -250,13 +414,13 @@ const LissajousCurve = () => {
               //  float edge = smoothstep(0.9, 1.1, r);
               //  float scale = pow(r * (1.0 + edge * 0.2), 1.0 / 2.2) / r;
 
-              // エッジ周辺のノイズを追加
-              float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
-              float edge = smoothstep(0.8, 1.2, r);  // 範囲を広げる
-              float noiseEffect = (noise - 0.5) * 0.4;  // ノイズの影響を強める
+              // // エッジ周辺のノイズを追加
+              // float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
+              // float edge = smoothstep(0.8, 1.2, r);  // 範囲を広げる
+              // float noiseEffect = (noise - 0.5) * 0.4;  // ノイズの影響を強める
 
-              // スケールにノイズを組み込む
-              float scale = pow(r * (1.0 + edge * (0.3 + noiseEffect)), 1.0 / 2.2) / r;
+              // // スケールにノイズを組み込む
+              // float scale = pow(r * (1.0 + edge * (0.3 + noiseEffect)), 1.0 / 2.2) / r;
 
               //float distortion = sin(r * 6.28318) * 0.1;
               //float scale = pow(r + distortion, 1.0 / 2.2) / r;
@@ -280,13 +444,6 @@ const LissajousCurve = () => {
 
               p.xy *= scale;
 
-              // float signX = sign(p.x);
-              // // p.x = abs(p.x) * signX;     
-              // p.x = pow(abs(p.x), 1.0 / 2.2) * signX;
-
-              // float signY = sign(p.y);
-              // p.y = pow(abs(p.y), 1.0 / 2.2) * signY;
-
               p = rotationMatrix * p;
 
               if (aspect < 1.0) {
@@ -298,8 +455,7 @@ const LissajousCurve = () => {
                 pointSize = 4.0 + mix(0.0, 4.0, smoothstep(0.25, 1.0, r));
               }
 
-              // 1. 距離とノイズの組み合わせ
-                          
+              // 1. 距離とノイズの組み合わせ  
               //float noise = fract(sin(dot(p.xy, vec2(12.9898, 78.233))) * 43758.5453);
               //float pointSize = 2.0 + noise * 2.0 + smoothstep(0.5, 1.0, r) * 2.0;
 
@@ -330,7 +486,7 @@ const LissajousCurve = () => {
               vColor = particleColor;
             }
           `,
-              fragmentShader: `
+                fragmentShader: `
             varying float vAlpha;
             varying vec3 vColor;
             uniform vec3 baseColor;
@@ -347,13 +503,14 @@ const LissajousCurve = () => {
               // gl_FragColor = vec4(vColor, vAlpha);
             }
           `,
-              transparent: true,
-              vertexColors: true,
-            },
-          ]}
-        />
-        {/* <pointsMaterial size={0.01} color="white" /> */}
-      </points>
+                transparent: true,
+                vertexColors: true,
+              },
+            ]}
+          />
+          {/* <pointsMaterial size={0.01} color="white" /> */}
+        </points>
+      </>
     )
   }, [particleCount, vertices, startTimes])
 
