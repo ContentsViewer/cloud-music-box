@@ -14,6 +14,15 @@ import {
 } from "@material/material-color-utilities"
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
+import { extend, Object3DNode } from "@react-three/fiber"
+
+extend({ Line_: THREE.Line })
+
+declare module "@react-three/fiber" {
+  interface ThreeElements {
+    line_: Object3DNode<THREE.Line, typeof THREE.Line>
+  }
+}
 
 const noteFromPitch = (frequency: number) => {
   const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
@@ -165,45 +174,50 @@ const LissajousCurve = () => {
     }
 
     // 線の頂点データを更新
-    const lineStartTimesArray = lineRef.current.geometry.attributes.startTime.array;
-    const lineColorsArray = lineRef.current.geometry.attributes.lineColor.array;
+    const lineStartTimesArray =
+      lineRef.current.geometry.attributes.startTime.array
+    const lineColorsArray = lineRef.current.geometry.attributes.lineColor.array
     for (let i = 0; i < linePointCount; ++i) {
       const index = (context.particleTail - i + particleCount) % particleCount
       lineVertices[i * 3 + 0] = positions[index * 3 + 0]
       lineVertices[i * 3 + 1] = positions[index * 3 + 1]
       lineVertices[i * 3 + 2] = positions[index * 3 + 2]
-      
+
       // 時間情報を更新
-      lineStartTimesArray[i] = startTimeArray[index];
-      
+      lineStartTimesArray[i] = startTimeArray[index]
+
       // 色情報を更新
-      lineColorsArray[i * 3 + 0] = particleColors[index * 3 + 0];
-      lineColorsArray[i * 3 + 1] = particleColors[index * 3 + 1];
-      lineColorsArray[i * 3 + 2] = particleColors[index * 3 + 2];
+      lineColorsArray[i * 3 + 0] = particleColors[index * 3 + 0]
+      lineColorsArray[i * 3 + 1] = particleColors[index * 3 + 1]
+      lineColorsArray[i * 3 + 2] = particleColors[index * 3 + 2]
     }
 
     pointsRef.current.geometry.attributes.position.needsUpdate = true
     pointsRef.current.geometry.attributes.startTime.needsUpdate = true
     pointsRef.current.geometry.attributes.particleColor.needsUpdate = true
     lineRef.current.geometry.attributes.position.needsUpdate = true
-    lineRef.current.geometry.attributes.startTime.needsUpdate = true  // 時間属性の更新を通知
-    lineRef.current.geometry.attributes.lineColor.needsUpdate = true  // 色属性の更新を通知
-    
+    lineRef.current.geometry.attributes.startTime.needsUpdate = true // 時間属性の更新を通知
+    lineRef.current.geometry.attributes.lineColor.needsUpdate = true // 色属性の更新を通知
+
     // シェーダーマテリアルのuniforms更新
     shaderMaterialRef.current.uniforms.time.value = time
-    shaderMaterialRef.current.uniforms.aspect.value = canvasSize.width / canvasSize.height
-    
+    shaderMaterialRef.current.uniforms.aspect.value =
+      canvasSize.width / canvasSize.height
+
     if (lineShaderMaterialRef.current) {
       lineShaderMaterialRef.current.uniforms.time.value = time
-      lineShaderMaterialRef.current.uniforms.aspect.value = canvasSize.width / canvasSize.height
-      lineShaderMaterialRef.current.uniforms.baseColor.value = new THREE.Color(0xffffff)
+      lineShaderMaterialRef.current.uniforms.aspect.value =
+        canvasSize.width / canvasSize.height
+      lineShaderMaterialRef.current.uniforms.baseColor.value = new THREE.Color(
+        0xffffff
+      )
     }
   })
 
   const particles = useMemo(() => {
     return (
       <>
-        <line ref={lineRef}>
+        <line_ ref={lineRef}>
           <bufferGeometry>
             <bufferAttribute
               attach="attributes-position"
@@ -318,10 +332,10 @@ const LissajousCurve = () => {
                   }
                 `,
                 transparent: true,
-              }
+              },
             ]}
           />
-        </line>
+        </line_>
         <points ref={pointsRef}>
           <bufferGeometry>
             <bufferAttribute
@@ -496,8 +510,6 @@ const LissajousCurve = () => {
           />
           {/* <pointsMaterial size={0.01} color="white" /> */}
         </points>
-
-       
       </>
     )
   }, [particleCount, vertices, startTimes])
