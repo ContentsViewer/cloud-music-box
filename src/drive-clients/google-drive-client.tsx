@@ -277,22 +277,30 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       return accessToken as string
     },
     async connect() {
+      await loadGoogleAPI()
+
       if (!accessToken) {
         throw new Error("No access token available")
       }
 
-      // ユーザー情報を取得
-      if (!userInfo) {
-        try {
-          const response = await window.gapi.client.request({
-            path: "https://www.googleapis.com/oauth2/v2/userinfo",
-          })
-          userInfo = response.result
-          localStorage.setItem(DB_KEY_USER_INFO, JSON.stringify(userInfo))
-        } catch (error) {
-          console.error("Failed to get user info:", error)
-        }
+      if (!window.gapi) {
+        throw new Error("GAPI client not loaded")
       }
+      console.log("connect")
+      window.gapi.client.setToken({ access_token: accessToken })
+
+      // // ユーザー情報を取得
+      // if (!userInfo) {
+      //   try {
+      //     const response = await window.gapi.client.request({
+      //       path: "https://www.googleapis.com/oauth2/v2/userinfo",
+      //     })
+      //     userInfo = response.result
+      //     localStorage.setItem(DB_KEY_USER_INFO, JSON.stringify(userInfo))
+      //   } catch (error) {
+      //     console.error("Failed to get user info:", error)
+      //   }
+      // }
     },
     async getRootFolderId() {
       return "root"
