@@ -37,6 +37,8 @@ import {
   CardContent,
   CardActionArea,
   alpha,
+  Backdrop,
+  CircularProgress,
 } from "@mui/material"
 import { useEffect, useRef, useState, ReactNode, memo } from "react"
 import { css } from "@emotion/react"
@@ -49,7 +51,10 @@ import { setDriveConfig } from "@/src/drive-clients/base-drive-client"
 import { createGoogleDriveClient } from "@/src/drive-clients/google-drive-client"
 
 const LoginPage = () => {
+  const [loading, setLoading] = useState(false)
+
   const signInOneDrive = async () => {
+    setLoading(true)
     setDriveConfig({
       type: "onedrive",
     })
@@ -64,23 +69,12 @@ const LoginPage = () => {
   }
 
   const signInGoogleDrive = async () => {
-    // setDriveConfig({
-    //   type: "google-drive",
-    // })
+    setLoading(true)
+    setDriveConfig({
+      type: "google-drive",
+    })
     const driveClient = await createGoogleDriveClient()
-
-    // const auth = driveClient.auth
-    // const loginRequest = {
-    //   scope: "https://www.googleapis.com/auth/drive.readonly",
-    //   ux_mode: "redirect",
-    //   redirect_uri: `${window.location.origin}${
-    //     process.env.NEXT_PUBLIC_BASE_PATH || ""
-    //   }/redirect/google-drive`,
-    // }
-    // const loginUrl = auth.generateAuthUrl(loginRequest)
-    // console.log("Google Drive login URL:", loginUrl)
-    // // window.location.href = loginUrl
-
+    await driveClient.loginRedirect()
   }
 
   return (
@@ -128,6 +122,16 @@ const LoginPage = () => {
           </ListItemButton>
         </List>
       </Paper>
+      <Backdrop
+        open={loading}
+        sx={{
+          zIndex: theme => theme.zIndex.drawer + 1,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <CircularProgress />
+      </Backdrop>
     </div>
   )
 }

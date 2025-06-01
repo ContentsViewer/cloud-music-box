@@ -21,6 +21,7 @@ import {
 } from "../drive-clients/base-drive-client"
 import { BaseDriveClient } from "../drive-clients/base-drive-client"
 import { createOneDriveClient } from "../drive-clients/onedrive-client"
+import { createGoogleDriveClient } from "../drive-clients/google-drive-client"
 
 interface SyncTask {
   fileId: string
@@ -674,6 +675,11 @@ export const FileStoreProvider = ({
             dispatch({ type: "setDriveStatus", payload: "offline" })
           }
         } else if (driveConfig?.type === "google-drive") {
+          const googleDriveClient = await createGoogleDriveClient()
+          dispatch({ type: "setDriveClient", payload: googleDriveClient })
+
+          // test
+          dispatch({ type: "setDriveStatus", payload: "offline" })
         } else {
           dispatch({ type: "setDriveStatus", payload: "no-account" })
         }
