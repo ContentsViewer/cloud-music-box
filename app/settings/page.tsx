@@ -351,6 +351,7 @@ export default function Page() {
               alignSelf: "center",
               width: "100%",
               maxWidth: "288px",
+              borderRadius: "24px",
             }}
           >
             <Typography variant="body1" sx={{ fontWeight: "bold" }}>

@@ -30,7 +30,7 @@ export async function createOneDriveClient(): Promise<OneDriveClient> {
       clientId: "28af6fb9-c605-4ad3-8039-3e90df0933cb",
       redirectUri: `${window.location.origin}${
         process.env.NEXT_PUBLIC_BASE_PATH || ""
-      }/redirect`,
+      }/redirect/onedrive`,
     },
     cache: {
       cacheLocation: "localStorage",

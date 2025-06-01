@@ -1,5 +1,7 @@
-import { GoogleAuth, OAuth2Client } from "google-auth-library"
-import { drive_v3, google } from "googleapis"
+// google-auth-libraryとgoogleapisのインポートを削除
+// import { GoogleAuth, OAuth2Client } from "google-auth-library"
+// import { drive_v3, google } from "googleapis"
+
 import {
   AUDIO_FORMAT_MAPPING,
   AudioTrackFileItem,
@@ -11,33 +13,74 @@ import {
 import { closeSnackbar, enqueueSnackbar, SnackbarKey } from "notistack"
 import { Button } from "@mui/material"
 
+// Google Identity Services用の型定義
+declare global {
+  interface Window {
+    google: any
+    gapi: any
+  }
+}
+
 export interface GoogleDriveClient extends BaseDriveClient {
-  auth: OAuth2Client
   userInfo: any | undefined
   connect(): Promise<void>
 }
 
 const DB_KEY_USER_INFO = "googleDrive.userInfo"
-const DB_KEY_TOKENS = "googleDrive.tokens"
+const DB_KEY_ACCESS_TOKEN = "googleDrive.accessToken"
+
+const GOOGLE_CLIENT_ID = "636784171461-qe09gc3cupq8iagds8hk16cb6k6cvle4.apps.googleusercontent.com"
 
 export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
   console.log("createGoogleDriveClient")
 
-  const auth = new OAuth2Client({
-    clientId: process.env.NEXT_PUBLIC_GOOGLE_DRIVE_CLIENT_ID,
-    clientSecret: "", // クライアントサイドでは不要
-    redirectUri: `${window.location.origin}${
-      process.env.NEXT_PUBLIC_BASE_PATH || ""
-    }/redirect`,
-  })
-
-  let drive: drive_v3.Drive | undefined = undefined
   let userInfo: any | undefined = undefined
-  let isConnected = false
+  let accessToken: string | undefined = undefined
 
-  function createFileItemFromDriveItem(
-    item: drive_v3.Schema$File
-  ): BaseFileItem {
+  // Google API スクリプトを動的に読み込み
+  const loadGoogleAPI = () => {
+    return new Promise<void>(resolve => {
+      if (window.gapi) {
+        resolve()
+        return
+      }
+
+      const script = document.createElement("script")
+      script.src = "https://apis.google.com/js/api.js"
+      script.onload = () => {
+        window.gapi.load("client", resolve)
+      }
+      document.head.appendChild(script)
+    })
+  }
+
+  // Google Identity Services スクリプトを読み込み
+  const loadGoogleIdentity = () => {
+    return new Promise<void>(resolve => {
+      if (window.google?.accounts) {
+        resolve()
+        return
+      }
+
+      const script = document.createElement("script")
+      script.src = "https://accounts.google.com/gsi/client"
+      script.onload = () => resolve()
+      document.head.appendChild(script)
+    })
+  }
+
+  await Promise.all([loadGoogleAPI(), loadGoogleIdentity()])
+  console.log(window.gapi, window.google)
+
+  // GAPI クライアントを初期化
+  await window.gapi.client.init({
+    discoveryDocs: [
+      "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
+    ],
+  })
+  console.log("AAAA")
+
+  function createFileItemFromDriveItem(item: any): BaseFileItem {
     if (item.mimeType === "application/vnd.google-apps.folder") {
       return {
         name: item.name || "",
@@ -68,209 +111,84 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
     }
   }
 
-  async function handleTokenRefresh(error: any) {
-    if (error.status === 401 && userInfo) {
-      try {
-        const tokens = JSON.parse(localStorage.getItem(DB_KEY_TOKENS) || "{}")
-        if (tokens.refresh_token) {
-          auth.setCredentials(tokens)
-          const { credentials } = await auth.refreshAccessToken()
-          auth.setCredentials(credentials)
-          localStorage.setItem(DB_KEY_TOKENS, JSON.stringify(credentials))
-
-          // Initialize the Drive client with the new token
-          drive = google.drive({ version: "v3", auth })
-
-          console.log("Token refreshed successfully")
-          return true
-        }
-      } catch (refreshError) {
-        console.error("Token refresh failed:", refreshError)
-        enqueueReauthorizeSnackbar()
-        throw new Error("Drive requires reauthorization")
-      }
-    }
-    return false
-  }
-
-  async function withAutoRefresh<T>(apiCall: () => Promise<T>): Promise<T> {
-    try {
-      return await apiCall()
-    } catch (error: any) {
-      console.warn("API call failed", error)
-      if (await handleTokenRefresh(error)) {
-        return await apiCall()
-      }
-      throw error
-    }
-  }
-
-  const enqueueReauthorizeSnackbar = () => {
-    const action = (snackbarId: SnackbarKey) => {
-      return (
-        <>
-          <Button
-            color="error"
-            onClick={async () => {
-              const authUrl = auth.generateAuthUrl({
-                access_type: "offline",
-                scope: ["https://www.googleapis.com/auth/drive.readonly"],
-                prompt: "consent",
-              })
-              window.location.href = authUrl
-              closeSnackbar(snackbarId)
-            }}
-          >
-            Reauthorize
-          </Button>
-          <Button
-            color="error"
-            onClick={() => {
-              closeSnackbar(snackbarId)
-            }}
-          >
-            Dismiss
-          </Button>
-        </>
-      )
-    }
-
-    enqueueSnackbar("Requires reauthorization to access Google Drive", {
-      variant: "error",
-      persist: true,
-      action,
-    })
-  }
-
   const init = async () => {
     const userInfoJson = localStorage.getItem(DB_KEY_USER_INFO)
     if (userInfoJson) {
       userInfo = JSON.parse(userInfoJson)
     }
 
-    const tokensJson = localStorage.getItem(DB_KEY_TOKENS)
-    if (tokensJson) {
-      const tokens = JSON.parse(tokensJson)
-      auth.setCredentials(tokens)
-    }
-
-    // Handle OAuth redirect
-    const urlParams = new URLSearchParams(window.location.search)
-    const code = urlParams.get("code")
-    if (code) {
-      try {
-        const { tokens } = await auth.getToken(code)
-        auth.setCredentials(tokens)
-        localStorage.setItem(DB_KEY_TOKENS, JSON.stringify(tokens))
-
-        // Clear the code from URL
-        window.history.replaceState(
-          {},
-          document.title,
-          window.location.pathname
-        )
-      } catch (error) {
-        console.error("OAuth token exchange failed:", error)
-      }
+    accessToken = localStorage.getItem(DB_KEY_ACCESS_TOKEN) || undefined
+    if (accessToken) {
+      window.gapi.client.setToken({ access_token: accessToken })
     }
   }
 
   await init()
 
   return {
-    auth,
     userInfo,
     async resetUser() {
       userInfo = undefined
-      drive = undefined
-      isConnected = false
+      accessToken = undefined
       localStorage.removeItem(DB_KEY_USER_INFO)
-      localStorage.removeItem(DB_KEY_TOKENS)
-      auth.setCredentials({})
+      localStorage.removeItem(DB_KEY_ACCESS_TOKEN)
+      window.gapi.client.setToken(null)
     },
-    async connect() {
-      const tokens = JSON.parse(localStorage.getItem(DB_KEY_TOKENS) || "{}")
 
-      if (!tokens.access_token) {
-        const authUrl = auth.generateAuthUrl({
-          access_type: "offline",
-          scope: ["https://www.googleapis.com/auth/drive.readonly"],
-          prompt: "consent",
-        })
-        window.location.href = authUrl
-        return
+    async connect() {
+      if (!accessToken) {
+        throw new Error("No access token available")
       }
 
-      auth.setCredentials(tokens)
-      drive = google.drive({ version: "v3", auth })
-
-      // Get user info
+      // ユーザー情報を取得
       if (!userInfo) {
         try {
-          const oauth2 = google.oauth2({ version: "v2", auth })
-          const { data } = await oauth2.userinfo.get()
-          userInfo = data
+          const response = await window.gapi.client.request({
+            path: "https://www.googleapis.com/oauth2/v2/userinfo",
+          })
+          userInfo = response.result
           localStorage.setItem(DB_KEY_USER_INFO, JSON.stringify(userInfo))
         } catch (error) {
           console.error("Failed to get user info:", error)
         }
       }
-
-      isConnected = true
     },
     async getRootFolderId() {
-      if (!drive) {
-        throw new Error("Not connected")
-      }
-      return "root" // Google Drive uses 'root' as the root folder ID
+      return "root"
     },
     async getFile(fileId: string) {
-      if (!drive) {
-        throw new Error("Not connected")
-      }
-      const response = await withAutoRefresh(() =>
-        drive!.files.get({
-          fileId,
-          fields: "id,name,mimeType,parents",
-        })
-      )
-      return createFileItemFromDriveItem(response.data)
+      const response = await window.gapi.client.drive.files.get({
+        fileId,
+        fields: "id,name,mimeType,parents",
+      })
+      return createFileItemFromDriveItem(response.result)
     },
     async getChildren(folderId: string) {
-      if (!drive) {
-        throw new Error("Not connected")
-      }
+      const response = await window.gapi.client.drive.files.list({
+        q: `'${folderId}' in parents and trashed=false`,
+        fields: "files(id,name,mimeType,parents)",
+        pageSize: 1000,
+      })
 
-      const response = await withAutoRefresh(() =>
-        drive!.files.list({
-          q: `'${folderId}' in parents and trashed=false`,
-          fields: "files(id,name,mimeType,parents)",
-          pageSize: 1000,
-        })
-      )
-
-      return (response.data.files || []).map(item =>
+      return (response.result.files || []).map((item: any) =>
         createFileItemFromDriveItem(item)
       )
     },
     async fetchFileBlob(fileId: string) {
-      if (!drive) {
-        throw new Error("Not connected")
-      }
-
-      const response = await withAutoRefresh(() =>
-        drive!.files.get(
-          {
-            fileId,
-            alt: "media",
+      const response = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
           },
-          {
-            responseType: "blob",
-          }
-        )
+        }
       )
 
-      return response.data as Blob
+      if (!response.ok) {
+        throw new Error(`Failed to fetch file: ${response.statusText}`)
+      }
+
+      return await response.blob()
     },
   }
 }

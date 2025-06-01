@@ -17,6 +17,7 @@ import {
   BaseFileItem,
   FolderItem,
   AudioTrackFileItem,
+  getDriveConfig,
 } from "../drive-clients/base-drive-client"
 import { BaseDriveClient } from "../drive-clients/base-drive-client"
 import { createOneDriveClient } from "../drive-clients/onedrive-client"
@@ -576,9 +577,7 @@ export const FileStoreProvider = ({
     }
 
     const init = async () => {
-      const onedriveClient = await createOneDriveClient()
-
-      dispatch({ type: "setDriveClient", payload: onedriveClient })
+      const localStorage = window.localStorage
 
       let fileDb: IDBDatabase | undefined = undefined
       try {
@@ -616,7 +615,6 @@ export const FileStoreProvider = ({
       }
 
       {
-        const localStorage = window.localStorage
         const rootFolderId = localStorage.getItem("rootFolderId")
         dispatch({
           type: "setRootFolderId",
@@ -663,11 +661,21 @@ export const FileStoreProvider = ({
       }
 
       {
-        const accountInfo = onedriveClient.accountInfo
-        if (accountInfo === undefined) {
-          dispatch({ type: "setDriveStatus", payload: "no-account" })
+        const driveConfig = getDriveConfig()
+
+        if (driveConfig?.type === "onedrive") {
+          const onedriveClient = await createOneDriveClient()
+
+          dispatch({ type: "setDriveClient", payload: onedriveClient })
+          const accountInfo = onedriveClient.accountInfo
+          if (accountInfo === undefined) {
+            dispatch({ type: "setDriveStatus", payload: "no-account" })
+          } else {
+            dispatch({ type: "setDriveStatus", payload: "offline" })
+          }
+        } else if (driveConfig?.type === "google-drive") {
         } else {
-          dispatch({ type: "setDriveStatus", payload: "offline" })
+          dispatch({ type: "setDriveStatus", payload: "no-account" })
         }
       }
     }
