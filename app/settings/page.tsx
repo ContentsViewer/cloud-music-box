@@ -336,22 +336,25 @@ function ResetSettingsArea() {
               if (fileDb) {
                 fileDb.close()
               }
-              // {
-              //   const  req = indexedDB.deleteDatabase("file-db")
-              // }
+              await new Promise<void>((resolve, reject) => {
+                const deleteReq = indexedDB.deleteDatabase("file-db")
+                deleteReq.onsuccess = () => resolve()
+                deleteReq.onerror = () => reject(deleteReq.error)
+                deleteReq.onblocked = () => resolve() // ブロック時も続行
+              })
 
-              const databases = await indexedDB.databases()
-              await Promise.all(
-                databases.map(db => {
-                  if (db.name) {
-                    return new Promise<void>((resolve, reject) => {
-                      const deleteReq = indexedDB.deleteDatabase(db.name!)
-                      deleteReq.onsuccess = () => resolve()
-                      deleteReq.onerror = () => reject(deleteReq.error)
-                    })
-                  }
-                })
-              )
+              // const databases = await indexedDB.databases()
+              // await Promise.all(
+              //   databases.map(db => {
+              //     if (db.name) {
+              //       return new Promise<void>((resolve, reject) => {
+              //         const deleteReq = indexedDB.deleteDatabase(db.name!)
+              //         deleteReq.onsuccess = () => resolve()
+              //         deleteReq.onerror = () => reject(deleteReq.error)
+              //       })
+              //     }
+              //   })
+              // )
               routerActions.goHome({ reload: true })
             }}
           >
