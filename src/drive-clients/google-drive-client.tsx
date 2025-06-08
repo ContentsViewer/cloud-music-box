@@ -205,9 +205,17 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
         scope: "https://www.googleapis.com/auth/drive.readonly",
         include_granted_scopes: "true", // 既存許可の再利用
         // prompt: "consent", // 毎回同意画面を出したいなら
+        // prompt: "select_account", // アカウント選択を促す
         // login_hint: "",
         nonce: Math.random().toString(36),
       })
+
+      if (userInfo) {
+        // 既にユーザー情報がある場合はログインヒントを追加
+        params.append("login_hint", userInfo)
+      } else {
+        params.append("prompt", "select_account") // アカウント選択を促す
+      }
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
       window.location.href = authUrl
       return

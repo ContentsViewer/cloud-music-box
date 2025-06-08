@@ -667,8 +667,8 @@ export const FileStoreProvider = ({
 
         if (driveConfig?.type === "onedrive") {
           const onedriveClient = await createOneDriveClient()
-
           dispatch({ type: "setDriveClient", payload: onedriveClient })
+
           const accountInfo = onedriveClient.accountInfo
           if (accountInfo === undefined) {
             dispatch({ type: "setDriveStatus", payload: "no-account" })
@@ -679,8 +679,12 @@ export const FileStoreProvider = ({
           const googleDriveClient = await createGoogleDriveClient()
           dispatch({ type: "setDriveClient", payload: googleDriveClient })
 
-          // test
-          dispatch({ type: "setDriveStatus", payload: "offline" })
+          const userInfo = googleDriveClient.userInfo
+          if (userInfo) {
+            dispatch({ type: "setDriveStatus", payload: "offline" })
+          } else {
+            dispatch({ type: "setDriveStatus", payload: "no-account" })
+          }
         } else {
           dispatch({ type: "setDriveStatus", payload: "no-account" })
         }
