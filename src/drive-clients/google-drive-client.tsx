@@ -24,7 +24,7 @@ declare global {
 export interface GoogleDriveClient extends BaseDriveClient {
   loginRedirect(): Promise<void>
   saveAccessToken(token: string): void
-  fetchAccessToken(code: string): Promise<string>
+  // fetchAccessToken(code: string): Promise<string>
   userInfo: any | undefined
   connect(): Promise<void>
 }
@@ -95,6 +95,75 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       script.onload = () => resolve()
       document.head.appendChild(script)
     })
+  }
+
+  const loginRedirectInternal = async () => {
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: "token id_token",
+      scope: "https://www.googleapis.com/auth/drive.readonly",
+      include_granted_scopes: "true", // 既存許可の再利用
+      // prompt: "consent", // 毎回同意画面を出したいなら
+      // prompt: "select_account", // アカウント選択を促す
+      // login_hint: "",
+      nonce: Math.random().toString(36),
+    })
+
+    if (userInfo) {
+      // 既にユーザー情報がある場合はログインヒントを追加
+      params.append("login_hint", userInfo)
+    } else {
+      params.append("prompt", "select_account") // アカウント選択を促す
+    }
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
+    window.location.href = authUrl
+    return
+  }
+
+  const enqueueSnackbarWithAction = () => {
+    const action = (snackbarId: SnackbarKey) => {
+      return (
+        <>
+          <Button
+            color="error"
+            onClick={() => {
+              loginRedirectInternal()
+              closeSnackbar(snackbarId)
+            }}
+          >
+            Reauthorize
+          </Button>
+          <Button
+            color="error"
+            onClick={() => {
+              closeSnackbar(snackbarId)
+            }}
+          >
+            Dismiss
+          </Button>
+        </>
+      )
+    }
+
+    enqueueSnackbar("Requires reauthorization to access the drive", {
+      variant: "error",
+      persist: true,
+      action,
+    })
+  }
+
+  async function withAutoRefresh<T>(apiCall: () => Promise<T>): Promise<T> {
+    try {
+      return await apiCall()
+    } catch (error: any) {
+      console.warn("API call failed", error)
+      if (error.status === 401 || error.status === 403) {
+        enqueueSnackbarWithAction()
+        throw new Error("Drive requires reauthorization")
+      }
+      throw error
+    }
   }
 
   function createFileItemFromDriveItem(item: any): BaseFileItem {
@@ -194,97 +263,40 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       window.gapi.client.setToken(null)
     },
     async loginRedirect() {
-      // await loadGoogleIdentity()
-
-      console.log("Redirect URI:", redirectUri)
-
-      const params = new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID,
-        redirect_uri: redirectUri,
-        response_type: "token id_token",
-        scope: "https://www.googleapis.com/auth/drive.readonly",
-        include_granted_scopes: "true", // 既存許可の再利用
-        // prompt: "consent", // 毎回同意画面を出したいなら
-        // prompt: "select_account", // アカウント選択を促す
-        // login_hint: "",
-        nonce: Math.random().toString(36),
-      })
-
-      if (userInfo) {
-        // 既にユーザー情報がある場合はログインヒントを追加
-        params.append("login_hint", userInfo)
-      } else {
-        params.append("prompt", "select_account") // アカウント選択を促す
-      }
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
-      window.location.href = authUrl
-      return
-
-      // const tokenClient = window.google.accounts.oauth2.initTokenClient({
-      //   client_id: GOOGLE_CLIENT_ID,
-      //   prompt: "none",
-      //   scope: "https://www.googleapis.com/auth/drive.readonly",
-      //   login_hint: "xxx@gmail.com"
-      //   // callback: (response: {
-      //   //   access_token: string
-      //   //   error?: string
-      //   // }) => {
-      //   //   const { access_token: accessToken, error } = response
-
-      //   //   /* このトークンで Drive API を呼ぶ */
-      //   //   console.log("Access token received:", accessToken, error)
-      //   // },
-      // })
-      // tokenClient.callback = (response: {
-      //   access_token: string
-      //   error?: string
-      // }) => {
-      //   console.log("Access token received:", response.access_token, response.error)
-      // }
-      // tokenClient.requestAccessToken({ prompt: "none" })
-
-      // // Google Identity Services を使用してリダイレクト認証
-      // const client = window.google.accounts.oauth2.initCodeClient({
-      //   client_id: GOOGLE_CLIENT_ID,
-      //   scope: "https://www.googleapis.com/auth/drive.readonly",
-      //   ux_mode: "redirect", // リダイレクトモードを指定
-      //   redirect_uri: redirectUri,
-      // })
-      // // リダイレクト開始
-      // client.requestCode()
+      await loginRedirectInternal()
     },
     saveAccessToken(token: string) {
       localStorage.setItem(DB_KEY_ACCESS_TOKEN, token)
     },
-    async fetchAccessToken(code: string) {
-      const redirectUri = `${window.location.origin}${
-        process.env.NEXT_PUBLIC_BASE_PATH || ""
-      }/redirect/google-drive`
+    // async fetchAccessToken(code: string) {
+    //   const redirectUri = `${window.location.origin}${
+    //     process.env.NEXT_PUBLIC_BASE_PATH || ""
+    //   }/redirect/google-drive`
 
-      const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          code: code,
-          client_id: GOOGLE_CLIENT_ID,
-          redirect_uri: redirectUri,
-          grant_type: "authorization_code",
-        }),
-      })
-      if (!tokenResponse.ok) {
-        throw new Error(`Token exchange failed: ${tokenResponse.statusText}`)
-      }
+    //   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    //     method: "POST",
+    //     headers: {
+    //       "Content-Type": "application/x-www-form-urlencoded",
+    //     },
+    //     body: new URLSearchParams({
+    //       code: code,
+    //       client_id: GOOGLE_CLIENT_ID,
+    //       redirect_uri: redirectUri,
+    //       grant_type: "authorization_code",
+    //     }),
+    //   })
+    //   if (!tokenResponse.ok) {
+    //     throw new Error(`Token exchange failed: ${tokenResponse.statusText}`)
+    //   }
 
-      const tokenData = await tokenResponse.json()
-      const accessToken = tokenData.access_token
-      if (!accessToken) {
-        throw new Error("No access token received")
-      }
-      localStorage.setItem(DB_KEY_ACCESS_TOKEN, accessToken)
-      return accessToken as string
-    },
+    //   const tokenData = await tokenResponse.json()
+    //   const accessToken = tokenData.access_token
+    //   if (!accessToken) {
+    //     throw new Error("No access token received")
+    //   }
+    //   localStorage.setItem(DB_KEY_ACCESS_TOKEN, accessToken)
+    //   return accessToken as string
+    // },
     async connect() {
       await loadGoogleAPI()
 
@@ -295,7 +307,6 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       if (!window.gapi) {
         throw new Error("GAPI client not loaded")
       }
-      console.log("connect")
       window.gapi.client.setToken({ access_token: accessToken })
 
       // // ユーザー情報を取得
@@ -313,28 +324,32 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
     },
     async getRootFolderId() {
       // 実際のルートフォルダIDを取得
-      const response = await window.gapi.client.drive.files.get({
-        fileId: "root", // エイリアスを使用して
-        fields: "id",
-      })
-
+      const response = await withAutoRefresh(() =>
+        window.gapi.client.drive.files.get({
+          fileId: "root", // エイリアスを使用して
+          fields: "id",
+        })
+      )
       return response.result.id!
     },
     async getFile(fileId: string) {
-      const response = await window.gapi.client.drive.files.get({
-        fileId,
-        fields: "id,name,mimeType,parents",
-      })
+      const response = await withAutoRefresh(() =>
+        window.gapi.client.drive.files.get({
+          fileId,
+          fields: "id,name,mimeType,parents",
+        })
+      )
+
       return createFileItemFromDriveItem(response.result)
     },
     async getChildren(folderId: string) {
-      const response = await window.gapi.client.drive.files.list({
-        q: `'${folderId}' in parents and trashed=false`,
-        fields: "files(id,name,mimeType,parents)",
-        pageSize: 1000,
-      })
-      // console.log(folderId, response.result)
-
+      const response = await withAutoRefresh(() =>
+        window.gapi.client.drive.files.list({
+          q: `'${folderId}' in parents and trashed=false`,
+          fields: "files(id,name,mimeType,parents)",
+          pageSize: 1000,
+        })
+      )
       return (response.result.files || []).map((item: any) =>
         createFileItemFromDriveItem(item)
       )
