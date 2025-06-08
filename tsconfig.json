@@ -29,7 +29,10 @@
     },
     "types": [
       "@serwist/next/typings",
-      "@emotion/react/types/css-prop"
+      "@emotion/react/types/css-prop",
+      "gapi",
+      "gapi.client",
+      "gapi.client.drive"
     ],
   },
   "include": [

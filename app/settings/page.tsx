@@ -37,7 +37,7 @@ import { enqueueSnackbar } from "notistack"
 import { css } from "@emotion/react"
 
 import { useEffect, useRef, useState } from "react"
-import Script from "next/script"
+import { createPortal } from "react-dom"
 
 function formatBytes(bytes: number, decimals = 2) {
   if (bytes === 0) return "0 Bytes"
@@ -178,12 +178,16 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
           </Button>
         </DialogActions>
       </Dialog>
-      <Backdrop
-        sx={{ zIndex: theme => theme.zIndex.modal + 1 }}
-        open={backdropOpen}
-      >
-        {backdropOpen && <CircularProgress />}
-      </Backdrop>
+      {backdropOpen &&
+        createPortal(
+          <Backdrop
+            sx={theme => ({ zIndex: theme.zIndex.modal + 1 })}
+            open={backdropOpen}
+          >
+            <CircularProgress />
+          </Backdrop>,
+          document.body
+        )}
     </Box>
   )
 }
@@ -234,13 +238,12 @@ function ScreenSettingsArea() {
   }, [])
 
   return (
-    <Box
-      component="div"
-      sx={{
+    <div
+      css={css({
         display: "flex",
         flexDirection: "column",
-        mt: 2,
-      }}
+        marginTop: "16px",
+      })}
     >
       <Typography variant="h6">Screen</Typography>
       <List>
@@ -261,7 +264,110 @@ function ScreenSettingsArea() {
           />
         </ListItem>
       </List>
-    </Box>
+    </div>
+  )
+}
+
+function ResetSettingsArea() {
+  const [resetAppDialogOpen, setResetAppDialogOpen] = useState(false)
+  const [backdropOpen, setBackdropOpen] = useState(false)
+  const [routerState, routerActions] = useRouter()
+  const [fileStoreState, fileStoreActions] = useFileStore()
+
+  return (
+    <div
+      css={css({
+        display: "flex",
+        flexDirection: "column",
+        marginTop: "16px",
+      })}
+    >
+      <Typography variant="h6">Reset</Typography>
+      <List>
+        <ListItemButton
+          onClick={() => {
+            setResetAppDialogOpen(true)
+          }}
+        >
+          <ListItemText
+            primary="Reset App"
+            secondary="Reset all settings and reload the app."
+          />
+        </ListItemButton>
+      </List>
+      <Dialog
+        open={resetAppDialogOpen}
+        onClose={() => {
+          setResetAppDialogOpen(false)
+        }}
+        sx={{ "& .MuiDialog-paper": { borderRadius: 3 } }}
+      >
+        <DialogTitle>Reset App</DialogTitle>
+        <DialogContent>
+          <Typography>
+            This will reset all settings and reload the app, including:
+          </Typography>
+          <ul>
+            <li>Clear cached local music data</li>
+            <li>Sign out from connected cloud storage</li>
+          </ul>
+          <Typography>This action cannot be undone.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            autoFocus
+            onClick={() => {
+              setResetAppDialogOpen(false)
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            onClick={async () => {
+              setBackdropOpen(true)
+              localStorage.clear()
+
+              sessionStorage.clear()
+
+              const fileDb = fileStoreState.fileDb
+              if (fileDb) {
+                fileDb.close()
+              }
+              // {
+              //   const  req = indexedDB.deleteDatabase("file-db")
+              // }
+
+              const databases = await indexedDB.databases()
+              await Promise.all(
+                databases.map(db => {
+                  if (db.name) {
+                    return new Promise<void>((resolve, reject) => {
+                      const deleteReq = indexedDB.deleteDatabase(db.name!)
+                      deleteReq.onsuccess = () => resolve()
+                      deleteReq.onerror = () => reject(deleteReq.error)
+                    })
+                  }
+                })
+              )
+              routerActions.goHome({ reload: true })
+            }}
+          >
+            Reset & Reload
+          </Button>
+        </DialogActions>
+      </Dialog>
+      {backdropOpen &&
+        createPortal(
+          <Backdrop
+            sx={theme => ({ zIndex: theme.zIndex.modal + 1 })}
+            open={backdropOpen}
+          >
+            <CircularProgress />
+          </Backdrop>,
+          document.body
+        )}
+    </div>
   )
 }
 
@@ -337,6 +443,7 @@ export default function Page() {
         >
           <StorageSettingsArea />
           <ScreenSettingsArea />
+          <ResetSettingsArea />
           <Typography variant="h6" sx={{ mt: 2 }}>
             About
           </Typography>
@@ -351,6 +458,7 @@ export default function Page() {
               alignSelf: "center",
               width: "100%",
               maxWidth: "288px",
+              borderRadius: "24px",
             }}
           >
             <Typography variant="body1" sx={{ fontWeight: "bold" }}>
