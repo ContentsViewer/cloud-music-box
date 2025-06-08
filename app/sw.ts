@@ -234,12 +234,12 @@ const defaultCache: RuntimeCaching[] =
               cacheKeyWillBeUsed: async ({ request }) => {
                 const url = new URL(request.url);
                 console.log('Original Request URL:', url.toString());
-      
+
                 // キャッシュ内の全エントリを確認
                 const cache = await caches.open("serwist-precache");
                 const keys = await cache.keys();
                 // console.log('Available Cache Keys:', keys.map(k => k.url));
-            
+
                 // パス名が一致するキャッシュエントリを探す
                 const matchingKey = keys.find(key => {
                   const keyUrl = new URL(key.url);

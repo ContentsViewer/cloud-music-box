@@ -284,16 +284,18 @@ function ResetSettingsArea() {
     >
       <Typography variant="h6">Reset</Typography>
       <List>
-        <ListItemButton
-          onClick={() => {
-            setResetAppDialogOpen(true)
-          }}
-        >
-          <ListItemText
-            primary="Reset App"
-            secondary="Reset all settings and reload the app."
-          />
-        </ListItemButton>
+        <ListItem disablePadding>
+          <ListItemButton
+            onClick={() => {
+              setResetAppDialogOpen(true)
+            }}
+          >
+            <ListItemText
+              primary="Reset App"
+              secondary="Reset all settings and reload the app."
+            />
+          </ListItemButton>
+        </ListItem>
       </List>
       <Dialog
         open={resetAppDialogOpen}
