@@ -9,8 +9,10 @@ import {
   hexFromArgb,
 } from "@material/material-color-utilities"
 import {
+  Add,
   AlbumRounded,
   Cloud,
+  CloudCircle,
   FolderRounded,
   HomeRounded,
   Login,
@@ -35,30 +37,54 @@ import {
   CardContent,
   CardActionArea,
   alpha,
+  Backdrop,
+  CircularProgress,
 } from "@mui/material"
-import React from "react"
-import { useEffect, useRef, useState, ReactNode } from "react"
+import { useEffect, useRef, useState, ReactNode, memo } from "react"
+import { css } from "@emotion/react"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
-import { OneDriveClient } from "@/src/drive-clients/onedrive-client"
+import {
+  createOneDriveClient,
+  OneDriveClient,
+} from "@/src/drive-clients/onedrive-client"
+import { setDriveConfig } from "@/src/drive-clients/base-drive-client"
+import { createGoogleDriveClient } from "@/src/drive-clients/google-drive-client"
 
 const LoginPage = () => {
-  const [fileStoreState] = useFileStore()
+  const [loading, setLoading] = useState(false)
 
-  const driveClient = fileStoreState.driveClient as OneDriveClient | undefined
-  const pca = driveClient?.pca
-  if (!pca) return null
+  const signInOneDrive = async () => {
+    setLoading(true)
+    setDriveConfig({
+      type: "onedrive",
+    })
+    const driveClient = await createOneDriveClient()
+    const pca = driveClient.pca
+    pca.setActiveAccount(null)
+    const loginRequest = {
+      scopes: ["Files.Read", "Sites.Read.All"],
+    }
+    console.log(pca.getActiveAccount())
+    pca.loginRedirect(loginRequest)
+  }
 
-  const accounts = pca.getAllAccounts()
+  const signInGoogleDrive = async () => {
+    setLoading(true)
+    setDriveConfig({
+      type: "google-drive",
+    })
+    const driveClient = await createGoogleDriveClient()
+    await driveClient.loginRedirect()
+  }
 
   return (
-    <Box
-      component="div"
-      sx={{
+    <div
+      css={css({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        mt: 8,
-      }}
+        marginTop: 64,
+      })}
     >
       <Paper
         sx={{
@@ -70,65 +96,47 @@ const LoginPage = () => {
           alignItems: "center",
           justifyContent: "center",
           flexDirection: "column",
+          borderRadius: "24px",
         }}
       >
         <Cloud sx={{ fontSize: 100 }} />
-        <Typography variant="h5">Sign in to OneDrive</Typography>
+        <Typography variant="h5">Sign in to Cloud Storage</Typography>
         <List sx={{ width: "100%" }}>
-          {accounts.map(account => (
-            <ListItemButton
-              sx={{ width: "100%" }}
-              key={account.username}
-              onClick={() => {
-                const loginRequest = {
-                  scopes: ["Files.Read", "Sites.Read.All"],
-                  account: account,
-                }
-                pca.acquireTokenRedirect(loginRequest)
-              }}
-            >
-              <ListItemAvatar>
-                <Avatar />
-              </ListItemAvatar>
-              <Typography
-                variant="body1"
-                sx={{
-                  flexGrow: 1,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {account.username}
-              </Typography>
-              <Login sx={{ ml: 1 }} />
-            </ListItemButton>
-          ))}
-          <ListItemButton
-            onClick={() => {
-              pca.setActiveAccount(null)
-              const loginRequest = {
-                scopes: ["Files.Read", "Sites.Read.All"],
-              }
-              console.log(pca.getActiveAccount())
-              pca.loginRedirect(loginRequest)
-            }}
-          >
-            <ListItemAvatar>
-              <Avatar />
-            </ListItemAvatar>
-            <Typography variant="body1" sx={{ flexGrow: 1 }}>
-              Add account
-            </Typography>
+          <ListItemButton onClick={signInOneDrive}>
+            <ListItemIcon>
+              <Cloud />
+            </ListItemIcon>
+
+            <ListItemText primary="OneDrive" />
+
+            <Login sx={{ ml: 1 }} />
+          </ListItemButton>
+          <ListItemButton onClick={signInGoogleDrive}>
+            <ListItemIcon>
+              <Cloud />
+            </ListItemIcon>
+
+            <ListItemText primary="GoogleDrive" />
+
             <Login sx={{ ml: 1 }} />
           </ListItemButton>
         </List>
       </Paper>
-    </Box>
+      <Backdrop
+        open={loading}
+        sx={{
+          zIndex: theme => theme.zIndex.drawer + 1,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <CircularProgress />
+      </Backdrop>
+    </div>
   )
 }
 
-const CardButton = React.memo(function CardButton({
+const CardButton = memo(function CardButton({
   children,
   onClick = () => {},
 }: {
@@ -137,7 +145,9 @@ const CardButton = React.memo(function CardButton({
 }) {
   const [themeStoreState] = useThemeStore()
   const colorSurfaceContainer = hexFromArgb(
-    MaterialDynamicColors.surfaceContainerHighest.getArgb(themeStoreState.scheme)
+    MaterialDynamicColors.surfaceContainerHighest.getArgb(
+      themeStoreState.scheme
+    )
   )
   return (
     <Card
@@ -184,12 +194,11 @@ export default function Page() {
   const downloadingCount = Object.keys(fileStoreState.syncingTrackFiles).length
 
   return (
-    <Box
-      component="div"
-      sx={{
+    <div
+      css={css({
         height: "100%",
         overflow: "hidden",
-      }}
+      })}
     >
       <AppTopBar scrollTarget={scrollTargetRef.current}>
         <Toolbar>
@@ -303,6 +312,6 @@ export default function Page() {
           </Box>
         )}
       </Box>
-    </Box>
+    </div>
   )
 }
