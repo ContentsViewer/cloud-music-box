@@ -63,16 +63,14 @@ export async function createOneDriveClient(): Promise<OneDriveClient> {
           parentId: item.parentReference.id,
           mimeType: audioMimeType,
         } as AudioTrackFileItem
-      } else {
-        return {
-          name: item.name,
-          id: item.id,
-          type: "file",
-          parentId: item.parentReference.id,
-        } as FileItem
       }
     }
-    throw new Error("Unknown item type")
+    return {
+      name: item.name,
+      id: item.id,
+      type: "file",
+      parentId: item.parentReference.id,
+    } as FileItem
   }
 
   async function handleTokenRefresh(error: any) {
