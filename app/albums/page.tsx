@@ -119,7 +119,7 @@ const AlbumCard = React.memo(function AlbumCard({
           )
 
           // Set the transform property
-          elem.style.transform = `perspective(400px) translate(${translateX}px, ${translateY}px) scale(${scale}) rotate3d(0, 1, 0, 180deg)`
+          elem.style.transform = `perspective(400px) translate(${translateX}px, ${translateY}px) scale(${scale}) rotate3d(0, 1, 0, 135deg)`
         }}
       >
         <AlbumCover

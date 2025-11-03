@@ -293,8 +293,12 @@ const LissajousCurve = () => {
                     p = rotationMatrix * p;
                     
                     // アスペクト比の調整
+                    // p.x /= aspect;
                     if (aspect < 1.0) {
                       p.x /= aspect;
+                    }
+                    if (aspect > 1.4) {
+                      p.y *= aspect / 1.4;
                     }
                     
                     // Z座標の処理（点群と同様）
@@ -446,8 +450,12 @@ const LissajousCurve = () => {
 
               p = rotationMatrix * p;
 
+              // p.x /= aspect;
               if (aspect < 1.0) {
-                p.x /= aspect;
+               p.x /= aspect;
+              }
+              if (aspect > 1.4) {
+               p.y *= aspect / 1.4;
               }
 
               float pointSize = 4.0;
