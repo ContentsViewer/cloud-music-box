@@ -328,50 +328,57 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
       <Box
         component="div"
         sx={{
-          display: "grid",
-          "@media (orientation: portrait)": {
-            // flexDirection: "column",
-            // gridTemplateRows: "65% 35%",
-            gridTemplateRows: "50% 50%",
-          },
-          "@media (orientation: landscape)": {
-            // flexDirection: "row",
-            gridTemplateColumns: "50% 50%",
-          },
-          // alignItems: "center",
-          // justifyContent: "center",
+          display: "flex",
+          flexDirection: "column",
           width: "100%",
           height: "100%",
+          position: "relative",
         }}
       >
+        {/* Portrait: Cover at top, Controls at bottom */}
+        {/* Landscape: Cover at bottom-left, Controls at bottom-right */}
         <Box
           component="div"
           sx={{
-            m: 5,
-            boxSizing: "border-box",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            position: "relative",
-            "@media (orientation: landscape)": {
-              ml: "max(64px, env(safe-area-inset-left, 0))",
-            },
             "@media (orientation: portrait)": {
-              mt: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pt: 10,
+              pb: 1,
+              px: 4,
+            },
+            "@media (orientation: landscape)": {
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              width: "auto",
+              height: "auto",
+              maxWidth: "40%",
+              maxHeight: "60%",
+              pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
+              pl: "calc(env(safe-area-inset-left, 0) + 40px)",
             },
           }}
           ref={trackCoverWrapperRef}
         >
           <TrackCover
             sx={{
-              position: "absolute",
-              // maxWidth: "100%",
               aspectRatio: "1 / 1",
               width: "auto",
               height: "auto",
-
+              maxWidth: "100%",
+              maxHeight: "100%",
               boxShadow: "0 8px 32px rgba(0, 0, 0, 0.25)",
               boxSizing: "border-box",
+              "@media (orientation: portrait)": {
+                maxWidth: "min(50vw, 240px)",
+                maxHeight: "min(50vw, 240px)",
+              },
+              "@media (orientation: landscape)": {
+                maxWidth: "min(40vh, 300px)",
+                maxHeight: "min(40vh, 300px)",
+              },
             }}
             coverUrl={props.coverUrl}
             ref={trackCoverRef}
@@ -383,22 +390,26 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
         <Box
           component="div"
           sx={{
-            // flexBasis: "50%",
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
             minWidth: 0,
-            // width: "100%",
             "@media (orientation: portrait)": {
-              // alignSelf: "start",
-              // alignSelf: "end",
-              pb: 5,
+              flexGrow: 1,
+              justifyContent: "flex-end",
+              pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
               pr: "calc(env(safe-area-inset-right, 0) + 40px)",
               pl: "calc(env(safe-area-inset-left, 0) + 40px)",
             },
             "@media (orientation: landscape)": {
-              pl: 0,
-              pr: "max(64px, env(safe-area-inset-right, 0))",
+              position: "absolute",
+              bottom: 0,
+              right: 0,
+              width: "auto",
+              maxWidth: "50%",
+              pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
+              pr: "calc(env(safe-area-inset-right, 0) + 40px)",
+              pl: 5,
             },
           }}
         >
