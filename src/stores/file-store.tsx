@@ -18,6 +18,7 @@ import {
   FolderItem,
   AudioTrackFileItem,
   getDriveConfig,
+  AUDIO_FORMAT_MAPPING,
 } from "../drive-clients/base-drive-client"
 import { BaseDriveClient } from "../drive-clients/base-drive-client"
 import { createOneDriveClient } from "../drive-clients/onedrive-client"
@@ -362,6 +363,57 @@ export const useFileStore = () => {
         localStorage.setItem("blobsStorageUsageBytes", "0")
         dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
       },
+      addPickerGroup: async (files: Array<{id: string, name: string, mimeType: string}>) => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        // 仮想フォルダ（Picker Group）を作成
+        const groupId = crypto.randomUUID()
+        const groupFolder: FolderItem = {
+          id: groupId,
+          name: `Picked at ${new Date().toLocaleString()}`,
+          type: "folder",
+          parentId: "root",
+          childrenIds: files.map(f => f.id),
+        }
+
+        // フォルダをIDBに保存
+        await getIdbRequest(
+          refState.current.fileDb
+            .transaction("files", "readwrite")
+            .objectStore("files")
+            .put(groupFolder)
+        )
+
+        // 各ファイルをIDBに保存
+        const transaction = refState.current.fileDb.transaction("files", "readwrite")
+        const store = transaction.objectStore("files")
+
+        for (const file of files) {
+          const ext = file.name.split(".").pop()?.toLowerCase() || ""
+          const audioFormatInfo = AUDIO_FORMAT_MAPPING[ext]
+
+          const fileItem: BaseFileItem = {
+            id: file.id,
+            name: file.name,
+            type: audioFormatInfo ? "audio-track" : "file",
+            parentId: groupId,
+            ...(audioFormatInfo && { mimeType: audioFormatInfo.mimeType }),
+          }
+          store.put(fileItem)
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          transaction.oncomplete = () => resolve()
+          transaction.onerror = () => reject(transaction.error)
+        })
+
+        return groupId
+      },
     }
   }, [])
 
@@ -684,6 +736,31 @@ export const FileStoreProvider = ({
             dispatch({ type: "setDriveStatus", payload: "offline" })
           } else {
             dispatch({ type: "setDriveStatus", payload: "no-account" })
+          }
+
+          // Google Drive Pickerモード用の仮想rootフォルダを作成
+          if (fileDb) {
+            const rootFolder: FolderItem = {
+              id: "root",
+              name: "Google Drive Files",
+              type: "folder",
+              childrenIds: [],
+            }
+            // rootフォルダが存在しない場合のみ作成
+            const existingRoot = await getIdbRequest(
+              fileDb.transaction("files").objectStore("files").get("root")
+            )
+            if (!existingRoot) {
+              await getIdbRequest(
+                fileDb
+                  .transaction("files", "readwrite")
+                  .objectStore("files")
+                  .put(rootFolder)
+              )
+            }
+            // rootFolderIdを設定
+            localStorage.setItem("rootFolderId", "root")
+            dispatch({ type: "setRootFolderId", payload: "root" })
           }
         } else {
           dispatch({ type: "setDriveStatus", payload: "no-account" })

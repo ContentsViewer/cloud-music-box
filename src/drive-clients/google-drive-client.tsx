@@ -21,12 +21,18 @@ declare global {
   }
 }
 
+export interface GooglePickerResult {
+  id: string
+  name: string
+  mimeType: string
+}
+
 export interface GoogleDriveClient extends BaseDriveClient {
   loginRedirect(): Promise<void>
   saveAccessToken(token: string): void
-  // fetchAccessToken(code: string): Promise<string>
   userInfo: any | undefined
   connect(): Promise<void>
+  openPicker(): Promise<GooglePickerResult[]>
 }
 
 const DB_KEY_USER_INFO = "googleDrive.userInfo"
@@ -36,6 +42,10 @@ const DB_KEY_TOKEN_EXPIRES = "googleDrive.tokenExpires"
 
 const GOOGLE_CLIENT_ID =
   "636784171461-qe09gc3cupq8iagds8hk16cb6k6cvle4.apps.googleusercontent.com"
+
+// Google Picker API用のDeveloper Key（API Key）
+// TODO: Google Cloud Consoleで取得したAPI Keyに置き換えてください
+const GOOGLE_DEVELOPER_KEY = "AIzaSyDnV3ERZBz85HEqzGKXWIoNw79YEC8MsYQ"
 
 export function saveAccessToken(token: string) {
   localStorage.setItem(DB_KEY_ACCESS_TOKEN, token)
@@ -97,12 +107,26 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
     })
   }
 
+  // Google Picker API を読み込み
+  const loadGooglePicker = () => {
+    return new Promise<void>(resolve => {
+      if (window.google?.picker) {
+        resolve()
+        return
+      }
+
+      window.gapi.load("picker", () => {
+        resolve()
+      })
+    })
+  }
+
   const loginRedirectInternal = async () => {
     const params = new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
       redirect_uri: redirectUri,
       response_type: "token id_token",
-      scope: "https://www.googleapis.com/auth/drive.readonly",
+      scope: "https://www.googleapis.com/auth/drive.file",
       include_granted_scopes: "true", // 既存許可の再利用
       // prompt: "consent", // 毎回同意画面を出したいなら
       // prompt: "select_account", // アカウント選択を促す
@@ -308,51 +332,57 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
         throw new Error("GAPI client not loaded")
       }
       window.gapi.client.setToken({ access_token: accessToken })
+    },
+    async openPicker(): Promise<GooglePickerResult[]> {
+      await loadGoogleAPI()
+      await loadGooglePicker()
 
-      // // ユーザー情報を取得
-      // if (!userInfo) {
-      //   try {
-      //     const response = await window.gapi.client.request({
-      //       path: "https://www.googleapis.com/oauth2/v2/userinfo",
-      //     })
-      //     userInfo = response.result
-      //     localStorage.setItem(DB_KEY_USER_INFO, JSON.stringify(userInfo))
-      //   } catch (error) {
-      //     console.error("Failed to get user info:", error)
-      //   }
-      // }
+      if (!accessToken) {
+        throw new Error("No access token available for Picker")
+      }
+
+      return new Promise((resolve, reject) => {
+        try {
+          // DocsViewでフォルダも表示されるように設定
+          const docsView = new window.google.picker.DocsView()
+            .setIncludeFolders(true)  // フォルダを表示
+            .setParent('root')  // Driveのルートから開始
+
+          const picker = new window.google.picker.PickerBuilder()
+            .addView(docsView)  // カスタムビューを使用
+            .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)  // 複数選択を有効化
+            .setOAuthToken(accessToken)
+            .setDeveloperKey(GOOGLE_DEVELOPER_KEY)
+            .setCallback((data: any) => {
+              if (data.action === window.google.picker.Action.PICKED) {
+                const results: GooglePickerResult[] = data.docs.map((doc: any) => ({
+                  id: doc.id,
+                  name: doc.name,
+                  mimeType: doc.mimeType,
+                }))
+                resolve(results)
+              } else if (data.action === window.google.picker.Action.CANCEL) {
+                resolve([])
+              }
+            })
+            .build()
+          picker.setVisible(true)
+        } catch (error) {
+          reject(error)
+        }
+      })
     },
     async getRootFolderId() {
-      // 実際のルートフォルダIDを取得
-      const response = await withAutoRefresh(() =>
-        window.gapi.client.drive.files.get({
-          fileId: "root", // エイリアスを使用して
-          fields: "id",
-        })
-      )
-      return response.result.id!
+      // Pickerモードでは仮想ルートフォルダIDを返す
+      return "root"
     },
     async getFile(fileId: string) {
-      const response = await withAutoRefresh(() =>
-        window.gapi.client.drive.files.get({
-          fileId,
-          fields: "id,name,mimeType,parents",
-        })
-      )
-
-      return createFileItemFromDriveItem(response.result)
+      // Pickerモードでは実装不要（file-storeがIDBから取得）
+      throw new Error("getFile is not supported in Picker mode. Use file-store instead.")
     },
     async getChildren(folderId: string) {
-      const response = await withAutoRefresh(() =>
-        window.gapi.client.drive.files.list({
-          q: `'${folderId}' in parents and trashed=false`,
-          fields: "files(id,name,mimeType,parents)",
-          pageSize: 1000,
-        })
-      )
-      return (response.result.files || []).map((item: any) =>
-        createFileItemFromDriveItem(item)
-      )
+      // Pickerモードでは実装不要（file-storeがIDBから取得）
+      throw new Error("getChildren is not supported in Picker mode. Use file-store instead.")
     },
     async fetchFileBlob(fileId: string) {
       const response = await fetch(

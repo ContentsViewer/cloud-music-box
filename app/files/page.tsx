@@ -41,7 +41,10 @@ import DownloadingIndicator from "@/src/components/downloading-indicator"
 import {
   AudioTrackFileItem,
   BaseFileItem,
+  getDriveConfig,
 } from "@/src/drive-clients/base-drive-client"
+import { GoogleDriveClient } from "@/src/drive-clients/google-drive-client"
+import { AddRounded } from "@mui/icons-material"
 import { SerializedStyles, css } from "@emotion/react"
 
 export default function Page() {
@@ -154,6 +157,40 @@ export default function Page() {
     })
   }
 
+  const handleAddFiles = async () => {
+    try {
+      const driveClient = fileStoreState.driveClient
+      if (!driveClient) {
+        enqueueSnackbar("Drive client not connected", { variant: "error" })
+        return
+      }
+
+      const googleDriveClient = driveClient as GoogleDriveClient
+      if (!googleDriveClient.openPicker) {
+        enqueueSnackbar("Picker not available", { variant: "error" })
+        return
+      }
+
+      const pickedFiles = await googleDriveClient.openPicker()
+      if (pickedFiles.length === 0) return
+
+      const groupId = await fileStoreActions.addPickerGroup(pickedFiles)
+      enqueueSnackbar(`Added ${pickedFiles.length} files`, { variant: "success" })
+
+      // ファイル一覧を更新
+      if (folderId === fileStoreState.rootFolderId) {
+        const children = await fileStoreActions.getChildrenLocal(folderId)
+        setFiles(children)
+      }
+    } catch (error) {
+      console.error(error)
+      enqueueSnackbar(`${error}`, { variant: "error" })
+    }
+  }
+
+  const driveConfig = getDriveConfig()
+  const isGoogleDrive = driveConfig?.type === "google-drive"
+
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
@@ -230,6 +267,15 @@ export default function Page() {
               color={colorOnSurfaceVariant}
             />
           ) : null}
+          {isGoogleDrive && (
+            <IconButton
+              color="inherit"
+              onClick={handleAddFiles}
+              disabled={!networkMonitor.isOnline}
+            >
+              <AddRounded />
+            </IconButton>
+          )}
           <div>
             <IconButton
               color="inherit"
