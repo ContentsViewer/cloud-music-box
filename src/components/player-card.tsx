@@ -354,8 +354,8 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               left: 0,
               width: "auto",
               height: "auto",
-              maxWidth: "40%",
-              maxHeight: "60%",
+              maxWidth: "min(25%, 280px)",
+              maxHeight: "50%",
               pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
               pl: "calc(env(safe-area-inset-left, 0) + 40px)",
             },
@@ -376,8 +376,8 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
                 maxHeight: "min(50vw, 240px)",
               },
               "@media (orientation: landscape)": {
-                maxWidth: "min(40vh, 300px)",
-                maxHeight: "min(40vh, 300px)",
+                maxWidth: "min(25vw, 280px)",
+                maxHeight: "min(40vh, 280px)",
               },
             }}
             coverUrl={props.coverUrl}
@@ -397,7 +397,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             "@media (orientation: portrait)": {
               flexGrow: 1,
               justifyContent: "flex-end",
-              pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
+              pb: "calc(env(safe-area-inset-bottom, 0) + 80px)",
               pr: "calc(env(safe-area-inset-right, 0) + 40px)",
               pl: "calc(env(safe-area-inset-left, 0) + 40px)",
             },
@@ -405,11 +405,10 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               position: "absolute",
               bottom: 0,
               right: 0,
-              width: "auto",
-              maxWidth: "50%",
+              width: "min(50%, 600px)",
               pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
               pr: "calc(env(safe-area-inset-right, 0) + 40px)",
-              pl: 5,
+              pl: "calc(env(safe-area-inset-left, 0) + 40px)",
             },
           }}
         >
