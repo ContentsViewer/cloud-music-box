@@ -18,6 +18,7 @@ import {
   FolderItem,
   AudioTrackFileItem,
   getDriveConfig,
+  AUDIO_FORMAT_MAPPING,
 } from "../drive-clients/base-drive-client"
 import { BaseDriveClient } from "../drive-clients/base-drive-client"
 import { createOneDriveClient } from "../drive-clients/onedrive-client"
@@ -362,6 +363,117 @@ export const useFileStore = () => {
         localStorage.setItem("blobsStorageUsageBytes", "0")
         dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
       },
+      addPickerGroup: async (
+        files: Array<{id: string, name: string, mimeType: string, parentId?: string}>,
+        folderNames?: Map<string, string>
+      ) => {
+        console.log("addPickerGroup called with files:", files)
+        console.log("folderNames:", folderNames)
+
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        // parentIdごとにファイルをグループ化
+        const filesByParent = new Map<string, Array<{id: string, name: string, mimeType: string, parentId?: string}>>()
+
+        for (const file of files) {
+          const parentId = file.parentId || "unknown"
+          if (!filesByParent.has(parentId)) {
+            filesByParent.set(parentId, [])
+          }
+          filesByParent.get(parentId)!.push(file)
+        }
+
+        const transaction = refState.current.fileDb.transaction("files", "readwrite")
+        const store = transaction.objectStore("files")
+        const createdFolderIds: string[] = []
+
+        // 各parentIdごとにフォルダを作成/更新
+        for (const [driveParentId, groupFiles] of Array.from(filesByParent.entries())) {
+          // Drive上のフォルダIDを仮想フォルダIDとして使用
+          const folderId = driveParentId
+
+          // 既存のフォルダを取得
+          const existingFolderRequest = store.get(folderId)
+          const existingFolder = await new Promise<FolderItem | undefined>((resolve) => {
+            existingFolderRequest.onsuccess = () => {
+              resolve(existingFolderRequest.result as FolderItem | undefined)
+            }
+            existingFolderRequest.onerror = () => {
+              resolve(undefined)
+            }
+          })
+
+          // フォルダ名: folderNamesから取得、既存のフォルダ名を優先、なければデフォルト名
+          const folderName = existingFolder?.name || folderNames?.get(driveParentId) || `Folder ${driveParentId.substring(0, 8)}`
+
+          // 既存のchildrenIdsに新しいファイルIDsを追加（重複を避ける）
+          const existingChildrenIds = new Set(existingFolder?.childrenIds || [])
+          groupFiles.forEach((f: {id: string}) => existingChildrenIds.add(f.id))
+
+          const groupFolder: FolderItem = {
+            id: folderId,
+            name: folderName,
+            type: "folder",
+            parentId: "root",
+            childrenIds: Array.from(existingChildrenIds),
+          }
+
+          console.log("Creating/Updating folder:", groupFolder)
+          store.put(groupFolder)
+          createdFolderIds.push(folderId)
+
+          // 各ファイルをIDBに保存
+          for (const file of groupFiles) {
+            const ext = file.name.split(".").pop()?.toLowerCase() || ""
+            const audioFormatInfo = AUDIO_FORMAT_MAPPING[ext]
+
+            const fileItem: BaseFileItem = {
+              id: file.id,
+              name: file.name,
+              type: audioFormatInfo ? "audio-track" : "file",
+              parentId: folderId,
+              ...(audioFormatInfo && { mimeType: audioFormatInfo.mimeType }),
+            }
+            console.log("Creating file:", fileItem)
+            store.put(fileItem)
+          }
+        }
+
+        // rootフォルダのchildrenIdsを更新
+        const getRootRequest = store.get("root")
+        getRootRequest.onsuccess = () => {
+          const rootFolder = getRootRequest.result as FolderItem | undefined
+          if (rootFolder) {
+            // 既存のchildrenIdsに新しいフォルダIDsを追加（重複を避ける）
+            const existingIds = new Set(rootFolder.childrenIds || [])
+            createdFolderIds.forEach(id => existingIds.add(id))
+            rootFolder.childrenIds = Array.from(existingIds)
+            store.put(rootFolder)
+            console.log("Updated root folder childrenIds:", rootFolder.childrenIds)
+          }
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          transaction.oncomplete = () => {
+            console.log("Transaction completed successfully")
+            resolve()
+          }
+          transaction.onerror = () => {
+            console.error("Transaction error:", transaction.error)
+            reject(transaction.error)
+          }
+        })
+
+        console.log("Created folder IDs:", createdFolderIds)
+
+        // 最初に作成したフォルダIDを返す（互換性のため）
+        return createdFolderIds[0] || "root"
+      },
     }
   }, [])
 
@@ -684,6 +796,31 @@ export const FileStoreProvider = ({
             dispatch({ type: "setDriveStatus", payload: "offline" })
           } else {
             dispatch({ type: "setDriveStatus", payload: "no-account" })
+          }
+
+          // Google Drive Pickerモード用の仮想rootフォルダを作成
+          if (fileDb) {
+            const rootFolder: FolderItem = {
+              id: "root",
+              name: "Google Drive Files",
+              type: "folder",
+              childrenIds: [],
+            }
+            // rootフォルダが存在しない場合のみ作成
+            const existingRoot = await getIdbRequest(
+              fileDb.transaction("files").objectStore("files").get("root")
+            )
+            if (!existingRoot) {
+              await getIdbRequest(
+                fileDb
+                  .transaction("files", "readwrite")
+                  .objectStore("files")
+                  .put(rootFolder)
+              )
+            }
+            // rootFolderIdを設定
+            localStorage.setItem("rootFolderId", "root")
+            dispatch({ type: "setRootFolderId", payload: "root" })
           }
         } else {
           dispatch({ type: "setDriveStatus", payload: "no-account" })

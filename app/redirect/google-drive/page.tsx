@@ -43,6 +43,15 @@ export default function Page() {
       console.log(accessToken)
       saveAccessToken(accessToken)
 
+      // トークンの有効期限を保存
+      const expiresIn = hash.get("expires_in")
+      if (expiresIn) {
+        const expiresInSeconds = parseInt(expiresIn)
+        const expiresAt = Date.now() + expiresInSeconds * 1000
+        localStorage.setItem("googleDrive.tokenExpires", expiresAt.toString())
+        console.log(`Token expires in ${expiresInSeconds} seconds (at ${new Date(expiresAt).toISOString()})`)
+      }
+
       const idToken = hash.get("id_token")
       if (idToken !== null) {
         const data = parseJWT(idToken)
