@@ -226,50 +226,60 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
     }
   }
 
-  // リフレッシュトークンを使ってアクセストークンを更新
-  const refreshAccessToken = async (): Promise<string> => {
-    if (!refreshToken) {
-      throw new Error("No refresh token available")
-    }
+  // // リフレッシュトークンを使ってアクセストークンを更新
+  // const refreshAccessToken = async (): Promise<string> => {
+  //   if (!refreshToken) {
+  //     throw new Error("No refresh token available")
+  //   }
 
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-        client_id: GOOGLE_CLIENT_ID,
-      }),
-    })
+  //   const response = await fetch("https://oauth2.googleapis.com/token", {
+  //     method: "POST",
+  //     headers: {
+  //       "Content-Type": "application/x-www-form-urlencoded",
+  //     },
+  //     body: new URLSearchParams({
+  //       grant_type: "refresh_token",
+  //       refresh_token: refreshToken,
+  //       client_id: GOOGLE_CLIENT_ID,
+  //     }),
+  //   })
 
-    if (!response.ok) {
-      throw new Error(`Token refresh failed: ${response.statusText}`)
-    }
+  //   if (!response.ok) {
+  //     throw new Error(`Token refresh failed: ${response.statusText}`)
+  //   }
 
-    const tokenData = await response.json()
+  //   const tokenData = await response.json()
 
-    if (tokenData.error) {
-      throw new Error(`Token refresh error: ${tokenData.error}`)
-    }
+  //   if (tokenData.error) {
+  //     throw new Error(`Token refresh error: ${tokenData.error}`)
+  //   }
 
-    accessToken = tokenData.access_token as string
-    const expiresIn = tokenData.expires_in || 3600 // デフォルト1時間
-    const expiresAt = Date.now() + expiresIn * 1000
+  //   accessToken = tokenData.access_token as string
+  //   const expiresIn = tokenData.expires_in || 3600 // デフォルト1時間
+  //   const expiresAt = Date.now() + expiresIn * 1000
 
-    // 新しいリフレッシュトークンがある場合は更新
-    if (tokenData.refresh_token) {
-      refreshToken = tokenData.refresh_token as string
-      localStorage.setItem(DB_KEY_REFRESH_TOKEN, refreshToken)
-    }
+  //   // 新しいリフレッシュトークンがある場合は更新
+  //   if (tokenData.refresh_token) {
+  //     refreshToken = tokenData.refresh_token as string
+  //     localStorage.setItem(DB_KEY_REFRESH_TOKEN, refreshToken)
+  //   }
 
-    localStorage.setItem(DB_KEY_ACCESS_TOKEN, accessToken)
-    localStorage.setItem(DB_KEY_TOKEN_EXPIRES, expiresAt.toString())
+  //   localStorage.setItem(DB_KEY_ACCESS_TOKEN, accessToken)
+  //   localStorage.setItem(DB_KEY_TOKEN_EXPIRES, expiresAt.toString())
 
-    window.gapi.client.setToken({ access_token: accessToken })
+  //   window.gapi.client.setToken({ access_token: accessToken })
 
-    return accessToken
+  //   return accessToken
+  // }
+
+  // トークンの有効性をチェック
+  const isTokenValid = (): boolean => {
+    const expiresAt = localStorage.getItem(DB_KEY_TOKEN_EXPIRES)
+    if (!expiresAt) return false
+
+    // 5分前にマージンを取る（余裕を持って再認証を促す）
+    const marginMs = 5 * 60 * 1000
+    return Date.now() < parseInt(expiresAt) - marginMs
   }
 
   const init = async () => {
@@ -289,6 +299,8 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       accessToken = undefined
       localStorage.removeItem(DB_KEY_USER_INFO)
       localStorage.removeItem(DB_KEY_ACCESS_TOKEN)
+      localStorage.removeItem(DB_KEY_TOKEN_EXPIRES)
+      localStorage.removeItem(DB_KEY_REFRESH_TOKEN)
       window.gapi.client.setToken(null)
     },
     async loginRedirect() {
@@ -297,35 +309,6 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
     saveAccessToken(token: string) {
       localStorage.setItem(DB_KEY_ACCESS_TOKEN, token)
     },
-    // async fetchAccessToken(code: string) {
-    //   const redirectUri = `${window.location.origin}${
-    //     process.env.NEXT_PUBLIC_BASE_PATH || ""
-    //   }/redirect/google-drive`
-
-    //   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-    //     method: "POST",
-    //     headers: {
-    //       "Content-Type": "application/x-www-form-urlencoded",
-    //     },
-    //     body: new URLSearchParams({
-    //       code: code,
-    //       client_id: GOOGLE_CLIENT_ID,
-    //       redirect_uri: redirectUri,
-    //       grant_type: "authorization_code",
-    //     }),
-    //   })
-    //   if (!tokenResponse.ok) {
-    //     throw new Error(`Token exchange failed: ${tokenResponse.statusText}`)
-    //   }
-
-    //   const tokenData = await tokenResponse.json()
-    //   const accessToken = tokenData.access_token
-    //   if (!accessToken) {
-    //     throw new Error("No access token received")
-    //   }
-    //   localStorage.setItem(DB_KEY_ACCESS_TOKEN, accessToken)
-    //   return accessToken as string
-    // },
     async connect() {
       await loadGoogleAPI()
 
@@ -337,6 +320,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
         throw new Error("GAPI client not loaded")
       }
       window.gapi.client.setToken({ access_token: accessToken })
+      // console.log("!!!!", gapi.client.getToken())
     },
     async openFilesPicker(parentId?: string): Promise<GooglePickerResult[]> {
       await loadGoogleAPI()
@@ -344,6 +328,12 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
 
       if (!accessToken) {
         throw new Error("No access token available for Picker")
+      }
+
+      // トークンの有効性をチェック
+      if (!isTokenValid()) {
+        enqueueSnackbarWithAction()
+        throw new Error("Access token expired, reauthorization required")
       }
 
       return new Promise((resolve, reject) => {
@@ -388,6 +378,12 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
 
       if (!accessToken) {
         throw new Error("No access token available for Picker")
+      }
+
+      // トークンの有効性をチェック
+      if (!isTokenValid()) {
+        enqueueSnackbarWithAction()
+        throw new Error("Access token expired, reauthorization required")
       }
 
       return new Promise((resolve, reject) => {
@@ -452,6 +448,11 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
         if (response.ok) {
           const data = await response.json()
           return { hasAccess: true, folderName: data.name }
+        } else if (response.status === 401 || response.status === 403) {
+          // トークンが無効
+          console.warn("Token invalid (401/403), requesting reauthorization")
+          enqueueSnackbarWithAction()
+          return { hasAccess: false }
         } else if (response.status === 404) {
           // アクセス許可なし
           return { hasAccess: false }
@@ -486,6 +487,11 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       )
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          // トークンが無効
+          console.warn("Token invalid (401/403) on fetchFileBlob, requesting reauthorization")
+          enqueueSnackbarWithAction()
+        }
         throw new Error(`Failed to fetch file: ${response.statusText}`)
       }
 
