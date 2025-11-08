@@ -425,6 +425,20 @@ export const useFileStore = () => {
           }
         }
 
+        // rootフォルダのchildrenIdsを更新
+        const getRootRequest = store.get("root")
+        getRootRequest.onsuccess = () => {
+          const rootFolder = getRootRequest.result as FolderItem | undefined
+          if (rootFolder) {
+            // 既存のchildrenIdsに新しいフォルダIDsを追加（重複を避ける）
+            const existingIds = new Set(rootFolder.childrenIds || [])
+            createdFolderIds.forEach(id => existingIds.add(id))
+            rootFolder.childrenIds = Array.from(existingIds)
+            store.put(rootFolder)
+            console.log("Updated root folder childrenIds:", rootFolder.childrenIds)
+          }
+        }
+
         await new Promise<void>((resolve, reject) => {
           transaction.oncomplete = () => {
             console.log("Transaction completed successfully")

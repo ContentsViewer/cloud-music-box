@@ -45,8 +45,10 @@ const GOOGLE_CLIENT_ID =
   "636784171461-qe09gc3cupq8iagds8hk16cb6k6cvle4.apps.googleusercontent.com"
 
 // Google Picker API用のDeveloper Key（API Key）
-// TODO: Google Cloud Consoleで取得したAPI Keyに置き換えてください
 const GOOGLE_DEVELOPER_KEY = "AIzaSyDnV3ERZBz85HEqzGKXWIoNw79YEC8MsYQ"
+
+// Google Cloud Projectのプロジェクト番号（App ID）
+const GOOGLE_APP_ID = "636784171461"
 
 export function saveAccessToken(token: string) {
   localStorage.setItem(DB_KEY_ACCESS_TOKEN, token)
@@ -354,6 +356,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
             .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)  // 複数選択を有効化
             .setOAuthToken(accessToken)
             .setDeveloperKey(GOOGLE_DEVELOPER_KEY)
+            .setAppId(GOOGLE_APP_ID)  // プロジェクト番号を設定（drive.fileスコープで必須）
             .setCallback((data: any) => {
               if (data.action === window.google.picker.Action.PICKED) {
                 console.log("Picker data:", data)
