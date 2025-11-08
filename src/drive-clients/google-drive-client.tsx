@@ -360,10 +360,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
             .setCallback((data: any) => {
               if (data.action === window.google.picker.Action.PICKED) {
                 console.log("Picker data:", data)
-                console.log("First doc all properties:", JSON.stringify(data.docs[0], null, 2))
                 const results: GooglePickerResult[] = data.docs.map((doc: any) => {
-                  // 全プロパティを確認
-                  console.log("Doc keys:", Object.keys(doc))
                   return {
                     id: doc.id,
                     name: doc.name,
@@ -371,7 +368,6 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
                     parentId: doc.parentId || doc.parents?.[0] || doc.parent || undefined,
                   }
                 })
-                console.log("Mapped results:", results)
                 resolve(results)
               } else if (data.action === window.google.picker.Action.CANCEL) {
                 resolve([])
