@@ -363,8 +363,12 @@ export const useFileStore = () => {
         localStorage.setItem("blobsStorageUsageBytes", "0")
         dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
       },
-      addPickerGroup: async (files: Array<{id: string, name: string, mimeType: string, parentId?: string}>) => {
+      addPickerGroup: async (
+        files: Array<{id: string, name: string, mimeType: string, parentId?: string}>,
+        folderNames?: Map<string, string>
+      ) => {
         console.log("addPickerGroup called with files:", files)
+        console.log("folderNames:", folderNames)
 
         if (!refState.current.configured) {
           throw new Error("File store not configured")
@@ -388,23 +392,38 @@ export const useFileStore = () => {
         const store = transaction.objectStore("files")
         const createdFolderIds: string[] = []
 
-        // 各parentIdごとにフォルダを作成
+        // 各parentIdごとにフォルダを作成/更新
         for (const [driveParentId, groupFiles] of Array.from(filesByParent.entries())) {
           // Drive上のフォルダIDを仮想フォルダIDとして使用
           const folderId = driveParentId
 
-          // フォルダ名は最初のファイルから推測、または日時
-          const folderName = `Folder ${driveParentId.substring(0, 8)}`
+          // 既存のフォルダを取得
+          const existingFolderRequest = store.get(folderId)
+          const existingFolder = await new Promise<FolderItem | undefined>((resolve) => {
+            existingFolderRequest.onsuccess = () => {
+              resolve(existingFolderRequest.result as FolderItem | undefined)
+            }
+            existingFolderRequest.onerror = () => {
+              resolve(undefined)
+            }
+          })
+
+          // フォルダ名: folderNamesから取得、既存のフォルダ名を優先、なければデフォルト名
+          const folderName = existingFolder?.name || folderNames?.get(driveParentId) || `Folder ${driveParentId.substring(0, 8)}`
+
+          // 既存のchildrenIdsに新しいファイルIDsを追加（重複を避ける）
+          const existingChildrenIds = new Set(existingFolder?.childrenIds || [])
+          groupFiles.forEach((f: {id: string}) => existingChildrenIds.add(f.id))
 
           const groupFolder: FolderItem = {
             id: folderId,
             name: folderName,
             type: "folder",
             parentId: "root",
-            childrenIds: groupFiles.map((f: {id: string}) => f.id),
+            childrenIds: Array.from(existingChildrenIds),
           }
 
-          console.log("Creating folder:", groupFolder)
+          console.log("Creating/Updating folder:", groupFolder)
           store.put(groupFolder)
           createdFolderIds.push(folderId)
 

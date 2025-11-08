@@ -136,21 +136,65 @@ export default function GoogleDrivePage() {
       }
 
       const googleDriveClient = driveClient as GoogleDriveClient
-      if (!googleDriveClient.openPicker) {
+      if (!googleDriveClient.openFilesPicker) {
         enqueueSnackbar("Picker not available", { variant: "error" })
         return
       }
 
-      const pickedFiles = await googleDriveClient.openPicker()
+      // ステップ1: 音楽ファイルを選択
+      // ルートフォルダ以外の場合は、現在のフォルダを親として指定
+      const parentIdForPicker = folderId !== fileStoreState.rootFolderId ? folderId : undefined
+      const pickedFiles = await googleDriveClient.openFilesPicker(parentIdForPicker)
       if (pickedFiles.length === 0) return
 
-      const groupId = await fileStoreActions.addPickerGroup(pickedFiles)
-      enqueueSnackbar(`Added ${pickedFiles.length} files`, {
-        variant: "success",
-      })
+      // ステップ2: ユニークなparentIdを抽出
+      const uniqueParentIds = [
+        ...new Set(pickedFiles.map(f => f.parentId).filter(Boolean)),
+      ] as string[]
 
-      // ファイル一覧を更新
-      if (folderId === fileStoreState.rootFolderId) {
+      // ステップ3: 各parentIdのアクセス権をチェック
+      const folderNames = new Map<string, string>()
+      const foldersNeedingAccess: string[] = []
+
+      for (const parentId of uniqueParentIds) {
+        const { hasAccess, folderName } =
+          await googleDriveClient.checkFolderAccess(parentId)
+        if (hasAccess && folderName) {
+          folderNames.set(parentId, folderName)
+        } else {
+          foldersNeedingAccess.push(parentId)
+        }
+      }
+
+      // ステップ4: アクセス許可が必要なフォルダのPickerを表示
+      if (foldersNeedingAccess.length > 0) {
+        enqueueSnackbar(
+          `${foldersNeedingAccess.length}個のフォルダへのアクセス許可が必要です`
+        )
+
+        for (const parentId of foldersNeedingAccess) {
+          const selectedFolder = await googleDriveClient.openFolderPicker(
+            parentId
+          )
+          if (selectedFolder && selectedFolder.id === parentId) {
+            folderNames.set(parentId, selectedFolder.name)
+          } else {
+            // 異なるフォルダが選択された場合も名前を保存
+            // キャンセルされた場合はデフォルト名
+            folderNames.set(parentId, `Folder ${parentId.substring(0, 8)}`)
+          }
+        }
+      }
+
+      // ステップ5: ファイルとフォルダ名を保存
+      const groupId = await fileStoreActions.addPickerGroup(
+        pickedFiles,
+        folderNames
+      )
+      enqueueSnackbar(`Added ${pickedFiles.length} files`)
+
+      // ファイル一覧を更新（現在表示中のフォルダの内容を再取得）
+      if (folderId) {
         const children = await fileStoreActions.getChildrenLocal(folderId)
         setFiles(children)
       }

@@ -33,7 +33,9 @@ export interface GoogleDriveClient extends BaseDriveClient {
   saveAccessToken(token: string): void
   userInfo: any | undefined
   connect(): Promise<void>
-  openPicker(): Promise<GooglePickerResult[]>
+  openFilesPicker(parentId?: string): Promise<GooglePickerResult[]>
+  openFolderPicker(parentId: string): Promise<GooglePickerResult | null>
+  checkFolderAccess(folderId: string): Promise<{ hasAccess: boolean; folderName?: string }>
 }
 
 const DB_KEY_USER_INFO = "googleDrive.userInfo"
@@ -336,7 +338,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       }
       window.gapi.client.setToken({ access_token: accessToken })
     },
-    async openPicker(): Promise<GooglePickerResult[]> {
+    async openFilesPicker(parentId?: string): Promise<GooglePickerResult[]> {
       await loadGoogleAPI()
       await loadGooglePicker()
 
@@ -349,7 +351,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
           // DocsViewでフォルダも表示されるように設定
           const docsView = new window.google.picker.DocsView()
             .setIncludeFolders(true)  // フォルダを表示
-            .setParent('root')  // Driveのルートから開始
+            .setParent(parentId || 'root')  // 指定されたフォルダまたはDriveのルートから開始
 
           const picker = new window.google.picker.PickerBuilder()
             .addView(docsView)  // カスタムビューを使用
@@ -379,6 +381,87 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
           reject(error)
         }
       })
+    },
+    async openFolderPicker(parentId: string): Promise<GooglePickerResult | null> {
+      await loadGoogleAPI()
+      await loadGooglePicker()
+
+      if (!accessToken) {
+        throw new Error("No access token available for Picker")
+      }
+
+      return new Promise((resolve, reject) => {
+        try {
+          // フォルダのみ選択可能なDocsView
+          const docsView = new window.google.picker.DocsView()
+            .setIncludeFolders(true)
+            .setMimeTypes('application/vnd.google-apps.folder')
+            .setSelectFolderEnabled(true)
+
+          // setFileIds() を文字列形式で指定
+          // 注意: setParent()と併用不可（setFileIdsが上書きする）
+          console.log("Setting fileIds (string format):", parentId)
+          docsView.setFileIds(parentId)  // 文字列として渡す
+
+          const picker = new window.google.picker.PickerBuilder()
+            .addView(docsView)
+            .setOAuthToken(accessToken)
+            .setDeveloperKey(GOOGLE_DEVELOPER_KEY)
+            .setAppId(GOOGLE_APP_ID)
+            .setTitle(`フォルダを選択してアクセス許可を付与してください`)
+            .setCallback((data: any) => {
+              if (data.action === window.google.picker.Action.PICKED) {
+                const folder = data.docs[0]
+                console.log("Folder selected:", folder)
+
+                // 選択されたフォルダが対象のフォルダかチェック
+                if (folder.id === parentId) {
+                  console.log("✅ Correct folder selected!")
+                } else {
+                  console.warn("⚠️ Different folder selected. Expected:", parentId, "Got:", folder.id)
+                }
+
+                resolve({
+                  id: folder.id,
+                  name: folder.name,
+                  mimeType: folder.mimeType,
+                  parentId: folder.parentId || folder.parents?.[0] || undefined,
+                })
+              } else if (data.action === window.google.picker.Action.CANCEL) {
+                resolve(null)
+              }
+            })
+            .build()
+          picker.setVisible(true)
+        } catch (error) {
+          reject(error)
+        }
+      })
+    },
+    async checkFolderAccess(folderId: string): Promise<{ hasAccess: boolean; folderName?: string }> {
+      try {
+        const response = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${folderId}?fields=name`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
+        )
+
+        if (response.ok) {
+          const data = await response.json()
+          return { hasAccess: true, folderName: data.name }
+        } else if (response.status === 404) {
+          // アクセス許可なし
+          return { hasAccess: false }
+        } else {
+          throw new Error(`Failed to check folder access: ${response.statusText}`)
+        }
+      } catch (error) {
+        console.error("Error checking folder access:", error)
+        return { hasAccess: false }
+      }
     },
     async getRootFolderId() {
       // Pickerモードでは仮想ルートフォルダIDを返す
