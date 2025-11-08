@@ -25,6 +25,7 @@ export interface GooglePickerResult {
   id: string
   name: string
   mimeType: string
+  parentId?: string
 }
 
 export interface GoogleDriveClient extends BaseDriveClient {
@@ -355,11 +356,19 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
             .setDeveloperKey(GOOGLE_DEVELOPER_KEY)
             .setCallback((data: any) => {
               if (data.action === window.google.picker.Action.PICKED) {
-                const results: GooglePickerResult[] = data.docs.map((doc: any) => ({
-                  id: doc.id,
-                  name: doc.name,
-                  mimeType: doc.mimeType,
-                }))
+                console.log("Picker data:", data)
+                console.log("First doc all properties:", JSON.stringify(data.docs[0], null, 2))
+                const results: GooglePickerResult[] = data.docs.map((doc: any) => {
+                  // 全プロパティを確認
+                  console.log("Doc keys:", Object.keys(doc))
+                  return {
+                    id: doc.id,
+                    name: doc.name,
+                    mimeType: doc.mimeType,
+                    parentId: doc.parentId || doc.parents?.[0] || doc.parent || undefined,
+                  }
+                })
+                console.log("Mapped results:", results)
                 resolve(results)
               } else if (data.action === window.google.picker.Action.CANCEL) {
                 resolve([])

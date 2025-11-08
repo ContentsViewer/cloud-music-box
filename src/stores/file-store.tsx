@@ -363,7 +363,9 @@ export const useFileStore = () => {
         localStorage.setItem("blobsStorageUsageBytes", "0")
         dispatch({ type: "setBlobsStorageUsageBytes", payload: 0 })
       },
-      addPickerGroup: async (files: Array<{id: string, name: string, mimeType: string}>) => {
+      addPickerGroup: async (files: Array<{id: string, name: string, mimeType: string, parentId?: string}>) => {
+        console.log("addPickerGroup called with files:", files)
+
         if (!refState.current.configured) {
           throw new Error("File store not configured")
         }
@@ -371,48 +373,73 @@ export const useFileStore = () => {
           throw new Error("File database not initialized")
         }
 
-        // 仮想フォルダ（Picker Group）を作成
-        const groupId = crypto.randomUUID()
-        const groupFolder: FolderItem = {
-          id: groupId,
-          name: `Picked at ${new Date().toLocaleString()}`,
-          type: "folder",
-          parentId: "root",
-          childrenIds: files.map(f => f.id),
-        }
-
-        // フォルダをIDBに保存
-        await getIdbRequest(
-          refState.current.fileDb
-            .transaction("files", "readwrite")
-            .objectStore("files")
-            .put(groupFolder)
-        )
-
-        // 各ファイルをIDBに保存
-        const transaction = refState.current.fileDb.transaction("files", "readwrite")
-        const store = transaction.objectStore("files")
+        // parentIdごとにファイルをグループ化
+        const filesByParent = new Map<string, Array<{id: string, name: string, mimeType: string, parentId?: string}>>()
 
         for (const file of files) {
-          const ext = file.name.split(".").pop()?.toLowerCase() || ""
-          const audioFormatInfo = AUDIO_FORMAT_MAPPING[ext]
-
-          const fileItem: BaseFileItem = {
-            id: file.id,
-            name: file.name,
-            type: audioFormatInfo ? "audio-track" : "file",
-            parentId: groupId,
-            ...(audioFormatInfo && { mimeType: audioFormatInfo.mimeType }),
+          const parentId = file.parentId || "unknown"
+          if (!filesByParent.has(parentId)) {
+            filesByParent.set(parentId, [])
           }
-          store.put(fileItem)
+          filesByParent.get(parentId)!.push(file)
+        }
+
+        const transaction = refState.current.fileDb.transaction("files", "readwrite")
+        const store = transaction.objectStore("files")
+        const createdFolderIds: string[] = []
+
+        // 各parentIdごとにフォルダを作成
+        for (const [driveParentId, groupFiles] of Array.from(filesByParent.entries())) {
+          // Drive上のフォルダIDを仮想フォルダIDとして使用
+          const folderId = driveParentId
+
+          // フォルダ名は最初のファイルから推測、または日時
+          const folderName = `Folder ${driveParentId.substring(0, 8)}`
+
+          const groupFolder: FolderItem = {
+            id: folderId,
+            name: folderName,
+            type: "folder",
+            parentId: "root",
+            childrenIds: groupFiles.map((f: {id: string}) => f.id),
+          }
+
+          console.log("Creating folder:", groupFolder)
+          store.put(groupFolder)
+          createdFolderIds.push(folderId)
+
+          // 各ファイルをIDBに保存
+          for (const file of groupFiles) {
+            const ext = file.name.split(".").pop()?.toLowerCase() || ""
+            const audioFormatInfo = AUDIO_FORMAT_MAPPING[ext]
+
+            const fileItem: BaseFileItem = {
+              id: file.id,
+              name: file.name,
+              type: audioFormatInfo ? "audio-track" : "file",
+              parentId: folderId,
+              ...(audioFormatInfo && { mimeType: audioFormatInfo.mimeType }),
+            }
+            console.log("Creating file:", fileItem)
+            store.put(fileItem)
+          }
         }
 
         await new Promise<void>((resolve, reject) => {
-          transaction.oncomplete = () => resolve()
-          transaction.onerror = () => reject(transaction.error)
+          transaction.oncomplete = () => {
+            console.log("Transaction completed successfully")
+            resolve()
+          }
+          transaction.onerror = () => {
+            console.error("Transaction error:", transaction.error)
+            reject(transaction.error)
+          }
         })
 
-        return groupId
+        console.log("Created folder IDs:", createdFolderIds)
+
+        // 最初に作成したフォルダIDを返す（互換性のため）
+        return createdFolderIds[0] || "root"
       },
     }
   }, [])
