@@ -3,13 +3,23 @@
 import { getDriveConfig } from "@/src/drive-clients/base-drive-client"
 import OneDrivePage from "./onedrive-page"
 import GoogleDrivePage from "./google-drive-page"
+import { useEffect, useState } from "react"
 
 export default function Page() {
-  const driveConfig = getDriveConfig()
+  const [driveType, setDriveType] = useState<string | undefined>(undefined)
 
-  if (driveConfig?.type === "google-drive") {
-    return <GoogleDrivePage />
+  useEffect(() => {
+    // クライアントサイドでのみDrive設定を取得
+    const driveConfig = getDriveConfig()
+    setDriveType(driveConfig?.type)
+  }, [])
+
+  switch (driveType) {
+    case "google-drive":
+      return <GoogleDrivePage />
+    case "onedrive":
+      return <OneDrivePage />
+    default:
+      return null
   }
-
-  return <OneDrivePage />
 }

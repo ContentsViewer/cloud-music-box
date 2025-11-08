@@ -148,9 +148,9 @@ export default function GoogleDrivePage() {
       if (pickedFiles.length === 0) return
 
       // ステップ2: ユニークなparentIdを抽出
-      const uniqueParentIds = [
-        ...new Set(pickedFiles.map(f => f.parentId).filter(Boolean)),
-      ] as string[]
+      const uniqueParentIds = Array.from(
+        new Set(pickedFiles.map(f => f.parentId).filter((id): id is string => id !== undefined))
+      )
 
       // ステップ3: 各parentIdのアクセス権をチェック
       const folderNames = new Map<string, string>()
