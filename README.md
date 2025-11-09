@@ -16,7 +16,7 @@ English | [日本語](./README_jp.md)
     </a>
 </p>
 
-Cloud Music Box is a PWA music player that plays music from cloud storage (currently only `OneDrive`).
+Cloud Music Box is a PWA music player that plays music from cloud storage (`OneDrive`, `Google Drive`), designed to let you feel and enjoy music more deeply.
 
 It has the following features:
 
@@ -24,12 +24,12 @@ It has the following features:
 * It plays from centrally managed cloud storage, so there is no need to sync music for each player.
 * Even offline, music that has been downloaded can be played.
 * Even when the app is in the background, music can be played sequentially (May not work on iOS only).
-* The style and animation of the app change dynamically according to the music.
+* Featuring a unique non-linear visualizer, the entire player dynamically changes in response to the music.
 
 > [!WARNING]
-> Currently, this app is in alpha version.
+> Database compatibility may be lost during major updates, requiring you to reset the app.
 >
-> Compatibility with the database may be lost when updating, and you may need to reinstall the app.
+> You can reset the app by executing `Reset App` from the app settings screen. If that doesn't resolve the issue, try reinstalling the app.
 
 ## Development
 
@@ -40,7 +40,7 @@ npm install
 npm run dev
 ```
 
-### Building the production version and verifying its operation
+### Building and testing the production version
 
 ```sh
 npm run build
@@ -50,3 +50,11 @@ npx serve@latest out
 ## Further information
 
 * [Home Page](https://contentsviewer.work/Master/apps/cloud-music-box/docs)
+
+## Support
+
+If you like this app, please consider buying me a coffee. Thank you!
+
+<a href="https://www.buymeacoffee.com/contentsviewer" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="60" width="217">
+</a>
