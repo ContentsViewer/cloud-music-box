@@ -96,7 +96,7 @@ const LoginPage = () => {
           alignItems: "center",
           justifyContent: "center",
           flexDirection: "column",
-          borderRadius: "24px",
+          borderRadius: "12px",
         }}
       >
         <Cloud sx={{ fontSize: 100 }} />
@@ -153,6 +153,7 @@ const CardButton = memo(function CardButton({
     <Card
       sx={{
         background: alpha(colorSurfaceContainer, 0.5),
+        borderRadius: "12px",
       }}
     >
       <CardActionArea onClick={onClick}>

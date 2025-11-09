@@ -147,15 +147,35 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
       <Dialog
         open={clearLocalDataDialogOpen}
         onClose={handleCloseClearLocalDataDialog}
-        sx={{ "& .MuiDialog-paper": { borderRadius: 3 } }}
+        sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
       >
-        <DialogTitle>Clear Local Data</DialogTitle>
-        <DialogContent>
+        <DialogTitle
+          sx={{
+            paddingTop: "24px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
+            paddingBottom: "16px",
+          }}
+        >
+          Clear Local Data
+        </DialogTitle>
+        <DialogContent
+          sx={{
+            paddingBottom: "24px",
+          }}
+        >
           <Typography>
             Clear the downloaded audio files. This action cannot be undone.
           </Typography>
         </DialogContent>
-        <DialogActions>
+        <DialogActions
+          sx={{
+            paddingTop: "0px",
+            paddingBottom: "24px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
+          }}
+        >
           <Button autoFocus onClick={handleCloseClearLocalDataDialog}>
             Cancel
           </Button>
@@ -302,10 +322,23 @@ function ResetSettingsArea() {
         onClose={() => {
           setResetAppDialogOpen(false)
         }}
-        sx={{ "& .MuiDialog-paper": { borderRadius: 3 } }}
+        sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
       >
-        <DialogTitle>Reset App</DialogTitle>
-        <DialogContent>
+        <DialogTitle
+          sx={{
+            paddingTop: "24px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
+            paddingBottom: "16px",
+          }}
+        >
+          Reset App
+        </DialogTitle>
+        <DialogContent
+          sx={{
+            paddingBottom: "24px",
+          }}
+        >
           <Typography>
             This will reset all settings and reload the app, including:
           </Typography>
@@ -315,7 +348,14 @@ function ResetSettingsArea() {
           </ul>
           <Typography>This action cannot be undone.</Typography>
         </DialogContent>
-        <DialogActions>
+        <DialogActions
+          sx={{
+            paddingTop: "0px",
+            paddingBottom: "24px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
+          }}
+        >
           <Button
             autoFocus
             onClick={() => {
@@ -463,7 +503,7 @@ export default function Page() {
               alignSelf: "center",
               width: "100%",
               maxWidth: "288px",
-              borderRadius: "24px",
+              borderRadius: "12px",
             }}
           >
             <Typography variant="body1" sx={{ fontWeight: "bold" }}>
@@ -531,7 +571,7 @@ export default function Page() {
               marginTop: "128px",
               marginBottom: "32px",
               border: `1px solid ${colorOutlineVariant}`,
-              borderRadius: "24px",
+              borderRadius: "12px",
               padding: "16px",
               color: colorOnSurfaceVariant,
               alignSelf: "center",
