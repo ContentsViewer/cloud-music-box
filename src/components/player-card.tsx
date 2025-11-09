@@ -29,7 +29,14 @@ import {
   hexFromArgb,
   Hct,
 } from "@material/material-color-utilities"
-import { memo, MouseEventHandler, useEffect, useRef, useState, useCallback } from "react"
+import {
+  memo,
+  MouseEventHandler,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+} from "react"
 import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
@@ -116,18 +123,48 @@ interface MiniPlayerContentProps {
   title: string
   coverUrl?: string
   onExpand?: () => void
-  sx?: SxProps<Theme>
 }
 
-const MiniPlayerContent = (props: MiniPlayerContentProps) => {
-  const { activeTrack, coverUrl, title, onExpand } = props
+interface MiniPlayerContentInnerProps {
+  activeTrack: AudioTrack | null
+  title: string
+  coverUrl?: string
+  onExpand?: () => void
+  isPlaying: boolean
+  isActiveTrackLoading: boolean
+  playSourceUrl?: string
+  routerPathname: string
+  routerHash: string
+  onGoBack: () => void
+  onPlayPrevious: () => void
+  onPlayPause: () => void
+  onPlayNext: () => void
+}
 
-  const [playerState, playerActions] = usePlayerStore()
-  const [routerState, routerActions] = useRouter()
+const MiniPlayerContentInner = memo((props: MiniPlayerContentInnerProps) => {
+  const {
+    activeTrack,
+    coverUrl,
+    title,
+    onExpand,
+    isPlaying,
+    isActiveTrackLoading,
+    playSourceUrl,
+    routerPathname,
+    routerHash,
+    onGoBack,
+    onPlayPrevious,
+    onPlayPause,
+    onPlayNext,
+  } = props
+
   const [themeStoreState] = useThemeStore()
 
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+  const colorOnSurface = hexFromArgb(
+    MaterialDynamicColors.onSurface.getArgb(themeStoreState.scheme)
   )
   const primaryColor = hexFromArgb(
     MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
@@ -137,34 +174,25 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
   )
 
   const goBackEnabled = (() => {
-    if (!playerState.playSourceUrl) return false
-    if (
-      `${routerState.pathname}${routerState.hash}` === playerState.playSourceUrl
-    )
-      return false
+    if (!playSourceUrl) return false
+    if (`${routerPathname}${routerHash}` === playSourceUrl) return false
     return true
   })()
 
   return (
-    <Box
-      component="div"
-      sx={{
-        position: "relative",
-        ...props.sx,
-      }}
-    >
-      <Box
-        component="div"
-        sx={{ position: "absolute", top: 0, left: 0, right: 0 }}
+    <div css={css({ position: "relative" })}>
+      <div
+        css={css({
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+        })}
       >
         {goBackEnabled ? (
           <IconButton
             size="small"
-            onClick={() => {
-              const sourceUrl = playerState.playSourceUrl
-              if (!sourceUrl) return
-              routerActions.go(sourceUrl)
-            }}
+            onClick={onGoBack}
             sx={{
               color: colorOnSurfaceVariant,
             }}
@@ -172,22 +200,24 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
             <Undo fontSize="inherit" />
           </IconButton>
         ) : null}
-      </Box>
+      </div>
       <TimelineSlider
-        sx={{
-          my: 1,
-          mx: 4,
-        }}
+        css={css({
+          marginTop: 8,
+          marginBottom: 8,
+          marginLeft: 32,
+          marginRight: 32,
+        })}
       />
-      <Box
-        component="div"
-        sx={{
+      <div
+        css={css({
           display: "flex",
           alignItems: "center",
           width: "100%",
-          px: 2,
-          pb: 1,
-        }}
+          paddingLeft: 16,
+          paddingRight: 16,
+          paddingBottom: 8,
+        })}
       >
         <ButtonBase
           sx={{
@@ -195,64 +225,99 @@ const MiniPlayerContent = (props: MiniPlayerContentProps) => {
             p: 0,
             borderRadius: "10%",
           }}
-          onClick={() => {
-            if (onExpand) {
-              onExpand()
-            }
-          }}
+          onClick={onExpand}
         >
           <TrackCover coverUrl={coverUrl} />
         </ButtonBase>
-        <Box component="div" sx={{ flexGrow: 1, minWidth: "0" }}>
-          <MarqueeText
-            text={title}
-            color={hexFromArgb(
-              MaterialDynamicColors.onSurface.getArgb(themeStoreState.scheme)
-            )}
-          />
+        <div
+          css={css({
+            flexGrow: 1,
+            minWidth: 0,
+          })}
+        >
+          <MarqueeText text={title} color={colorOnSurface} />
           <MarqueeText
             text={activeTrack?.file.metadata?.common.artist || ""}
             color={colorOnSurfaceVariant}
           />
-        </Box>
-        <SkipPreviousButton
-          onClick={() => {
-            playerActions.playPreviousTrack()
-          }}
-        />
+        </div>
+        <SkipPreviousButton onClick={onPlayPrevious} />
         <PlayPauseButton
-          onClick={() => {
-            if (playerState.isPlaying) {
-              playerActions.pause()
-            } else {
-              playerActions.play()
-            }
-          }}
-          isPlaying={playerState.isPlaying}
+          onClick={onPlayPause}
+          isPlaying={isPlaying}
           primaryColor={primaryColor}
           onPrimaryColor={onPrimaryColor}
         />
-        <SkipNextButton
-          onClick={() => {
-            playerActions.playNextTrack()
-          }}
-        />
-      </Box>
-      <Box
-        component="div"
-        sx={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
+        <SkipNextButton onClick={onPlayNext} />
+      </div>
+      <div
+        css={css({
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+        })}
       >
         <Fade
-          in={playerState.isActiveTrackLoading}
+          in={isActiveTrackLoading}
           style={{
-            transitionDelay: playerState.isActiveTrackLoading ? "800ms" : "0ms",
+            transitionDelay: isActiveTrackLoading ? "800ms" : "0ms",
           }}
           unmountOnExit
         >
           <LinearProgress sx={{ width: "100%" }} />
         </Fade>
-      </Box>
-    </Box>
+      </div>
+    </div>
+  )
+})
+
+MiniPlayerContentInner.displayName = "MiniPlayerContentInner"
+
+const MiniPlayerContent = (props: MiniPlayerContentProps) => {
+  const { activeTrack, coverUrl, title, onExpand } = props
+
+  const [playerState, playerActions] = usePlayerStore()
+  const [routerState, routerActions] = useRouter()
+
+  const onGoBack = useCallback(() => {
+    const sourceUrl = playerState.playSourceUrl
+    if (!sourceUrl) return
+    routerActions.go(sourceUrl)
+  }, [playerState.playSourceUrl, routerActions])
+
+  const onPlayPrevious = useCallback(() => {
+    playerActions.playPreviousTrack()
+  }, [playerActions])
+
+  const onPlayPause = useCallback(() => {
+    if (playerState.isPlaying) {
+      playerActions.pause()
+    } else {
+      playerActions.play()
+    }
+  }, [playerState.isPlaying, playerActions])
+
+  const onPlayNext = useCallback(() => {
+    playerActions.playNextTrack()
+  }, [playerActions])
+
+  return (
+    <MiniPlayerContentInner
+      activeTrack={activeTrack}
+      title={title}
+      coverUrl={coverUrl}
+      onExpand={onExpand}
+      isPlaying={playerState.isPlaying}
+      isActiveTrackLoading={playerState.isActiveTrackLoading}
+      playSourceUrl={playerState.playSourceUrl}
+      routerPathname={routerState.pathname}
+      routerHash={routerState.hash}
+      onGoBack={onGoBack}
+      onPlayPrevious={onPlayPrevious}
+      onPlayPause={onPlayPause}
+      onPlayNext={onPlayNext}
+    />
   )
 }
 
@@ -264,49 +329,47 @@ interface FullPlayerContentProps {
   coverUrl?: string
 }
 
-const FullPlayerContent = (props: FullPlayerContentProps) => {
-  const { activeTrack } = props
+interface FullPlayerContentInnerProps {
+  onShrink?: () => void
+  title: string
+  activeTrack: AudioTrack | null
+  coverUrl?: string
+  isPlaying: boolean
+  showCursor: boolean
+  containerRef: React.RefObject<HTMLDivElement>
+  trackCoverWrapperRef: React.RefObject<HTMLDivElement>
+  trackCoverRef: React.RefObject<HTMLDivElement>
+  onPlayPrevious: () => void
+  onPlayPause: () => void
+  onPlayNext: () => void
+  onCoverClick: () => void
+}
+
+const FullPlayerContentInner = memo((props: FullPlayerContentInnerProps) => {
+  const {
+    onShrink,
+    title,
+    activeTrack,
+    coverUrl,
+    isPlaying,
+    showCursor,
+    containerRef,
+    trackCoverWrapperRef,
+    trackCoverRef,
+    onPlayPrevious,
+    onPlayPause,
+    onPlayNext,
+    onCoverClick,
+  } = props
 
   const [themeStoreState] = useThemeStore()
-  const [playerState, playerActions] = usePlayerStore()
+
   const primaryColor = hexFromArgb(
     MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
   )
   const onPrimaryColor = hexFromArgb(
     MaterialDynamicColors.onPrimary.getArgb(themeStoreState.scheme)
   )
-  const trackCoverWrapperRef = useRef<HTMLDivElement>(null)
-  const trackCoverRef = useRef<HTMLDivElement>(null)
-
-  const [audioDynamicsSettings, audioDynamicsSettingsActions] =
-    useAudioDynamicsSettingsStore()
-
-  // Auto-hide cursor after 3 seconds of inactivity
-  const { showCursor, containerRef } = useAutoHideCursor(3000)
-
-  useEffect(() => {
-    const resizeObserver = new ResizeObserver(entries => {
-      if (!trackCoverRef.current) return
-      for (let entry of entries) {
-        const { width, height } = entry.contentRect
-        if (width < height) {
-          trackCoverRef.current.style.width = "100%"
-          trackCoverRef.current.style.height = "auto"
-        } else {
-          trackCoverRef.current.style.width = "auto"
-          trackCoverRef.current.style.height = "100%"
-        }
-      }
-    })
-
-    if (trackCoverWrapperRef.current) {
-      resizeObserver.observe(trackCoverWrapperRef.current)
-    }
-
-    return () => {
-      resizeObserver.disconnect()
-    }
-  }, [])
 
   return (
     <div
@@ -314,7 +377,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
       css={css({
         width: "100%",
         height: "100%",
-        cursor: showCursor ? 'default' : 'none',
+        cursor: showCursor ? "default" : "none",
       })}
     >
       <AppBar
@@ -328,11 +391,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             size="large"
             edge="start"
             color="inherit"
-            onClick={() => {
-              if (props.onShrink) {
-                props.onShrink()
-              }
-            }}
+            onClick={onShrink}
           >
             <Undo />
           </IconButton>
@@ -392,11 +451,9 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
                 maxHeight: "min(40vh, 280px)",
               },
             }}
-            coverUrl={props.coverUrl}
+            coverUrl={coverUrl}
             ref={trackCoverRef}
-            onClick={() => {
-              audioDynamicsSettingsActions.setDynamicsEffectAppeal(true)
-            }}
+            onClick={onCoverClick}
           />
         </div>
         <div
@@ -424,7 +481,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
           })}
         >
           <MarqueeText
-            text={props.title}
+            text={title}
             variant="h4"
             typographySx={{
               fontWeight: "bold",
@@ -435,7 +492,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             variant="subtitle1"
           />
 
-          <TimelineSlider sx={{ mt: 1 }} />
+          <TimelineSlider css={css({ marginTop: 8 })} />
           <div
             css={css({
               display: "flex",
@@ -445,34 +502,96 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               gap: 40,
             })}
           >
-            <SkipPreviousButton
-              onClick={() => {
-                playerActions.playPreviousTrack()
-              }}
-              size="large"
-            />
+            <SkipPreviousButton onClick={onPlayPrevious} size="large" />
             <PlayPauseButton
-              onClick={() => {
-                if (playerState.isPlaying) {
-                  playerActions.pause()
-                } else {
-                  playerActions.play()
-                }
-              }}
-              isPlaying={playerState.isPlaying}
+              onClick={onPlayPause}
+              isPlaying={isPlaying}
               primaryColor={primaryColor}
               onPrimaryColor={onPrimaryColor}
             />
-            <SkipNextButton
-              onClick={() => {
-                playerActions.playNextTrack()
-              }}
-              size="large"
-            />
+            <SkipNextButton onClick={onPlayNext} size="large" />
           </div>
         </div>
       </div>
     </div>
+  )
+})
+
+FullPlayerContentInner.displayName = "FullPlayerContentInner"
+
+const FullPlayerContent = (props: FullPlayerContentProps) => {
+  const { activeTrack } = props
+
+  const [playerState, playerActions] = usePlayerStore()
+  const trackCoverWrapperRef = useRef<HTMLDivElement>(null)
+  const trackCoverRef = useRef<HTMLDivElement>(null)
+
+  const [audioDynamicsSettings, audioDynamicsSettingsActions] =
+    useAudioDynamicsSettingsStore()
+
+  // Auto-hide cursor after 3 seconds of inactivity
+  const { showCursor, containerRef } = useAutoHideCursor(3000)
+
+  useEffect(() => {
+    const resizeObserver = new ResizeObserver(entries => {
+      if (!trackCoverRef.current) return
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect
+        if (width < height) {
+          trackCoverRef.current.style.width = "100%"
+          trackCoverRef.current.style.height = "auto"
+        } else {
+          trackCoverRef.current.style.width = "auto"
+          trackCoverRef.current.style.height = "100%"
+        }
+      }
+    })
+
+    if (trackCoverWrapperRef.current) {
+      resizeObserver.observe(trackCoverWrapperRef.current)
+    }
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [])
+
+  const onPlayPrevious = useCallback(() => {
+    playerActions.playPreviousTrack()
+  }, [playerActions])
+
+  const onPlayPause = useCallback(() => {
+    if (playerState.isPlaying) {
+      playerActions.pause()
+    } else {
+      playerActions.play()
+    }
+  }, [playerState.isPlaying, playerActions])
+
+  const onPlayNext = useCallback(() => {
+    playerActions.playNextTrack()
+  }, [playerActions])
+
+  const onCoverClick = useCallback(() => {
+    audioDynamicsSettingsActions.setDynamicsEffectAppeal(true)
+  }, [audioDynamicsSettingsActions])
+
+  return (
+    <FullPlayerContentInner
+      onShrink={props.onShrink}
+      title={props.title}
+      activeTrack={activeTrack}
+      coverUrl={props.coverUrl}
+      isPlaying={playerState.isPlaying}
+      showCursor={showCursor}
+      containerRef={containerRef}
+      trackCoverWrapperRef={trackCoverWrapperRef}
+      trackCoverRef={trackCoverRef}
+      onPlayPrevious={onPlayPrevious}
+      onPlayPause={onPlayPause}
+      onPlayNext={onPlayNext}
+      onCoverClick={onCoverClick}
+    />
   )
 }
 
@@ -588,7 +707,7 @@ const PlayerCardInner = memo(function PlayerCardInner({
               maxWidth: 640,
               // backgroundColor: alpha(colorSurfaceContainerHighest, 0.5),
               background: alpha(colorSurfaceContainerHighest, 0.5),
-              borderRadius: 4,
+              borderRadius: "12px",
               m: "auto",
               pointerEvents: "auto",
             }}

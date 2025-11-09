@@ -1,13 +1,14 @@
 "use client"
 
-import { Box, Slider, SxProps, Theme, Typography } from "@mui/material"
+import { Slider, Typography, alpha } from "@mui/material"
 import { usePlayerStore } from "../stores/player-store"
 import { useThemeStore } from "../stores/theme-store"
-import { useEffect, useState } from "react"
+import { useEffect, useState, memo, useMemo } from "react"
 import {
   MaterialDynamicColors,
   hexFromArgb,
 } from "@material/material-color-utilities"
+import { css } from "@emotion/react"
 
 const getNumberWithLeadingZero = (n: number) => `${n < 10 ? "0" : ""}${n}`
 
@@ -31,9 +32,76 @@ const formatTime = (ms: number) => {
   return time.join(":")
 }
 
-interface TimelineSliderProps {
-  sx?: SxProps<Theme>
+const containerStyle = css({
+  display: "flex",
+  flexDirection: "column",
+})
+
+interface TimeSliderProps {
+  value: number
 }
+
+const TimeSlider = memo(({ value }: TimeSliderProps) => {
+  return (
+    <Slider
+      sx={{
+        height: 8,
+        "& .MuiSlider-thumb": {
+          width: 4,
+          height: 16,
+          borderRadius: 1,
+          "&.Mui-active": {
+            boxShadow: theme =>
+              `0px 0px 0px 6px ${alpha(theme.palette.primary.main, 0.16)}`,
+          },
+        },
+        "& .MuiSlider-track": {
+          height: 8,
+        },
+        "& .MuiSlider-rail": {
+          height: 8,
+        },
+      }}
+      size="small"
+      value={value}
+      max={1000}
+    />
+  )
+})
+
+TimeSlider.displayName = "TimeSlider"
+
+interface TimeDisplayProps {
+  currentTime: number
+  duration: number
+  color: string
+}
+
+const TimeDisplay = memo(
+  ({ currentTime, duration, color }: TimeDisplayProps) => {
+    return (
+      <div
+        css={css({
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginTop: -16,
+        })}
+      >
+        <Typography variant="caption" color={color}>
+          {formatTime(currentTime)}
+        </Typography>
+        <Typography variant="caption" color={color}>
+          {formatTime(duration)}
+        </Typography>
+      </div>
+    )
+  }
+)
+
+TimeDisplay.displayName = "TimeDisplay"
+
+interface TimelineSliderProps {}
 
 export const TimelineSlider = (props: TimelineSliderProps) => {
   const [playerState] = usePlayerStore()
@@ -54,46 +122,13 @@ export const TimelineSlider = (props: TimelineSliderProps) => {
   }, [actualTime, duration])
 
   return (
-    <Box
-      component="div"
-      sx={{
-        display: "flex",
-        flexDirection: "column",
-        ...props.sx,
-      }}
-    >
-      <Slider
-        sx={{
-          height: 4,
-        }}
-        size="small"
-        value={inputValue}
-        max={1000}
+    <div css={containerStyle} {...props}>
+      <TimeSlider value={inputValue} />
+      <TimeDisplay
+        currentTime={~~actualTime}
+        duration={duration}
+        color={colorOnSurfaceVariant}
       />
-      <Box
-        component="div"
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          mt: -1.5,
-        }}
-      >
-        <Typography variant="caption" color={colorOnSurfaceVariant} sx={{}}>
-          {formatTime(actualTime)}
-        </Typography>
-        <Typography
-          variant="caption"
-          sx={
-            {
-              // gridColumn: "3",
-            }
-          }
-          color={colorOnSurfaceVariant}
-        >
-          {formatTime(duration)}
-        </Typography>
-      </Box>
-    </Box>
+    </div>
   )
 }
