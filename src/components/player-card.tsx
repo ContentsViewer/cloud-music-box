@@ -356,8 +356,8 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               height: "auto",
               maxWidth: "min(25%, 280px)",
               maxHeight: "50%",
-              pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
-              pl: "calc(env(safe-area-inset-left, 0) + 40px)",
+              pb: "max(40px, env(safe-area-inset-bottom, 0))",
+              pl: "max(40px, env(safe-area-inset-left, 0))",
             },
           }}
           ref={trackCoverWrapperRef}
@@ -406,9 +406,9 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               bottom: 0,
               right: 0,
               width: "min(50%, 600px)",
-              pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
-              pr: "calc(env(safe-area-inset-right, 0) + 40px)",
-              pl: "calc(env(safe-area-inset-left, 0) + 40px)",
+              pb: "max(40px, env(safe-area-inset-bottom, 0))",
+              pr: "max(40px, env(safe-area-inset-right, 0))",
+              pl: "40px",
             },
           }}
         >
