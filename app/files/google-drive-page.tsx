@@ -104,6 +104,48 @@ export default function GoogleDrivePage() {
     }
   }, [fileStoreState.configured, folderId])
 
+  // Auto-sync from remote when online
+  // Note: Excluded for root folder because:
+  // - Root folder is a virtual folder (id: "root") that exists only in IndexedDB
+  // - It doesn't exist on Google Drive API (actual Drive root has a different ID)
+  // - Root content is built by addPickerGroup() when user selects files via Picker
+  // - Calling getChildrenRemote("root") would query 'root' in parents, which returns empty/error
+  useEffect(() => {
+    if (fileStoreState.driveStatus != "online" || !folderId) {
+      return
+    }
+
+    // Skip auto-sync for root folder (virtual folder, not on Google Drive)
+    if (folderId === fileStoreState.rootFolderId) {
+      console.log(`[Google Drive] Skipping auto-sync for virtual root folder`)
+      return
+    }
+
+    let isCancelled = false
+
+    const getFiles = async () => {
+      try {
+        setRemoteFetching(true)
+        console.log(`[Google Drive] Auto-syncing folder from remote: ${folderId}`)
+        const remoteFiles = await fileStoreActions.getChildrenRemote(folderId)
+        if (isCancelled) return
+        // console.log("REMOTE")
+        if (remoteFiles) {
+          setFiles(remoteFiles)
+        }
+        setRemoteFetching(false)
+      } catch (error) {
+        console.error(error)
+        enqueueSnackbar(`${error}`, { variant: "error" })
+        setRemoteFetching(false)
+      }
+    }
+    getFiles()
+    return () => {
+      isCancelled = true
+    }
+  }, [fileStoreState.driveStatus, folderId])
+
   const handleMoreClose = () => {
     setAnchorEl(null)
   }

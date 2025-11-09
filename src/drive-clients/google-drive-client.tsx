@@ -473,8 +473,47 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       throw new Error("getFile is not supported in Picker mode. Use file-store instead.")
     },
     async getChildren(folderId: string) {
-      // Pickerモードでは実装不要（file-storeがIDBから取得）
-      throw new Error("getChildren is not supported in Picker mode. Use file-store instead.")
+      // drive.fileスコープでは、既にPickerで選択されたファイルのみ返される
+      // 新しいファイルは権限がないため表示されない可能性が高い（実験的実装）
+      return withAutoRefresh(async () => {
+        console.log(`Attempting to list children of folder: ${folderId}`)
+
+        try {
+          const response = await window.gapi.client.drive.files.list({
+            q: `'${folderId}' in parents and trashed=false`,
+            fields: 'files(id, name, mimeType, parents)',
+            pageSize: 256,
+            orderBy: 'folder,name',
+          })
+
+          console.log(`API Response for folder ${folderId}:`, response)
+
+          const items = response.result.files || []
+          console.log(`Found ${items.length} files with drive.file scope`)
+
+          if (items.length === 0) {
+            console.warn(
+              `No files returned for folder ${folderId}. ` +
+              `This is expected with drive.file scope - only previously selected files are accessible.`
+            )
+          }
+
+          return items.map(createFileItemFromDriveItem)
+        } catch (error: any) {
+          console.error(`Error listing children of folder ${folderId}:`, error)
+
+          // 403エラーの場合、権限がないことを明示
+          if (error.status === 403) {
+            console.warn(
+              `403 Forbidden - drive.file scope does not grant access to list folder contents. ` +
+              `Only files previously selected via Picker are accessible.`
+            )
+            return [] // 空の配列を返す（エラーではなく、権限による制限）
+          }
+
+          throw error
+        }
+      })
     },
     async fetchFileBlob(fileId: string) {
       const response = await fetch(

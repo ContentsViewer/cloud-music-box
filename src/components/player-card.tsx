@@ -29,12 +29,14 @@ import {
   hexFromArgb,
   Hct,
 } from "@material/material-color-utilities"
-import { memo, MouseEventHandler, useEffect, useRef, useState } from "react"
+import { memo, MouseEventHandler, useEffect, useRef, useState, useCallback } from "react"
 import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
 import { TrackCover } from "./track-cover"
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
+import { css } from "@emotion/react"
+import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
 
 const SkipPreviousButton = ({
   onClick,
@@ -279,6 +281,9 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
   const [audioDynamicsSettings, audioDynamicsSettingsActions] =
     useAudioDynamicsSettingsStore()
 
+  // Auto-hide cursor after 3 seconds of inactivity
+  const { showCursor, containerRef } = useAutoHideCursor(3000)
+
   useEffect(() => {
     const resizeObserver = new ResizeObserver(entries => {
       if (!trackCoverRef.current) return
@@ -302,8 +307,16 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
       resizeObserver.disconnect()
     }
   }, [])
+
   return (
-    <Box component="div" sx={{ width: "100%", height: "100%" }}>
+    <div
+      ref={containerRef}
+      css={css({
+        width: "100%",
+        height: "100%",
+        cursor: showCursor ? 'default' : 'none',
+      })}
+    >
       <AppBar
         sx={{
           backgroundColor: "transparent",
@@ -325,28 +338,27 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
           </IconButton>
         </Toolbar>
       </AppBar>
-      <Box
-        component="div"
-        sx={{
+      <div
+        css={css({
           display: "flex",
           flexDirection: "column",
           width: "100%",
           height: "100%",
           position: "relative",
-        }}
+        })}
       >
         {/* Portrait: Cover at top, Controls at bottom */}
         {/* Landscape: Cover at bottom-left, Controls at bottom-right */}
-        <Box
-          component="div"
-          sx={{
+        <div
+          css={css({
             "@media (orientation: portrait)": {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              pt: 10,
-              pb: 1,
-              px: 4,
+              paddingTop: 80,
+              paddingBottom: 8,
+              paddingLeft: 32,
+              paddingRight: 32,
             },
             "@media (orientation: landscape)": {
               position: "absolute",
@@ -356,10 +368,10 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               height: "auto",
               maxWidth: "min(25%, 280px)",
               maxHeight: "50%",
-              pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
-              pl: "calc(env(safe-area-inset-left, 0) + 40px)",
+              paddingBottom: "max(40px, env(safe-area-inset-bottom, 0))",
+              paddingLeft: "max(40px, env(safe-area-inset-left, 0))",
             },
-          }}
+          })}
           ref={trackCoverWrapperRef}
         >
           <TrackCover
@@ -386,10 +398,9 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               audioDynamicsSettingsActions.setDynamicsEffectAppeal(true)
             }}
           />
-        </Box>
-        <Box
-          component="div"
-          sx={{
+        </div>
+        <div
+          css={css({
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
@@ -397,20 +408,20 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
             "@media (orientation: portrait)": {
               flexGrow: 1,
               justifyContent: "flex-end",
-              pb: "calc(env(safe-area-inset-bottom, 0) + 80px)",
-              pr: "calc(env(safe-area-inset-right, 0) + 40px)",
-              pl: "calc(env(safe-area-inset-left, 0) + 40px)",
+              paddingBottom: "calc(env(safe-area-inset-bottom, 0) + 80px)",
+              paddingRight: "calc(env(safe-area-inset-right, 0) + 40px)",
+              paddingLeft: "calc(env(safe-area-inset-left, 0) + 40px)",
             },
             "@media (orientation: landscape)": {
               position: "absolute",
               bottom: 0,
               right: 0,
               width: "min(50%, 600px)",
-              pb: "calc(env(safe-area-inset-bottom, 0) + 40px)",
-              pr: "calc(env(safe-area-inset-right, 0) + 40px)",
-              pl: "calc(env(safe-area-inset-left, 0) + 40px)",
+              paddingBottom: "max(40px, env(safe-area-inset-bottom, 0))",
+              paddingRight: "max(40px, env(safe-area-inset-right, 0))",
+              paddingLeft: "40px",
             },
-          }}
+          })}
         >
           <MarqueeText
             text={props.title}
@@ -425,15 +436,14 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
           />
 
           <TimelineSlider sx={{ mt: 1 }} />
-          <Box
-            component="div"
-            sx={{
+          <div
+            css={css({
               display: "flex",
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",
-              gap: 5,
-            }}
+              gap: 40,
+            })}
           >
             <SkipPreviousButton
               onClick={() => {
@@ -459,10 +469,10 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
               }}
               size="large"
             />
-          </Box>
-        </Box>
-      </Box>
-    </Box>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
