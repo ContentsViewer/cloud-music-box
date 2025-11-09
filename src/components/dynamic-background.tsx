@@ -15,6 +15,7 @@ import {
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
 import { extend, Object3DNode } from "@react-three/fiber"
+import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
 
 extend({ Line_: THREE.Line })
 
@@ -532,6 +533,9 @@ export const DynamicBackground = () => {
   const [isPageUnloading, setIsPageUnloading] = useState(false)
   const pitchRef = useRef(-1)
 
+  // Auto-hide cursor after 3 seconds of inactivity
+  const { showCursor, containerRef } = useAutoHideCursor(3000)
+
   useEffect(() => {
     const pitchCurrent = Math.max(
       audioDynamicsState.frame.pitch0,
@@ -667,6 +671,7 @@ export const DynamicBackground = () => {
         // }}
       />
       <div
+        ref={containerRef}
         css={css`
           position: fixed;
           top: 0;
@@ -679,6 +684,7 @@ export const DynamicBackground = () => {
             ? "rgba(0, 0, 0, 0.6)"
             : "transparent"};
           transition: background-color 0.5s ease-in-out;
+          cursor: ${showCursor ? "default" : "none"};
           // backdrop-filter: blur(1px);
         `}
         // component="div"

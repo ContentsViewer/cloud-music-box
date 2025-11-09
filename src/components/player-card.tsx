@@ -29,13 +29,14 @@ import {
   hexFromArgb,
   Hct,
 } from "@material/material-color-utilities"
-import { memo, MouseEventHandler, useEffect, useRef, useState } from "react"
+import { memo, MouseEventHandler, useEffect, useRef, useState, useCallback } from "react"
 import * as mm from "music-metadata-browser"
 import { MarqueeText } from "./marquee-text"
 import { useRouter } from "../router"
 import { TrackCover } from "./track-cover"
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
+import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
 
 const SkipPreviousButton = ({
   onClick,
@@ -280,6 +281,9 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
   const [audioDynamicsSettings, audioDynamicsSettingsActions] =
     useAudioDynamicsSettingsStore()
 
+  // Auto-hide cursor after 3 seconds of inactivity
+  const { showCursor, containerRef } = useAutoHideCursor(3000)
+
   useEffect(() => {
     const resizeObserver = new ResizeObserver(entries => {
       if (!trackCoverRef.current) return
@@ -303,8 +307,16 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
       resizeObserver.disconnect()
     }
   }, [])
+
   return (
-    <div css={css({ width: "100%", height: "100%" })}>
+    <div
+      ref={containerRef}
+      css={css({
+        width: "100%",
+        height: "100%",
+        cursor: showCursor ? 'default' : 'none',
+      })}
+    >
       <AppBar
         sx={{
           backgroundColor: "transparent",
