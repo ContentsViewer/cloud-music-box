@@ -526,8 +526,7 @@ const FullPlayerContent = (props: FullPlayerContentProps) => {
   const trackCoverWrapperRef = useRef<HTMLDivElement>(null)
   const trackCoverRef = useRef<HTMLDivElement>(null)
 
-  const [audioDynamicsSettings, audioDynamicsSettingsActions] =
-    useAudioDynamicsSettingsStore()
+  const [, audioDynamicsSettingsActions] = useAudioDynamicsSettingsStore()
 
   // Auto-hide cursor after 3 seconds of inactivity
   const { showCursor, containerRef } = useAutoHideCursor(3000)

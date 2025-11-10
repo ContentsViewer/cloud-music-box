@@ -2,7 +2,7 @@
 
 import { Box, Typography, SxProps, Theme } from "@mui/material"
 import { Variant } from "@mui/material/styles/createTypography"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 
 interface MarqueeTextProps {
   text: string
@@ -10,6 +10,7 @@ interface MarqueeTextProps {
   color?: string
   sx?: SxProps<Theme>
   typographySx?: SxProps<Theme>
+  fadeWidth?: number
 }
 
 export const MarqueeText = ({
@@ -18,12 +19,14 @@ export const MarqueeText = ({
   color,
   sx,
   typographySx,
+  fadeWidth = 8,
 }: MarqueeTextProps) => {
   const firstTextRef = useRef<HTMLSpanElement>(null)
   const secondTextRef = useRef<HTMLSpanElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const [isScrolling, setIsScrolling] = useState(false)
 
-  const updateScrollAnimation = () => {
+  const updateScrollAnimation = useCallback(() => {
     if (!firstTextRef.current || !containerRef.current) return
 
     const textWidth = firstTextRef.current.offsetWidth
@@ -52,11 +55,13 @@ export const MarqueeText = ({
       const style = secondTextRef.current.style
       if (textWidth <= containerWidth) {
         style.display = "none"
+        setIsScrolling(false)
       } else {
         style.display = "block"
+        setIsScrolling(true)
       }
     }
-  }
+  }, [])
 
   useEffect(() => {
     const observer = new ResizeObserver(entries => {
@@ -70,11 +75,11 @@ export const MarqueeText = ({
     return () => {
       observer.disconnect()
     }
-  }, [])
+  }, [updateScrollAnimation])
 
   useEffect(() => {
     updateScrollAnimation()
-  }, [text])
+  }, [text, updateScrollAnimation])
 
   return (
     <Box
@@ -84,6 +89,10 @@ export const MarqueeText = ({
         overflow: "hidden",
         display: "flex",
         flexDirection: "row",
+        // Apply fade mask only when scrolling
+        ...(isScrolling && {
+          maskImage: `linear-gradient(to right, transparent 0, black ${fadeWidth}px, black calc(100% - ${fadeWidth}px), transparent 100%)`,
+        }),
       }}
       ref={containerRef}
     >

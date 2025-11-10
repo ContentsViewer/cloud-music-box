@@ -4,7 +4,9 @@ import {
   Dispatch,
   ReactNode,
   useContext,
+  useMemo,
   useReducer,
+  useRef,
 } from "react"
 
 export interface AudioDynamicsSettingsProps {
@@ -30,16 +32,23 @@ export const AudioDynamicsSettingsDispatchContext = createContext<
 export const useAudioDynamicsSettingsStore = () => {
   const state = useContext(AudioDynamicsSettingsStateContext)
   const dispatch = useContext(AudioDynamicsSettingsDispatchContext)
-  const actions = {
-    setDynamicsEffectAppeal: (dynamicsEffectAppeal: boolean) => {
-      dispatch({
-        type: "setDynamicsEffectAppeal",
-        payload: {
-          dynamicsEffectAppeal,
-        },
-      })
-    },
-  }
+  const refState = useRef(state)
+  refState.current = state
+
+  const actions = useMemo(
+    () => ({
+      setDynamicsEffectAppeal: (dynamicsEffectAppeal: boolean) => {
+        dispatch({
+          type: "setDynamicsEffectAppeal",
+          payload: {
+            dynamicsEffectAppeal,
+          },
+        })
+      },
+    }),
+    []
+  )
+
   return [state, actions] as const
 }
 
