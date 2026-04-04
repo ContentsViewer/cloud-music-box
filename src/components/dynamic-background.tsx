@@ -12,10 +12,11 @@ import {
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
 import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
-import { GeometricSwarm } from "./geometric-swarm"
+import { ParticleLife } from "./particle-life"
 // Other visualizers (uncomment to switch):
-// import { LissajousCurve } from "./lissajous-curve"          // Original point cloud
-// import { BandLissajous } from "./band-lissajous"            // Band-separated Lissajous
+// import { GeometricSwarm } from "./geometric-swarm"            // Boids flocking
+// import { LissajousCurve } from "./lissajous-curve"            // Original point cloud
+// import { BandLissajous } from "./band-lissajous"              // Band-separated Lissajous
 // import { ReactionDiffusionSurface } from "./reaction-diffusion-surface" // Phase-offset sweep
 
 const noteFromPitch = (frequency: number) => {
@@ -177,7 +178,8 @@ export const DynamicBackground = () => {
             })
           }
         >
-          <GeometricSwarm />
+          <ParticleLife />
+          {/* <GeometricSwarm /> */}
           {/* <LissajousCurve /> */}
           {/* <BandLissajous /> */}
           {/* <ReactionDiffusionSurface /> */}
