@@ -14,6 +14,7 @@ import { css } from "@emotion/react"
 import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
 import { ParticleLife } from "./particle-life"
 // Other visualizers (uncomment to switch):
+// import { ParticleLifeRMS } from "./particle-life-rms"         // Particle Life (RMS-driven)
 // import { GeometricSwarm } from "./geometric-swarm"            // Boids flocking
 // import { LissajousCurve } from "./lissajous-curve"            // Original point cloud
 // import { BandLissajous } from "./band-lissajous"              // Band-separated Lissajous

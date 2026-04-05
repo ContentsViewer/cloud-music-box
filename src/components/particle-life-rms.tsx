@@ -83,10 +83,6 @@ const BAND_HUE_OFFSETS = [0, 70, 160, 250]
 const R_MIN = 0.03   // repulsion radius
 const R_MAX = 0.25   // interaction radius
 const FRICTION = 0.98
-// Stride between sample reads per particle (spreads particles across waveform)
-const SAMPLE_STRIDE = 8
-// How strongly the raw waveform pushes particles (per band, low→high)
-const WAVEFORM_FORCE_SCALE = [0.002, 0.0015, 0.001, 0.0008]
 
 const noteFromPitch = (frequency: number) => {
   const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2))
@@ -132,7 +128,7 @@ interface PLContext {
   time: number
 }
 
-export const ParticleLife = () => {
+export const ParticleLifeRMS = () => {
   const [audioDynamicsState] = useAudioDynamicsStore()
   const [themeStoreState] = useThemeStore()
   const meshRef = useRef<THREE.Mesh>(null)
@@ -250,35 +246,36 @@ export const ParticleLife = () => {
       ctx.activeCounts[b] = active
     }
 
-    // --- Interaction matrix is STATIC (emergent structure backbone) ---
-    // No RMS modulation — the waveform drives movement directly
+    // --- Update interaction matrix based on band RMS ---
+    const baseMatrix = [
+      [ 0.3,  0.2, -0.1, -0.2],
+      [-0.1,  0.3,  0.2, -0.1],
+      [ 0.1, -0.2,  0.3,  0.2],
+      [ 0.2,  0.1, -0.1,  0.3],
+    ]
+    for (let i = 0; i < NUM_BANDS; i++) {
+      for (let j = 0; j < NUM_BANDS; j++) {
+        // When band i is loud, it attracts/pushes band j more strongly
+        ctx.matrix[i][j] = baseMatrix[i][j] + ctx.smoothRMS[i] * 1.5 - ctx.smoothRMS[j] * 0.5
+      }
+    }
 
-    // --- Particle Life force calculation with waveform injection ---
+    // --- Particle Life force calculation ---
     for (let b = 0; b < NUM_BANDS; b++) {
       const agents = ctx.agents[b]
       const ac = ctx.activeCounts[b]
       if (ac === 0) continue
 
-      const bandL = ctx.bandsL[b]
-      const bandR = ctx.bandsR[b]
-      const bandLen = bandL.length
-      const wfScale = WAVEFORM_FORCE_SCALE[b]
+      // Stereo offset
+      const stereoOffset = currentOffset >= 0 && currentOffset < ctx.bandsL[b].length
+        ? (ctx.bandsL[b][currentOffset] - ctx.bandsR[b][currentOffset]) * 0.2
+        : 0
 
       for (let i = 0; i < ac; i++) {
         const a = agents[i]
         let fx = 0, fy = 0
 
-        // === Waveform-driven force (unique per particle) ===
-        // Each particle reads a different position in the waveform
-        const sIdx = currentOffset + i * SAMPLE_STRIDE
-        if (sIdx >= 0 && sIdx < bandLen) {
-          // fx += bandL[sIdx] * wfScale   // L sample → x force
-          // fy += bandR[sIdx] * wfScale   // R sample → y force
-          fx += bandL[sIdx] * 0.01   // L sample → x force
-          fy += bandR[sIdx] * 0.01   // R sample → y force
-        }
-
-        // === Particle Life interactions (static matrix) ===
+        // Interact with ALL bands
         for (let ob = 0; ob < NUM_BANDS; ob++) {
           const attraction = ctx.matrix[b][ob]
           const otherAgents = ctx.agents[ob]
@@ -295,11 +292,14 @@ export const ParticleLife = () => {
             const dist = Math.sqrt(distSq)
 
             if (dist < R_MIN) {
+              // Universal short-range repulsion
               const repel = (R_MIN / dist - 1) * 0.0008
               fx -= (dx / dist) * repel
               fy -= (dy / dist) * repel
             } else {
+              // Attraction/repulsion based on matrix
               const t = (dist - R_MIN) / (R_MAX - R_MIN)
+              // Triangle function: peaks at midpoint of [rMin, rMax]
               const strength = attraction * (1 - Math.abs(2 * t - 1)) * 0.0004
               fx += (dx / dist) * strength
               fy += (dy / dist) * strength
@@ -311,6 +311,9 @@ export const ParticleLife = () => {
         const pitchAngle = (baseHue / 360) * Math.PI * 2 + b * Math.PI * 0.5
         fx += Math.cos(pitchAngle) * 0.00015
         fy += Math.sin(pitchAngle) * 0.00015
+
+        // Stereo bias
+        fx += stereoOffset * 0.0003
 
         // Boundary: soft push
         const br = Math.sqrt(a.x * a.x + a.y * a.y)
