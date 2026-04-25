@@ -12,8 +12,9 @@ import {
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
 import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
-import { FrenetRibbon } from "./frenet-ribbon"
+import { CymaticsPlate } from "./cymatics-plate"
 // Other visualizers (uncomment to switch):
+// import { FrenetRibbon } from "./frenet-ribbon"               // Frenet ribbon (sample-rate trajectory)
 // import { DelayEmbedding } from "./delay-embedding"            // Adaptive Takens delay embedding
 // import { SpectralLife } from "./spectral-life"                // Spectral Particle Life
 // import { TauLife } from "./tau-life"                           // Phase-offset Particle Life (tau-based)
@@ -184,7 +185,8 @@ export const DynamicBackground = () => {
             })
           }
         >
-          <FrenetRibbon />
+          <CymaticsPlate />
+          {/* <FrenetRibbon /> */}
           {/* <DelayEmbedding /> */}
           {/* <SpectralLife /> */}
           {/* <ParticleLife /> */}
