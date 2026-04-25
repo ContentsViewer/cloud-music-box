@@ -12,8 +12,11 @@ import {
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
 import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
-import { ParticleLife } from "./particle-life"
+import { SpectralLife } from "./spectral-life"
 // Other visualizers (uncomment to switch):
+// import { TauLife } from "./tau-life"                           // Phase-offset Particle Life (tau-based)
+// import { PhaseSwarm } from "./phase-swarm"                     // Phase-offset spring targets
+// import { ParticleLife } from "./particle-life"                 // Particle Life (waveform-driven)
 // import { ParticleLifeRMS } from "./particle-life-rms"         // Particle Life (RMS-driven)
 // import { GeometricSwarm } from "./geometric-swarm"            // Boids flocking
 // import { LissajousCurve } from "./lissajous-curve"            // Original point cloud
@@ -179,7 +182,8 @@ export const DynamicBackground = () => {
             })
           }
         >
-          <ParticleLife />
+          <SpectralLife />
+          {/* <ParticleLife /> */}
           {/* <GeometricSwarm /> */}
           {/* <LissajousCurve /> */}
           {/* <BandLissajous /> */}
