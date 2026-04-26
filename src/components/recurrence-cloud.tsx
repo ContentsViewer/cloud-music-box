@@ -11,12 +11,12 @@ import { Hct } from "@material/material-color-utilities"
 const STATE_COUNT = 96
 const VOXEL_N = 96
 const VOXEL_COUNT = VOXEL_N * VOXEL_N * VOXEL_N
-const SAMPLE_STRIDE = 24
+const SAMPLE_STRIDE = 8
 const TAU_DELAY = 8
 // Phyllotactic shifts: 3 つの異なる Fibonacci 比のシフトで C₃ 巡回対称も崩す
-const SHIFT_IJ = 1
-const SHIFT_JK = 2
-const SHIFT_KI = 3
+const SHIFT_IJ = 3
+const SHIFT_JK = 5
+const SHIFT_KI = 8
 const RECURRENCE_EPSILON = 0.5   // cosine 距離用スケール
 const FADE_POWER = 0.10
 const POINT_SIZE_BASE = 4.0
