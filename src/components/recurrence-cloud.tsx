@@ -20,8 +20,13 @@ const SHIFT_KI = 8
 const RECURRENCE_EPSILON = 0.5   // cosine 距離用スケール
 const FADE_POWER = 0.10
 const POINT_SIZE_BASE = 4.0
-const INTENSITY_CUTOFF = 0.05     // cosine intensity 範囲 [0, 1] 用
+const INTENSITY_CUTOFF = 0.04     // intensity 範囲 [0, 1] 用 (sharper 化に伴い緩和)
 const SCREEN_SCALE = 1.2
+// Outer Lp combine: 黄金比系の不等重みで巡回対称も崩す
+const W_A = 1.0
+const W_B = 0.618    // φ⁻¹
+const W_C = 0.382    // φ⁻²
+const COMBINE_P = 3.0
 const RING_SIZE = STATE_COUNT * SAMPLE_STRIDE + 4 * TAU_DELAY + 4096
 
 const VERTEX_SHADER = `
@@ -36,6 +41,10 @@ const VERTEX_SHADER = `
   uniform float uShiftIJ;
   uniform float uShiftJK;
   uniform float uShiftKI;
+  uniform float uWA;
+  uniform float uWB;
+  uniform float uWC;
+  uniform float uCombineP;
 
   varying float vIntensity;
 
@@ -51,13 +60,41 @@ const VERTEX_SHADER = `
     return texture2D(uStatesR, vec2((idx + 0.5) / STATE_F, 0.5)).rgb;
   }
 
-  // Cosine distance: 1 - cos(angle between (lA|rA) and (lB|rB)).
-  // Range [0, 2]. Magnitude-invariant — robust against loud passages.
-  float dist6(vec3 lA, vec3 rA, vec3 lB, vec3 rB) {
-    float dotV = dot(lA, lB) + dot(rA, rB);
-    float magA = sqrt(dot(lA, lA) + dot(rA, rA)) + 1e-5;
-    float magB = sqrt(dot(lB, lB) + dot(rB, rB)) + 1e-5;
-    return 1.0 - dotV / (magA * magB);
+  // Cosine distance for 3D state vectors. [0, 2], magnitude-invariant.
+  float dist3(vec3 A, vec3 B) {
+    float magA = length(A) + 1e-5;
+    float magB = length(B) + 1e-5;
+    return 1.0 - dot(A, B) / (magA * magB);
+  }
+
+  // 座標ごとに L/R の役割を非対称化することが鍵.
+  // - I 座標: Mid = L + R       → LR swap で不変
+  // - J 座標: Side = L - R      → LR swap で符号反転 (=ベクトル方向反転)
+  // - K 座標: L チャンネル単独   → LR swap で完全に R 信号に化ける
+  // 3 座標が L↔R swap に対して異なる効き方をするので、ボクセル空間内で
+  // 対称写像が存在せず、cloud 全体としても LR で異なる絵になる.
+  vec3 stateI(float idx) { return readL(idx) + readR(idx); }   // Mid
+  vec3 stateJ(float idx) { return readL(idx) - readR(idx); }   // Side
+  vec3 stateK(float idx) { return readL(idx); }                // L only
+
+  // R(i,j,k): 3 ペア比較を Lp ノルム (黄金比重み) で結合して intensity を返す.
+  float recurrenceIntensity3(
+    vec3 sI, vec3 sJ, vec3 sK,
+    vec3 sIs, vec3 sJs, vec3 sKs,
+    float eps
+  ) {
+    float dij = dist3(sI, sJs);   // i  vs  j+τs
+    float djk = dist3(sJ, sKs);   // j  vs  k+τs
+    float dki = dist3(sK, sIs);   // k  vs  i+τs
+
+    float p = max(uCombineP, 1.0);
+    float wsum = uWA + uWB + uWC + 1e-5;
+    float D = pow(
+      pow(uWA * dij, p) + pow(uWB * djk, p) + pow(uWC * dki, p),
+      1.0 / p
+    ) / wsum;
+
+    return exp(-D / max(eps, 1e-5));
   }
 
   void main() {
@@ -72,24 +109,19 @@ const VERTEX_SHADER = `
     float kShift = clamp(k + uShiftJK, 0.0, STATE_F - 1.0);   // d_jk 用
     float iShift = clamp(i + uShiftKI, 0.0, STATE_F - 1.0);   // d_ki 用
 
-    vec3 lI = readL(i);
-    vec3 rI = readR(i);
-    vec3 lJ = readL(j);
-    vec3 rJ = readR(j);
-    vec3 lK = readL(k);
-    vec3 rK = readR(k);
-    vec3 lJs = readL(jShift);
-    vec3 rJs = readR(jShift);
-    vec3 lKs = readL(kShift);
-    vec3 rKs = readR(kShift);
-    vec3 lIs = readL(iShift);
-    vec3 rIs = readR(iShift);
+    // 各座標で異なる L/R 役割を割り当てる. これが LR 非対称性の主源.
+    vec3 sI  = stateI(i);
+    vec3 sJ  = stateJ(j);
+    vec3 sK  = stateK(k);
+    vec3 sIs = stateI(iShift);
+    vec3 sJs = stateJ(jShift);
+    vec3 sKs = stateK(kShift);
 
-    float dij = dist6(lI, rI, lJs, rJs);   // i  vs  j+τs
-    float djk = dist6(lJ, rJ, lKs, rKs);   // j  vs  k+τs
-    float dki = dist6(lK, rK, lIs, rIs);   // k  vs  i+τs
-    float dmean = (dij + djk + dki) / 3.0;
-    float intensity = exp(-dmean / max(uEpsilon, 1e-5));
+    float intensity = recurrenceIntensity3(
+      sI,  sJ,  sK,
+      sIs, sJs, sKs,
+      uEpsilon
+    );
 
     if (intensity < uCutoff) {
       gl_PointSize = 0.0;
@@ -321,6 +353,10 @@ export const RecurrenceCloud = () => {
           uShiftIJ: { value: SHIFT_IJ },
           uShiftJK: { value: SHIFT_JK },
           uShiftKI: { value: SHIFT_KI },
+          uWA: { value: W_A },
+          uWB: { value: W_B },
+          uWC: { value: W_C },
+          uCombineP: { value: COMBINE_P },
           uColor: { value: colorVec },
           uOpacity: { value: 1.0 },
         }}
