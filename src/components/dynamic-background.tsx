@@ -25,7 +25,7 @@ import { DelayEmbedding } from "./delay-embedding"            // Adaptive Takens
 // import { ParticleLife } from "./particle-life"                 // Particle Life (waveform-driven)
 // import { ParticleLifeRMS } from "./particle-life-rms"         // Particle Life (RMS-driven)
 // import { GeometricSwarm } from "./geometric-swarm"            // Boids flocking
-// import { LissajousCurve } from "./lissajous-curve"            // Original point cloud
+import { LissajousCurve } from "./lissajous-curve"            // Original point cloud
 // import { BandLissajous } from "./band-lissajous"              // Band-separated Lissajous
 // import { ReactionDiffusionSurface } from "./reaction-diffusion-surface" // Phase-offset sweep
 

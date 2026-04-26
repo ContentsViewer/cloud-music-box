@@ -24,6 +24,10 @@ const TEX_W = 1024
 const TEX_H = Math.ceil(STATE_COUNT / TEX_W)
 const TEX_PIXELS = TEX_W * TEX_H
 const TAU_DELAY = 8
+// stateJ (Side) で readL に加える時間オフセット (sample 単位).
+// モノラル時 stateJ = signal(idx+offset) - signal(idx) の時間差分ベクトルになり、
+// 0 ベクトルにならず紋が出るようになる. iso-directional recurrence 風.
+const SIDE_OFFSET = 8
 // Phyllotactic shifts: 3 つの異なる Fibonacci 比のシフトで C₃ 巡回対称も崩す.
 // state-index (= sample) 単位. 旧 voxel 単位 (3, 5, 8) × SAMPLE_STRIDE_PARA(8) = (24, 40, 64).
 const SHIFT_IJ = 24
@@ -35,7 +39,7 @@ const RECURRENCE_EPSILON = 0.5   // cosine 距離用スケール
 // Sat/Val は uniform でランタイム可変.
 const PITCH_SAT = 0.7
 const PITCH_VAL = 1.0
-const POINT_SIZE_BASE = 4.0
+const POINT_SIZE_BASE = 6.0
 const INTENSITY_CUTOFF = 0.04     // intensity 範囲 [0, 1] 用 (sharper 化に伴い緩和)
 const SCREEN_SCALE = 1.2
 // Outer Lp combine: 黄金比系の不等重みで巡回対称も崩す
@@ -74,6 +78,7 @@ const VERTEX_SHADER = `
   const float N_F = ${VOXEL_N.toFixed(1)};
   const float STATE_F = ${STATE_COUNT.toFixed(1)};
   const float STRIDE_PARA = ${SAMPLE_STRIDE_PARA.toFixed(1)};
+  const float SIDE_OFFSET = ${SIDE_OFFSET.toFixed(1)};
   // 2D texture layout: 1D index → (x, y) で展開して MAX_TEXTURE_SIZE 制約を回避.
   const float TEX_W = ${TEX_W.toFixed(1)};
   const float TEX_H = ${TEX_H.toFixed(1)};
@@ -123,9 +128,14 @@ const VERTEX_SHADER = `
   // - K 座標: L チャンネル単独   → LR swap で完全に R 信号に化ける
   // 3 座標が L↔R swap に対して異なる効き方をするので、ボクセル空間内で
   // 対称写像が存在せず、cloud 全体としても LR で異なる絵になる.
-  vec3 stateI(float idx) { return readL(idx); }   // Mid
-  vec3 stateJ(float idx) { return readL(idx) - readR(idx); }   // Side
-  vec3 stateK(float idx) { return readR(idx); }                // L only
+  vec3 stateI(float idx) { return readL(idx); }   // L
+  // 時間オフセット付き Side: モノラル時にも非ゼロ (signal の時間差分ベクトル).
+  // LR swap で readL ↔ readR が入れ替わり、新 stateJ は元 stateJ と異なる → LR 非対称性も維持.
+  vec3 stateJ(float idx) {
+    float idxOff = clamp(idx + SIDE_OFFSET, 0.0, STATE_F - 1.0);
+    return readL(idxOff) - readR(idx);
+  }
+  vec3 stateK(float idx) { return readR(idx); }                // R
 
   // R(i,j,k): 3 ペア比較を Lp ノルム (黄金比重み) で結合して intensity を返す.
   float recurrenceIntensity3(
