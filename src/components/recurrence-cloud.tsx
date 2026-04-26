@@ -8,17 +8,29 @@ import {
 import { useThemeStore } from "../stores/theme-store"
 import { Hct } from "@material/material-color-utilities"
 
-const STATE_COUNT = 96
 const VOXEL_N = 96
 const VOXEL_COUNT = VOXEL_N * VOXEL_N * VOXEL_N
-const SAMPLE_STRIDE = 8
+// 異方性 stride: voxel coord → state index は線形変換.
+// 主対角線方向 (1,1,1) は STRIDE_PARA、直交方向は uStridePerp (uniform)。
+// state buffer は 1 sample 刻みで保持し、最大 state-index = (VOXEL_N-1)*STRIDE_PARA = 760
+// に余裕を持って 768 (= 256×3) を確保。
+const SAMPLE_STRIDE_PARA = 232       // GLSL 内 const として埋込 (state buffer サイズに直結)
+const SAMPLE_STRIDE_PERP_INITIAL = 8.0   // uStridePerp の初期値、ランタイム可変
+const STATE_COUNT = Math.ceil(((VOXEL_N - 1) * SAMPLE_STRIDE_PARA + 1) / 256) * 256
+// 2D texture layout: 1D だと MAX_TEXTURE_SIZE (典型 16384) を超える場合があるため
+// (TEX_W × TEX_H) の長方形に並べ替えて回避する.
+// TEX_W は GPU cache 親和性で 256 アラインの 1024 を採用、TEX_H は容量に合わせて切上.
+const TEX_W = 1024
+const TEX_H = Math.ceil(STATE_COUNT / TEX_W)
+const TEX_PIXELS = TEX_W * TEX_H
 const TAU_DELAY = 8
-// Phyllotactic shifts: 3 つの異なる Fibonacci 比のシフトで C₃ 巡回対称も崩す
-const SHIFT_IJ = 3
-const SHIFT_JK = 5
-const SHIFT_KI = 8
+// Phyllotactic shifts: 3 つの異なる Fibonacci 比のシフトで C₃ 巡回対称も崩す.
+// state-index (= sample) 単位. 旧 voxel 単位 (3, 5, 8) × SAMPLE_STRIDE_PARA(8) = (24, 40, 64).
+const SHIFT_IJ = 24
+const SHIFT_JK = 40
+const SHIFT_KI = 64
+const FADE_POWER = 1.0
 const RECURRENCE_EPSILON = 0.5   // cosine 距離用スケール
-const FADE_POWER = 0.10
 const POINT_SIZE_BASE = 4.0
 const INTENSITY_CUTOFF = 0.04     // intensity 範囲 [0, 1] 用 (sharper 化に伴い緩和)
 const SCREEN_SCALE = 1.2
@@ -27,7 +39,7 @@ const W_A = 1.0
 const W_B = 0.618    // φ⁻¹
 const W_C = 0.382    // φ⁻²
 const COMBINE_P = 3.0
-const RING_SIZE = STATE_COUNT * SAMPLE_STRIDE + 4 * TAU_DELAY + 4096
+const RING_SIZE = STATE_COUNT + 4 * TAU_DELAY + 4096
 
 const VERTEX_SHADER = `
   uniform sampler2D uStatesL;
@@ -45,6 +57,7 @@ const VERTEX_SHADER = `
   uniform float uWB;
   uniform float uWC;
   uniform float uCombineP;
+  uniform float uStridePerp;   // 直交方向 stride (sample/voxel). 主対角線方向は STRIDE_PARA 固定.
 
   varying float vIntensity;
 
@@ -52,12 +65,21 @@ const VERTEX_SHADER = `
   const float SQRT_6 = 2.44948975;
   const float N_F = ${VOXEL_N.toFixed(1)};
   const float STATE_F = ${STATE_COUNT.toFixed(1)};
+  const float STRIDE_PARA = ${SAMPLE_STRIDE_PARA.toFixed(1)};
+  // 2D texture layout: 1D index → (x, y) で展開して MAX_TEXTURE_SIZE 制約を回避.
+  const float TEX_W = ${TEX_W.toFixed(1)};
+  const float TEX_H = ${TEX_H.toFixed(1)};
 
+  vec2 idxToUV(float idx) {
+    float x = mod(idx, TEX_W);
+    float y = floor(idx / TEX_W);
+    return vec2((x + 0.5) / TEX_W, (y + 0.5) / TEX_H);
+  }
   vec3 readL(float idx) {
-    return texture2D(uStatesL, vec2((idx + 0.5) / STATE_F, 0.5)).rgb;
+    return texture2D(uStatesL, idxToUV(idx)).rgb;
   }
   vec3 readR(float idx) {
-    return texture2D(uStatesR, vec2((idx + 0.5) / STATE_F, 0.5)).rgb;
+    return texture2D(uStatesR, idxToUV(idx)).rgb;
   }
 
   // Cosine distance for 3D state vectors. [0, 2], magnitude-invariant.
@@ -103,19 +125,28 @@ const VERTEX_SHADER = `
     float j = position.y;
     float k = position.z;
 
-    // Phyllotactic shifts: 3 つの異なる shift 量を割り当て、C₃ 巡回対称も崩す。
-    // d_ij が SHIFT_IJ、d_jk が SHIFT_JK、d_ki が SHIFT_KI に紐付く → 巡回で値が変わる。
-    float jShift = clamp(j + uShiftIJ, 0.0, STATE_F - 1.0);   // d_ij 用
-    float kShift = clamp(k + uShiftJK, 0.0, STATE_F - 1.0);   // d_jk 用
-    float iShift = clamp(i + uShiftKI, 0.0, STATE_F - 1.0);   // d_ki 用
+    // 異方性線形変換: voxel coord (i,j,k) → state-index (Si, Sj, Sk).
+    // 主対角線方向 (1,1,1) は STRIDE_PARA で粗く、直交方向は uStridePerp で細かく.
+    float center = (i + j + k) / 3.0;
+    float Si = STRIDE_PARA * center + uStridePerp * (i - center);
+    float Sj = STRIDE_PARA * center + uStridePerp * (j - center);
+    float Sk = STRIDE_PARA * center + uStridePerp * (k - center);
+
+    // Phyllotactic shifts: state-index (sample) 単位. 3 ペア間で異なるずれを与え C₃ 対称を崩す.
+    float SiSh = clamp(Si + uShiftKI, 0.0, STATE_F - 1.0);   // d_ki 用
+    float SjSh = clamp(Sj + uShiftIJ, 0.0, STATE_F - 1.0);   // d_ij 用
+    float SkSh = clamp(Sk + uShiftJK, 0.0, STATE_F - 1.0);   // d_jk 用
+    Si = clamp(Si, 0.0, STATE_F - 1.0);
+    Sj = clamp(Sj, 0.0, STATE_F - 1.0);
+    Sk = clamp(Sk, 0.0, STATE_F - 1.0);
 
     // 各座標で異なる L/R 役割を割り当てる. これが LR 非対称性の主源.
-    vec3 sI  = stateI(i);
-    vec3 sJ  = stateJ(j);
-    vec3 sK  = stateK(k);
-    vec3 sIs = stateI(iShift);
-    vec3 sJs = stateJ(jShift);
-    vec3 sKs = stateK(kShift);
+    vec3 sI  = stateI(Si);
+    vec3 sJ  = stateJ(Sj);
+    vec3 sK  = stateK(Sk);
+    vec3 sIs = stateI(SiSh);
+    vec3 sJs = stateJ(SjSh);
+    vec3 sKs = stateK(SkSh);
 
     float intensity = recurrenceIntensity3(
       sI,  sJ,  sK,
@@ -130,9 +161,23 @@ const VERTEX_SHADER = `
       return;
     }
 
-    // Age fade: newer corner (high i+j+k) brighter
+    // Age fade: pow(age, FADE_POWER) — newer corner (high i+j+k) brighter.
     float age = (i + j + k) / (3.0 * (N_F - 1.0));
     float fade = pow(age, uFadePower);
+
+    // Age fade (lissajous-curve 風 3 フェーズ、現在無効化):
+    // - elapsed [0.0, 0.1):  1.0 → 0.6   急減衰 (誕生直後の点滅)
+    // - elapsed [0.1, 0.5]:  0.6 → 0.4   緩やかに保持
+    // - elapsed (0.5, 1.0]:  0.4 → 0.0   フェードアウト
+    // float elapsed = 1.0 - age;
+    // float fade;
+    // if (elapsed < 0.1) {
+    //   fade = mix(1.0, 0.5, smoothstep(0.0, 0.1, elapsed));
+    // } else if (elapsed <= 0.5) {
+    //   fade = mix(0.5, 0.4, smoothstep(0.1, 0.5, elapsed));
+    // } else {
+    //   fade = mix(0.4, 0.0, smoothstep(0.5, 1.0, elapsed));
+    // }
 
     // Voxel position in [-0.5, 0.5]^3
     vec3 p = vec3(i, j, k) / (N_F - 1.0) - 0.5;
@@ -167,6 +212,10 @@ const FRAGMENT_SHADER = `
     vec2 c = gl_PointCoord - 0.5;
     float r = length(c) * 2.0;
     float disc = smoothstep(1.0, 0.0, r);
+    // ガンマ補正 (一時無効化): pow(x, 1/2.2) で暗部を持ち上げる.
+    // ※ three.js outputColorSpace=SRGBColorSpace で後段に自動 sRGB 変換あり.
+    // float corrected = pow(vIntensity, 1.0 / 2.2);
+    // gl_FragColor = vec4(uColor * corrected, disc * corrected * uOpacity);
     gl_FragColor = vec4(uColor * vIntensity, disc * vIntensity * uOpacity);
   }
 `
@@ -181,14 +230,14 @@ export const RecurrenceCloud = () => {
   const audioRingR = useMemo(() => new Float32Array(RING_SIZE), [])
   const ringRef = useRef({ tail: 0 })
 
-  const statesArrayL = useMemo(() => new Float32Array(STATE_COUNT * 4), [])
-  const statesArrayR = useMemo(() => new Float32Array(STATE_COUNT * 4), [])
+  const statesArrayL = useMemo(() => new Float32Array(TEX_PIXELS * 4), [])
+  const statesArrayR = useMemo(() => new Float32Array(TEX_PIXELS * 4), [])
 
   const statesTexL = useMemo(() => {
     const tex = new THREE.DataTexture(
       statesArrayL,
-      STATE_COUNT,
-      1,
+      TEX_W,
+      TEX_H,
       THREE.RGBAFormat,
       THREE.FloatType
     )
@@ -203,8 +252,8 @@ export const RecurrenceCloud = () => {
   const statesTexR = useMemo(() => {
     const tex = new THREE.DataTexture(
       statesArrayR,
-      STATE_COUNT,
-      1,
+      TEX_W,
+      TEX_H,
       THREE.RGBAFormat,
       THREE.FloatType
     )
@@ -302,7 +351,9 @@ export const RecurrenceCloud = () => {
 
     const newestBase = tail - 1 - 2 * TAU_DELAY
     for (let k = 0; k < STATE_COUNT; k++) {
-      const stepsBack = (STATE_COUNT - 1 - k) * SAMPLE_STRIDE
+      // 1 sample 刻みで連続スナップショットを作る (異方性 stride 化に伴う変更).
+      // voxel→state-index 変換側で stride を吸収するため、ここは固定 stride 1.
+      const stepsBack = STATE_COUNT - 1 - k
       let baseIdx = newestBase - stepsBack
       baseIdx = ((baseIdx % RING_SIZE) + RING_SIZE) % RING_SIZE
       let i1 = baseIdx + TAU_DELAY
@@ -357,6 +408,7 @@ export const RecurrenceCloud = () => {
           uWB: { value: W_B },
           uWC: { value: W_C },
           uCombineP: { value: COMBINE_P },
+          uStridePerp: { value: SAMPLE_STRIDE_PERP_INITIAL },
           uColor: { value: colorVec },
           uOpacity: { value: 1.0 },
         }}
