@@ -13,7 +13,10 @@ const VOXEL_N = 96
 const VOXEL_COUNT = VOXEL_N * VOXEL_N * VOXEL_N
 const SAMPLE_STRIDE = 24
 const TAU_DELAY = 8
-const SHIFT_TAU = 2              // 巡回シフト(対称性破り)
+// Phyllotactic shifts: 3 つの異なる Fibonacci 比のシフトで C₃ 巡回対称も崩す
+const SHIFT_IJ = 1
+const SHIFT_JK = 2
+const SHIFT_KI = 3
 const RECURRENCE_EPSILON = 0.5   // cosine 距離用スケール
 const FADE_POWER = 0.10
 const POINT_SIZE_BASE = 4.0
@@ -30,7 +33,9 @@ const VERTEX_SHADER = `
   uniform float uCutoff;
   uniform float uScale;
   uniform float uAspect;
-  uniform float uShiftTau;
+  uniform float uShiftIJ;
+  uniform float uShiftJK;
+  uniform float uShiftKI;
 
   varying float vIntensity;
 
@@ -61,11 +66,11 @@ const VERTEX_SHADER = `
     float j = position.y;
     float k = position.z;
 
-    // Cyclic-shift indices: compare each anchor against the NEXT anchor
-    // shifted forward by SHIFT_TAU. Asymmetric chain: i -> (j+τs), j -> (k+τs), k -> (i+τs).
-    float jShift = clamp(j + uShiftTau, 0.0, STATE_F - 1.0);
-    float kShift = clamp(k + uShiftTau, 0.0, STATE_F - 1.0);
-    float iShift = clamp(i + uShiftTau, 0.0, STATE_F - 1.0);
+    // Phyllotactic shifts: 3 つの異なる shift 量を割り当て、C₃ 巡回対称も崩す。
+    // d_ij が SHIFT_IJ、d_jk が SHIFT_JK、d_ki が SHIFT_KI に紐付く → 巡回で値が変わる。
+    float jShift = clamp(j + uShiftIJ, 0.0, STATE_F - 1.0);   // d_ij 用
+    float kShift = clamp(k + uShiftJK, 0.0, STATE_F - 1.0);   // d_jk 用
+    float iShift = clamp(i + uShiftKI, 0.0, STATE_F - 1.0);   // d_ki 用
 
     vec3 lI = readL(i);
     vec3 rI = readR(i);
@@ -313,7 +318,9 @@ export const RecurrenceCloud = () => {
           uCutoff: { value: INTENSITY_CUTOFF },
           uScale: { value: SCREEN_SCALE },
           uAspect: { value: 1 },
-          uShiftTau: { value: SHIFT_TAU },
+          uShiftIJ: { value: SHIFT_IJ },
+          uShiftJK: { value: SHIFT_JK },
+          uShiftKI: { value: SHIFT_KI },
           uColor: { value: colorVec },
           uOpacity: { value: 1.0 },
         }}
