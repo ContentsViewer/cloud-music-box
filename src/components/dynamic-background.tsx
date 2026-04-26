@@ -18,7 +18,7 @@ import { RecurrenceCloud } from "./recurrence-cloud"
 // import { RecurrencePlot } from "./recurrence-plot"          // 2D recurrence plot (mono)
 // import { CymaticsPlate } from "./cymatics-plate"            // 2D wave-equation FDTD plate
 // import { FrenetRibbon } from "./frenet-ribbon"               // Frenet ribbon (sample-rate trajectory)
-// import { DelayEmbedding } from "./delay-embedding"            // Adaptive Takens delay embedding
+import { DelayEmbedding } from "./delay-embedding"            // Adaptive Takens delay embedding
 // import { SpectralLife } from "./spectral-life"                // Spectral Particle Life
 // import { TauLife } from "./tau-life"                           // Phase-offset Particle Life (tau-based)
 // import { PhaseSwarm } from "./phase-swarm"                     // Phase-offset spring targets

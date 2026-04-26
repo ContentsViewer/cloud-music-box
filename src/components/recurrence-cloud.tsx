@@ -11,13 +11,13 @@ import { Hct } from "@material/material-color-utilities"
 const STATE_COUNT = 96
 const VOXEL_N = 96
 const VOXEL_COUNT = VOXEL_N * VOXEL_N * VOXEL_N
-const SAMPLE_STRIDE = 86
+const SAMPLE_STRIDE = 24
 const TAU_DELAY = 8
 const SHIFT_TAU = 2              // 巡回シフト(対称性破り)
-const RECURRENCE_EPSILON = 0.4   // cosine 距離用スケール
+const RECURRENCE_EPSILON = 0.5   // cosine 距離用スケール
 const FADE_POWER = 0.10
-const POINT_SIZE_BASE = 2.0
-const INTENSITY_CUTOFF = 0.3     // cosine intensity 範囲 [0, 1] 用
+const POINT_SIZE_BASE = 4.0
+const INTENSITY_CUTOFF = 0.05     // cosine intensity 範囲 [0, 1] 用
 const SCREEN_SCALE = 1.2
 const RING_SIZE = STATE_COUNT * SAMPLE_STRIDE + 4 * TAU_DELAY + 4096
 
