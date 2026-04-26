@@ -73,9 +73,9 @@ const VERTEX_SHADER = `
   // - K 座標: L チャンネル単独   → LR swap で完全に R 信号に化ける
   // 3 座標が L↔R swap に対して異なる効き方をするので、ボクセル空間内で
   // 対称写像が存在せず、cloud 全体としても LR で異なる絵になる.
-  vec3 stateI(float idx) { return readL(idx) + readR(idx); }   // Mid
+  vec3 stateI(float idx) { return readL(idx); }   // Mid
   vec3 stateJ(float idx) { return readL(idx) - readR(idx); }   // Side
-  vec3 stateK(float idx) { return readL(idx); }                // L only
+  vec3 stateK(float idx) { return readR(idx); }                // L only
 
   // R(i,j,k): 3 ペア比較を Lp ノルム (黄金比重み) で結合して intensity を返す.
   float recurrenceIntensity3(
