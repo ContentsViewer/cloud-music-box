@@ -12,8 +12,9 @@ import {
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
 import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
-import { CymaticsPlate } from "./cymatics-plate"
+import { RecurrencePlot } from "./recurrence-plot"
 // Other visualizers (uncomment to switch):
+// import { CymaticsPlate } from "./cymatics-plate"            // 2D wave-equation FDTD plate
 // import { FrenetRibbon } from "./frenet-ribbon"               // Frenet ribbon (sample-rate trajectory)
 // import { DelayEmbedding } from "./delay-embedding"            // Adaptive Takens delay embedding
 // import { SpectralLife } from "./spectral-life"                // Spectral Particle Life
@@ -185,7 +186,8 @@ export const DynamicBackground = () => {
             })
           }
         >
-          <CymaticsPlate />
+          <RecurrencePlot />
+          {/* <CymaticsPlate /> */}
           {/* <FrenetRibbon /> */}
           {/* <DelayEmbedding /> */}
           {/* <SpectralLife /> */}

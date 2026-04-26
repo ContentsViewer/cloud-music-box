@@ -32,6 +32,16 @@ const TAU_INIT = 100
 const RIBBON_BASE_WIDTH = 0.012
 const DEGEN_EPS = 1e-8
 
+const RIBBON_POINT_COUNT = 768
+const RIBBON_VERTEX_COUNT = RIBBON_POINT_COUNT * 2
+const RIBBON_STRIDE = 6
+const RIBBON_SPAN_SAMPLES = RIBBON_POINT_COUNT * RIBBON_STRIDE
+const RIBBON_SMOOTH_HALFWIN = 3
+const ALONG_HUE_CYCLES = 0.8
+const SIDE_HUE_AMP = 0.12
+const FLOW_SPEED = 0.18
+const PRISM_SAT_BOOST = 0.2
+
 export const FrenetRibbon = () => {
   const [audioDynamicsState] = useAudioDynamicsStore()
   const [themeStoreState] = useThemeStore()
@@ -52,8 +62,6 @@ export const FrenetRibbon = () => {
   )
 
   const particleCount = 22050
-  const ribbonPointCount = 4096
-  const ribbonVertexCount = ribbonPointCount * 2
 
   useEffect(() => {
     const frame = audioDynamicsState.frame
@@ -77,29 +85,39 @@ export const FrenetRibbon = () => {
 
   // Ribbon vertex buffers (8192 verts = 4096 ribbon points x 2 sides)
   const ribbonPositions = useMemo(
-    () => new Float32Array(ribbonVertexCount * 3),
+    () => new Float32Array(RIBBON_VERTEX_COUNT * 3),
     []
   )
   const ribbonStartTimes = useMemo(
-    () => new Float32Array(ribbonVertexCount),
+    () => new Float32Array(RIBBON_VERTEX_COUNT),
     []
   )
   const ribbonColors = useMemo(
-    () => new Float32Array(ribbonVertexCount * 3),
+    () => new Float32Array(RIBBON_VERTEX_COUNT * 3),
     []
   )
   const ribbonSideUV = useMemo(() => {
-    const arr = new Float32Array(ribbonVertexCount)
-    for (let k = 0; k < ribbonPointCount; ++k) {
+    const arr = new Float32Array(RIBBON_VERTEX_COUNT)
+    for (let k = 0; k < RIBBON_POINT_COUNT; ++k) {
       arr[k * 2 + 0] = -1
       arr[k * 2 + 1] = +1
     }
     return arr
   }, [])
+  const ribbonAlong = useMemo(() => {
+    const arr = new Float32Array(RIBBON_VERTEX_COUNT)
+    const denom = Math.max(1, RIBBON_POINT_COUNT - 1)
+    for (let k = 0; k < RIBBON_POINT_COUNT; ++k) {
+      const t = k / denom
+      arr[k * 2 + 0] = t
+      arr[k * 2 + 1] = t
+    }
+    return arr
+  }, [])
   const ribbonIndices = useMemo(() => {
-    const arr = new Uint16Array((ribbonPointCount - 1) * 6)
+    const arr = new Uint16Array((RIBBON_POINT_COUNT - 1) * 6)
     let p = 0
-    for (let k = 0; k < ribbonPointCount - 1; ++k) {
+    for (let k = 0; k < RIBBON_POINT_COUNT - 1; ++k) {
       const a = 2 * k
       const b = 2 * k + 1
       const c = 2 * k + 2
@@ -115,15 +133,15 @@ export const FrenetRibbon = () => {
   }, [])
 
   // RMF scratch buffers
-  const ribbonR = useMemo(() => new Float32Array(ribbonPointCount * 3), [])
-  const ribbonT = useMemo(() => new Float32Array(ribbonPointCount * 3), [])
-  const ribbonU = useMemo(() => new Float32Array(ribbonPointCount * 3), [])
+  const ribbonR = useMemo(() => new Float32Array(RIBBON_POINT_COUNT * 3), [])
+  const ribbonT = useMemo(() => new Float32Array(RIBBON_POINT_COUNT * 3), [])
+  const ribbonU = useMemo(() => new Float32Array(RIBBON_POINT_COUNT * 3), [])
   const ribbonStartTimePerPoint = useMemo(
-    () => new Float32Array(ribbonPointCount),
+    () => new Float32Array(RIBBON_POINT_COUNT),
     []
   )
   const ribbonColorPerPoint = useMemo(
-    () => new Float32Array(ribbonPointCount * 3),
+    () => new Float32Array(RIBBON_POINT_COUNT * 3),
     []
   )
 
@@ -196,20 +214,41 @@ export const FrenetRibbon = () => {
       context.particleTail = (t + 1) % particleCount
     }
 
-    // 1) Pull ribbon points in chronological order (oldest -> newest)
-    for (let k = 0; k < ribbonPointCount; ++k) {
-      const i = ribbonPointCount - 1 - k
-      const idx =
-        (context.particleTail - i + particleCount) % particleCount
-      const idx3 = idx * 3
+    // 1) Pull ribbon points in chronological order (oldest -> newest), with
+    //    stride decimation + ±RIBBON_SMOOTH_HALFWIN box filter. The particle
+    //    ring buffer keeps raw sample-rate data; the ribbon sees a smoothed,
+    //    sparser view of it.
+    const winSize = RIBBON_SMOOTH_HALFWIN * 2 + 1
+    const invWin = 1 / winSize
+    for (let k = 0; k < RIBBON_POINT_COUNT; ++k) {
+      const i = RIBBON_POINT_COUNT - 1 - k
+      const center =
+        (context.particleTail - i * RIBBON_STRIDE + particleCount * 100) %
+        particleCount
+      let sx = 0,
+        sy = 0,
+        sz = 0,
+        scR = 0,
+        scG = 0,
+        scB = 0
+      for (let d = -RIBBON_SMOOTH_HALFWIN; d <= RIBBON_SMOOTH_HALFWIN; ++d) {
+        const j = (center + d + particleCount) % particleCount
+        const j3 = j * 3
+        sx += positions[j3 + 0]
+        sy += positions[j3 + 1]
+        sz += positions[j3 + 2]
+        scR += particleColorsArr[j3 + 0]
+        scG += particleColorsArr[j3 + 1]
+        scB += particleColorsArr[j3 + 2]
+      }
       const k3 = k * 3
-      ribbonR[k3 + 0] = positions[idx3 + 0]
-      ribbonR[k3 + 1] = positions[idx3 + 1]
-      ribbonR[k3 + 2] = positions[idx3 + 2]
-      ribbonStartTimePerPoint[k] = startTimeArray[idx]
-      ribbonColorPerPoint[k3 + 0] = particleColorsArr[idx3 + 0]
-      ribbonColorPerPoint[k3 + 1] = particleColorsArr[idx3 + 1]
-      ribbonColorPerPoint[k3 + 2] = particleColorsArr[idx3 + 2]
+      ribbonR[k3 + 0] = sx * invWin
+      ribbonR[k3 + 1] = sy * invWin
+      ribbonR[k3 + 2] = sz * invWin
+      ribbonStartTimePerPoint[k] = startTimeArray[center]
+      ribbonColorPerPoint[k3 + 0] = scR * invWin
+      ribbonColorPerPoint[k3 + 1] = scG * invWin
+      ribbonColorPerPoint[k3 + 2] = scB * invWin
     }
 
     // 2) Initial frame T_0, U_0
@@ -252,7 +291,7 @@ export const FrenetRibbon = () => {
     }
 
     // 3) RMF Double Reflection (Wang et al. 2008)
-    for (let k = 0; k < ribbonPointCount - 1; ++k) {
+    for (let k = 0; k < RIBBON_POINT_COUNT - 1; ++k) {
       const k3 = k * 3
       const k3n = (k + 1) * 3
 
@@ -263,7 +302,7 @@ export const FrenetRibbon = () => {
 
       // T_{k+1} = normalized direction toward next-next point (or v1 at end)
       let tnxRaw, tnyRaw, tnzRaw
-      if (k + 2 < ribbonPointCount) {
+      if (k + 2 < RIBBON_POINT_COUNT) {
         const k3nn = (k + 2) * 3
         tnxRaw = ribbonR[k3nn + 0] - ribbonR[k3n + 0]
         tnyRaw = ribbonR[k3nn + 1] - ribbonR[k3n + 1]
@@ -339,7 +378,7 @@ export const FrenetRibbon = () => {
 
     // 4) Build ribbon vertex attributes (left/right per point)
     const halfWidth = RIBBON_BASE_WIDTH * (0.3 + 1.4 * context.rmsSmooth) * 0.5
-    for (let k = 0; k < ribbonPointCount; ++k) {
+    for (let k = 0; k < RIBBON_POINT_COUNT; ++k) {
       const k3 = k * 3
       const rx = ribbonR[k3 + 0]
       const ry = ribbonR[k3 + 1]
@@ -394,30 +433,42 @@ export const FrenetRibbon = () => {
       <>
         <mesh ref={meshRef}>
           <bufferGeometry>
-            <bufferAttribute attach="attributes-position" count={ribbonVertexCount} itemSize={3} array={ribbonPositions} />
-            <bufferAttribute attach="attributes-startTime" count={ribbonVertexCount} itemSize={1} array={ribbonStartTimes} />
-            <bufferAttribute attach="attributes-ribbonColor" count={ribbonVertexCount} itemSize={3} array={ribbonColors} />
-            <bufferAttribute attach="attributes-sideUV" count={ribbonVertexCount} itemSize={1} array={ribbonSideUV} />
+            <bufferAttribute attach="attributes-position" count={RIBBON_VERTEX_COUNT} itemSize={3} array={ribbonPositions} />
+            <bufferAttribute attach="attributes-startTime" count={RIBBON_VERTEX_COUNT} itemSize={1} array={ribbonStartTimes} />
+            <bufferAttribute attach="attributes-ribbonColor" count={RIBBON_VERTEX_COUNT} itemSize={3} array={ribbonColors} />
+            <bufferAttribute attach="attributes-sideUV" count={RIBBON_VERTEX_COUNT} itemSize={1} array={ribbonSideUV} />
+            <bufferAttribute attach="attributes-ribbonAlong" count={RIBBON_VERTEX_COUNT} itemSize={1} array={ribbonAlong} />
             <bufferAttribute attach="index" count={ribbonIndices.length} itemSize={1} array={ribbonIndices} />
           </bufferGeometry>
           <shaderMaterial
             ref={ribbonShaderMaterialRef}
             attach="material"
             args={[{
-              uniforms: { time: { value: 0 }, aspect: { value: 1 } },
+              uniforms: {
+                time: { value: 0 },
+                aspect: { value: 1 },
+                uLifetime: { value: RIBBON_SPAN_SAMPLES / 22050.0 },
+                uHueCycles: { value: ALONG_HUE_CYCLES },
+                uSideAmp: { value: SIDE_HUE_AMP },
+                uFlowSpeed: { value: FLOW_SPEED },
+                uSatBoost: { value: PRISM_SAT_BOOST },
+              },
               vertexShader: `
                 attribute float startTime;
                 attribute vec3 ribbonColor;
                 attribute float sideUV;
+                attribute float ribbonAlong;
                 uniform float time;
                 uniform float aspect;
+                uniform float uLifetime;
                 varying vec3 vColor;
                 varying float vAlpha;
                 varying float vSide;
+                varying float vAlong;
                 void main() {
                   vec3 p = position;
                   float r = length(p.xy);
-                  float elapsed = clamp((time - startTime) / (4096.0 / 22050.0), 0.0, 1.0);
+                  float elapsed = clamp((time - startTime) / uLifetime, 0.0, 1.0);
                   float alpha = 1.0;
                   if (elapsed < 0.1) { alpha = mix(1.0, 0.6, smoothstep(0.0, 0.1, elapsed)); }
                   else if (elapsed <= 0.5) { alpha = mix(0.6, 0.4, smoothstep(0.1, 0.5, elapsed)); }
@@ -436,15 +487,44 @@ export const FrenetRibbon = () => {
                   gl_Position = vec4(p, 1.0);
                   vColor = ribbonColor;
                   vSide = sideUV;
+                  vAlong = ribbonAlong;
                 }
               `,
               fragmentShader: `
+                uniform float time;
+                uniform float uHueCycles;
+                uniform float uSideAmp;
+                uniform float uFlowSpeed;
+                uniform float uSatBoost;
                 varying vec3 vColor;
                 varying float vAlpha;
                 varying float vSide;
+                varying float vAlong;
+
+                vec3 rgb2hsv(vec3 c) {
+                  vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+                  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+                  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+                  float d = q.x - min(q.w, q.y);
+                  float e = 1.0e-10;
+                  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+                }
+                vec3 hsv2rgb(vec3 c) {
+                  vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+                  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+                  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+                }
+
                 void main() {
                   float glow = smoothstep(1.0, 0.0, abs(vSide));
-                  gl_FragColor = vec4(vColor, vAlpha * glow * 0.7);
+                  vec3 hsv = rgb2hsv(vColor);
+                  float hueShift = vAlong * uHueCycles
+                                 + vSide * uSideAmp
+                                 + time * uFlowSpeed;
+                  hsv.x = fract(hsv.x + hueShift);
+                  hsv.y = clamp(hsv.y + uSatBoost, 0.0, 1.0);
+                  vec3 prism = hsv2rgb(hsv);
+                  gl_FragColor = vec4(prism, vAlpha * glow * 0.7);
                 }
               `,
               transparent: true,
