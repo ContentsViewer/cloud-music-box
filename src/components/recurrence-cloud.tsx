@@ -31,6 +31,10 @@ const SHIFT_JK = 40
 const SHIFT_KI = 64
 const FADE_POWER = 1.0
 const RECURRENCE_EPSILON = 0.5   // cosine 距離用スケール
+// Pitch coloring: pitch を半音 hue にして HSV→RGB 変換する.
+// Sat/Val は uniform でランタイム可変.
+const PITCH_SAT = 0.7
+const PITCH_VAL = 1.0
 const POINT_SIZE_BASE = 4.0
 const INTENSITY_CUTOFF = 0.04     // intensity 範囲 [0, 1] 用 (sharper 化に伴い緩和)
 const SCREEN_SCALE = 1.2
@@ -58,8 +62,12 @@ const VERTEX_SHADER = `
   uniform float uWC;
   uniform float uCombineP;
   uniform float uStridePerp;   // 直交方向 stride (sample/voxel). 主対角線方向は STRIDE_PARA 固定.
+  uniform vec3 uColor;          // pitch 未検出時のフォールバック色 (テーマ色)
+  uniform float uPitchSat;
+  uniform float uPitchVal;
 
   varying float vIntensity;
+  varying vec3 vColor;
 
   const float SQRT_2 = 1.41421356;
   const float SQRT_6 = 2.44948975;
@@ -80,6 +88,26 @@ const VERTEX_SHADER = `
   }
   vec3 readR(float idx) {
     return texture2D(uStatesR, idxToUV(idx)).rgb;
+  }
+  // state texture L の alpha チャンネルに pitch (Hz) を仕込んである.
+  float readPitch(float idx) {
+    return texture2D(uStatesL, idxToUV(idx)).a;
+  }
+
+  // 標準的な HSV → RGB 変換.
+  vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+  }
+
+  // pitch (Hz) → 半音 hue → HSV → RGB.
+  // pitch <= 0 (未検出) は uColor フォールバック.
+  vec3 pitchToColor(float pitch) {
+    if (pitch <= 0.0) return uColor;
+    float note = 12.0 * log2(pitch / 440.0);
+    float hue = mod(note, 12.0) / 12.0;
+    return hsv2rgb(vec3(hue, uPitchSat, uPitchVal));
   }
 
   // Cosine distance for 3D state vectors. [0, 2], magnitude-invariant.
@@ -140,6 +168,11 @@ const VERTEX_SHADER = `
     Sj = clamp(Sj, 0.0, STATE_F - 1.0);
     Sk = clamp(Sk, 0.0, STATE_F - 1.0);
 
+    // voxel center (主対角線中央) 時刻の state-index. 視線軸=(1,1,1) と一致するため
+    // 画面奥行きに沿って色がグラデーションする.
+    float centerIdx = clamp(STRIDE_PARA * center, 0.0, STATE_F - 1.0);
+    vColor = pitchToColor(readPitch(centerIdx));
+
     // 各座標で異なる L/R 役割を割り当てる. これが LR 非対称性の主源.
     vec3 sI  = stateI(Si);
     vec3 sJ  = stateJ(Sj);
@@ -172,9 +205,9 @@ const VERTEX_SHADER = `
     // float elapsed = 1.0 - age;
     // float fade;
     // if (elapsed < 0.1) {
-    //   fade = mix(1.0, 0.5, smoothstep(0.0, 0.1, elapsed));
+    //   fade = mix(1.0, 0.8, smoothstep(0.0, 0.1, elapsed));
     // } else if (elapsed <= 0.5) {
-    //   fade = mix(0.5, 0.4, smoothstep(0.1, 0.5, elapsed));
+    //   fade = mix(0.8, 0.4, smoothstep(0.1, 0.5, elapsed));
     // } else {
     //   fade = mix(0.4, 0.0, smoothstep(0.5, 1.0, elapsed));
     // }
@@ -203,9 +236,9 @@ const VERTEX_SHADER = `
 
 const FRAGMENT_SHADER = `
   precision highp float;
-  uniform vec3 uColor;
   uniform float uOpacity;
   varying float vIntensity;
+  varying vec3 vColor;   // vertex で pitch から生成、テーマ色フォールバック含む
 
   void main() {
     if (vIntensity <= 0.0) discard;
@@ -215,8 +248,8 @@ const FRAGMENT_SHADER = `
     // ガンマ補正 (一時無効化): pow(x, 1/2.2) で暗部を持ち上げる.
     // ※ three.js outputColorSpace=SRGBColorSpace で後段に自動 sRGB 変換あり.
     // float corrected = pow(vIntensity, 1.0 / 2.2);
-    // gl_FragColor = vec4(uColor * corrected, disc * corrected * uOpacity);
-    gl_FragColor = vec4(uColor * vIntensity, disc * vIntensity * uOpacity);
+    // gl_FragColor = vec4(vColor * corrected, disc * corrected * uOpacity);
+    gl_FragColor = vec4(vColor * vIntensity, disc * vIntensity * uOpacity);
   }
 `
 
@@ -228,6 +261,8 @@ export const RecurrenceCloud = () => {
 
   const audioRingL = useMemo(() => new Float32Array(RING_SIZE), [])
   const audioRingR = useMemo(() => new Float32Array(RING_SIZE), [])
+  // pitch を sample 単位で ring に積む (frame 内は同値). state alpha に転載してシェーダーで色変換.
+  const audioRingPitch = useMemo(() => new Float32Array(RING_SIZE), [])
   const ringRef = useRef({ tail: 0 })
 
   const statesArrayL = useMemo(() => new Float32Array(TEX_PIXELS * 4), [])
@@ -340,10 +375,15 @@ export const RecurrenceCloud = () => {
     )
     clock.time += deltaTime
 
+    // frame 単位の pitch は per-sample ではないので、L/R の有効な方を採用 (lissajous 流儀).
+    // 未検出 (-1) は 0 に正規化してシェーダー側でフォールバック分岐に乗せる.
+    const framePitch = Math.max(frame.pitch0, frame.pitch1, 0)
+
     let tail = ringRef.current.tail
     for (let i = 0; i < consume; i++) {
       audioRingL[tail] = samples0[startOffset + i]
       audioRingR[tail] = samples1[startOffset + i]
+      audioRingPitch[tail] = framePitch
       tail = tail + 1
       if (tail >= RING_SIZE) tail -= RING_SIZE
     }
@@ -364,7 +404,8 @@ export const RecurrenceCloud = () => {
       statesArrayL[off + 0] = audioRingL[baseIdx]
       statesArrayL[off + 1] = audioRingL[i1]
       statesArrayL[off + 2] = audioRingL[i2]
-      statesArrayL[off + 3] = 0
+      // alpha に baseIdx 時刻の pitch を載せる (シェーダーで色変換のため)
+      statesArrayL[off + 3] = audioRingPitch[baseIdx]
       statesArrayR[off + 0] = audioRingR[baseIdx]
       statesArrayR[off + 1] = audioRingR[i1]
       statesArrayR[off + 2] = audioRingR[i2]
@@ -410,6 +451,8 @@ export const RecurrenceCloud = () => {
           uCombineP: { value: COMBINE_P },
           uStridePerp: { value: SAMPLE_STRIDE_PERP_INITIAL },
           uColor: { value: colorVec },
+          uPitchSat: { value: PITCH_SAT },
+          uPitchVal: { value: PITCH_VAL },
           uOpacity: { value: 1.0 },
         }}
       />
