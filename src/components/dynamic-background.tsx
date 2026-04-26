@@ -12,8 +12,10 @@ import {
 import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
 import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
-import { RecurrencePlot } from "./recurrence-plot"
+import { RecurrenceCloud } from "./recurrence-cloud"
 // Other visualizers (uncomment to switch):
+// import { RecurrenceTunnel } from "./recurrence-tunnel"      // 3D RP via projection along time axis
+// import { RecurrencePlot } from "./recurrence-plot"          // 2D recurrence plot (mono)
 // import { CymaticsPlate } from "./cymatics-plate"            // 2D wave-equation FDTD plate
 // import { FrenetRibbon } from "./frenet-ribbon"               // Frenet ribbon (sample-rate trajectory)
 // import { DelayEmbedding } from "./delay-embedding"            // Adaptive Takens delay embedding
@@ -186,7 +188,9 @@ export const DynamicBackground = () => {
             })
           }
         >
-          <RecurrencePlot />
+          <RecurrenceCloud />
+          {/* <RecurrenceTunnel /> */}
+          {/* <RecurrencePlot /> */}
           {/* <CymaticsPlate /> */}
           {/* <FrenetRibbon /> */}
           {/* <DelayEmbedding /> */}
