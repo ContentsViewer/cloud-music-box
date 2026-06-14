@@ -13,19 +13,29 @@ import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings
 import { css } from "@emotion/react"
 import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
 import { RecurrenceCloud } from "./recurrence-cloud"
+import { FaradayPlate } from "./faraday-plate" // A: parametric standing-wave (Faraday) relief
+import { RecurrenceNetwork } from "./recurrence-network" // D: recurrence as a force-directed graph
+import { FbVideoFeedback } from "./fb-video-feedback" // A1: video feedback (Crutchfield)
+import { FbLenia } from "./fb-lenia" // A2: Lenia (NCA-family, untrained)
+import { FbReservoir } from "./fb-reservoir" // A3: echo-state reservoir field
+import { FbExcitable } from "./fb-excitable" // A4: excitable media (Barkley spirals)
+import { FbNcaReservoir } from "./fb-nca-reservoir" // untrained random NCA reservoir (critical field) + dense band injection
+import { FbSomEmbedding } from "./fb-som-embedding" // SOM of delay-embedding (attractor manifold, learned 2D unfolding)
+import { FbCochleaFrontend } from "./fb-cochlea-frontend" // cochlear front-end inspection: cochleagram / cross-correlogram / correlogram
+import { FbSparseCortex } from "./fb-sparse-cortex" // cochlea -> topographic sparse-coding interpretation -> readout
 // Other visualizers (uncomment to switch):
 // import { RecurrenceTunnel } from "./recurrence-tunnel"      // 3D RP via projection along time axis
 // import { RecurrencePlot } from "./recurrence-plot"          // 2D recurrence plot (mono)
 // import { CymaticsPlate } from "./cymatics-plate"            // 2D wave-equation FDTD plate
 // import { FrenetRibbon } from "./frenet-ribbon"               // Frenet ribbon (sample-rate trajectory)
-import { DelayEmbedding } from "./delay-embedding"            // Adaptive Takens delay embedding
+import { DelayEmbedding } from "./delay-embedding" // Adaptive Takens delay embedding
 // import { SpectralLife } from "./spectral-life"                // Spectral Particle Life
 // import { TauLife } from "./tau-life"                           // Phase-offset Particle Life (tau-based)
 // import { PhaseSwarm } from "./phase-swarm"                     // Phase-offset spring targets
 // import { ParticleLife } from "./particle-life"                 // Particle Life (waveform-driven)
 // import { ParticleLifeRMS } from "./particle-life-rms"         // Particle Life (RMS-driven)
 // import { GeometricSwarm } from "./geometric-swarm"            // Boids flocking
-import { LissajousCurve } from "./lissajous-curve"            // Original point cloud
+import { LissajousCurve } from "./lissajous-curve" // Original point cloud
 // import { BandLissajous } from "./band-lissajous"              // Band-separated Lissajous
 // import { ReactionDiffusionSurface } from "./reaction-diffusion-surface" // Phase-offset sweep
 
@@ -47,11 +57,11 @@ export const DynamicBackground = () => {
   useEffect(() => {
     const pitchCurrent = Math.max(
       audioDynamicsState.frame.pitch0,
-      audioDynamicsState.frame.pitch1
+      audioDynamicsState.frame.pitch1,
     )
     const rmsCurrent = Math.max(
       audioDynamicsState.frame.rms0,
-      audioDynamicsState.frame.rms1
+      audioDynamicsState.frame.rms1,
     )
 
     if (pitchCurrent !== -1) {
@@ -94,12 +104,12 @@ export const DynamicBackground = () => {
     // sourceColor.chroma = 16
     return hexFromArgb(
       // MaterialDynamicColors.primary.getArgb(themeStoreState.scheme)
-      sourceColor.toInt()
+      sourceColor.toInt(),
     )
   })()
   const backgroundColor = (() => {
     const color = MaterialDynamicColors.background.getArgb(
-      themeStoreState.scheme
+      themeStoreState.scheme,
     )
     return hexFromArgb(color)
   })()
@@ -188,7 +198,19 @@ export const DynamicBackground = () => {
             })
           }
         >
-          <RecurrenceCloud />
+          {/* 蝸牛 → スパース皮質マップ → 読み出し: r=リセット */}
+          <FbSparseCortex />
+          {/* <FbCochleaFrontend /> */}
+          {/* <FbSomEmbedding /> */}
+          {/* <FbNcaReservoir /> */}
+          {/* --- A1〜A4 デモ --- */}
+          {/* <FbVideoFeedback /> */}
+          {/* <FbLenia /> */}
+          {/* <FbReservoir /> */}
+          {/* <FbExcitable /> */}
+          {/* <FaradayPlate /> */}
+          {/* <RecurrenceNetwork /> */}
+          {/* <RecurrenceCloud /> */}
           {/* <RecurrenceTunnel /> */}
           {/* <RecurrencePlot /> */}
           {/* <CymaticsPlate /> */}
