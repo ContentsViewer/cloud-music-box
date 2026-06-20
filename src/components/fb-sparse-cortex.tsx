@@ -37,10 +37,24 @@ const DIM = 3 * M + P // 32+32+32+48 = 144
 const G = 64 // 格子 G×G
 const N = G * G // 2304 セル (≫ DIM = 過完備)
 const K_ACTIVE = Math.round(N * 0.02) // スパース: 上位 ~2% 発火
-const ETA = 0.02 // Oja 学習率(STRF)
-const ETA_NB = 0.008 // 近傍協調
-const NB_RAD = 2 // 近傍半径
-const GAMMA_IP = 0.02 // IP(恒常性)
+// ============================================================
+// 挙動プリセット(セット単位で切替: 使うセットの5値を下の定数へ反映)
+//
+//   [A] 落ち着いた挙動(初期セット)
+//       ETA=0.02, ETA_NB=0.008, NB_RAD=2, GAMMA_IP=0.02, HEAT_DECAY=0.85
+//       学習がゆっくりで安定。地図がじっくり組織化し、スイープは遅く滑らか。
+//       全域被覆に時間がかかる(~1分)が、チラつきが少なく落ち着いた絵。
+//
+//   [B] リアクティブ寄り(現行)
+//       ETA=0.06, ETA_NB=0.03, NB_RAD=3, GAMMA_IP=0.05, HEAT_DECAY=0.65
+//       学習が速くスイープ前線が速い + 発火のキレが出て信号追従が良い。
+//       立ち上がり・被覆が速い代わり、やや不安定/チラつきが出やすい。
+// ============================================================
+const ETA = 0.06 // Oja 学習率(STRF)
+const ETA_NB = 0.03 // 近傍協調(スイープ前線)
+const NB_RAD = 3 // 近傍半径
+const GAMMA_IP = 0.05 // IP(恒常性)
+const HEAT_DECAY = 0.65 // 発火残光(小=キレ/大=尾を引く)
 const USE_ALPHA = 0.02 // 使用率 EMA
 const P_TARGET = K_ACTIVE / N // 目標発火率
 
@@ -382,7 +396,7 @@ export const FbSparseCortex = () => {
     for (let i = 0; i < N; i++) {
       texData[i * 4 + 0] = Math.min(1, texData[i * 4 + 0] * invUmax)
       texData[i * 4 + 1] = heat[i]
-      heat[i] *= 0.85 // 残光
+      heat[i] *= HEAT_DECAY // 発火残光(プリセット参照)
     }
     mapTex.needsUpdate = true
   })
