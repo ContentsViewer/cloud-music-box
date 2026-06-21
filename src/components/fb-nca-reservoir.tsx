@@ -354,7 +354,7 @@ export const FbNcaReservoir = () => {
     tmp = sim.A1; sim.A1 = sim.B1; sim.B1 = tmp
   }
 
-  useFrame(() => {
+  useFrame((_state, deltaTime) => {
     const prevTarget = gl.getRenderTarget()
     if (!initRef.current) {
       seedField()
@@ -377,9 +377,9 @@ export const FbNcaReservoir = () => {
         Math.floor((clock.time - frame.timeSeconds) * sampleRate)
       )
       const remaining = len - startOffset
-      const consume = Math.max(0, Math.min(Math.floor((1 / 60) * sampleRate), remaining))
-      // フレーム時間を進める (playback 同期)
-      clock.time += 1 / 60
+      const consume = Math.max(0, Math.min(Math.floor(deltaTime * sampleRate), remaining))
+      // フレーム時間を進める (playback 同期, deltaTime でフレームレート非依存)
+      clock.time += deltaTime
 
       const K = Math.min(SUBSTEPS, consume)
       // 生サンプルを未加工で時間的に流し込む (フレーム内を等間隔サンプリング)

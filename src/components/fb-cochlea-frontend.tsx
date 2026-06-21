@@ -181,7 +181,7 @@ export const FbCochleaFrontend = () => {
     }
   }, [colors])
 
-  useFrame(() => {
+  useFrame((_state, deltaTime) => {
     const frame = clock.frame
     if (!frame || frame.samples0.length === 0) return
     const s0 = frame.samples0
@@ -193,8 +193,8 @@ export const FbCochleaFrontend = () => {
       Math.floor((clock.time - frame.timeSeconds) * sampleRate)
     )
     const remaining = len - startOffset
-    const consume = Math.max(0, Math.min(Math.floor((1 / 60) * sampleRate), remaining))
-    clock.time += 1 / 60
+    const consume = Math.max(0, Math.min(Math.floor(deltaTime * sampleRate), remaining))
+    clock.time += deltaTime
     if (consume === 0) return
 
     const { b0, b2, a1, a2 } = coeffs
