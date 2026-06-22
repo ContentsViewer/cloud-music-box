@@ -54,8 +54,8 @@ const K_ACTIVE = Math.round(N * 0.02) // スパース: 上位 ~2% 発火
 const ETA = 0.06 // Oja 学習率(STRF)
 const ETA_NB = 0.03 // 近傍協調(スイープ前線)
 const NB_RAD = 3 // 近傍半径
-const GAMMA_IP = 0.05 // IP(恒常性)
-const HEAT_DECAY = 0.65 // 発火残光(小=キレ/大=尾を引く)
+const GAMMA_IP = 0.000001 // IP(恒常性)
+const HEAT_DECAY = 0.95 // 発火残光(小=キレ/大=尾を引く)
 const USE_ALPHA = 0.02 // 使用率 EMA
 const P_TARGET = K_ACTIVE / N // 目標発火率
 
@@ -75,10 +75,23 @@ const NEB_BOX_HALF = [1.0, 1.0, 0.6] // 体積ボックス半径(z=厚み)
 const NEB_EYE = [0.0, 0.0, 2.2] // 仮想カメラ位置
 const NEB_TILT_X = 0.25 // 静的傾斜(rad, 奥行き/パララックス)
 const NEB_TILT_Y = 0.3
+// エッジ(W全144次元の U-matrix=学習マップの境界)
+const NEB_EDGE_GAIN = 2.5 // エッジ発光(境界の明るさ)
+const NEB_EDGE_THR = 0.45 // エッジの細さ(smoothstep下端)
+const NEB_EDGE_DENS = 0.6 // エッジの密度増(輪郭が締まる)
 
 // 帯域 m の中心周波数(入力層と同式)
 function bandFreq(m: number): number {
   return F_LO * Math.pow(F_HI / F_LO, m / (M - 1))
+}
+// 2セル間の重みベクトル距離(全 DIM=144 次元)。U-matrix 用
+function wdist(W: Float32Array, a: number, c: number): number {
+  let s = 0
+  for (let k = 0; k < DIM; k++) {
+    const d = W[a + k] - W[c + k]
+    s += d * d
+  }
+  return Math.sqrt(s)
 }
 // HSV→RGB(out[off..off+2] に書込)。recurrence-cloud の hsv2rgb を CPU化。
 function hsv2rgb(h: number, s: number, v: number, out: Float32Array, off: number) {
@@ -188,6 +201,10 @@ const NEB_FRAG = `
   uniform float uDensGain;
   uniform float uEmis;
   uniform float uOpacity;
+  uniform float uEdgeNorm;
+  uniform float uEdgeGain;
+  uniform float uEdgeThr;
+  uniform float uEdgeDens;
   uniform mat3 uView;
   uniform vec3 uEye;
   uniform vec3 uBoxHalf;
@@ -220,9 +237,13 @@ const NEB_FRAG = `
       float d = texture(uVolume, uvw).r;
       d = max(0.0, d * uDensGain - uCarve);     // 彫り=フィラメント化(参照の -128*n 相当)
       if (d > 0.0){
-        vec3 emis = texture(uColor, uvw.xy).rgb; // 共感覚色(深さ不変)
-        float a = 1.0 - exp(-d * uSigma * dt);   // Beer-Lambert(吸収=不透明度)
-        col += trans * a * emis * uEmis;         // 発光累積(front-to-back)
+        vec4 cs = texture(uColor, uvw.xy);            // rgb=共感覚色, a=U-matrix(raw)
+        float E = clamp(cs.a / uEdgeNorm, 0.0, 1.0);  // 全144次元の境界強度[0,1]
+        float edge = smoothstep(uEdgeThr, 1.0, E);    // 境界=エッジ線
+        vec3 emis = cs.rgb * (1.0 + uEdgeGain * edge); // エッジを発光
+        float dens = d * (1.0 + uEdgeDens * edge);     // エッジを濃く(輪郭が締まる)
+        float a = 1.0 - exp(-dens * uSigma * dt);     // Beer-Lambert(吸収=不透明度)
+        col += trans * a * emis * uEmis;              // 発光累積(front-to-back)
         trans *= 1.0 - a;
         if (trans < 0.01) break;
       }
@@ -243,6 +264,7 @@ export const FbSparseCortex = () => {
   const starGeoRef = useRef<THREE.BufferGeometry>(null)
   const resetRef = useRef(false)
   const volMaxRef = useRef(1) // 体積密度の自動露出(フレーム最大の平滑追従)
+  const edgeNormRef = useRef(1) // エッジ(U-matrix)の自動正規化(フレーム最大の平滑追従)
 
   // ===== INPUT 層: フィルタバンク係数 =====
   const coeffs = useMemo(() => {
@@ -550,6 +572,7 @@ export const FbSparseCortex = () => {
     // [OUTPUT 層] 共感覚カラー(W[i]→色)+ 発火 → 星の属性
     // ============================================================
     let frameMaxVol = 0
+    let frameMaxU = 0
     for (let i = 0; i < N; i++) {
       const b = i * DIM
       // 色相: cochleagram部のスペクトル重心 → 周波数 → note → hue
@@ -574,7 +597,30 @@ export const FbSparseCortex = () => {
       nebData[o + 0] = cellColor[i * 3 + 0]
       nebData[o + 1] = cellColor[i * 3 + 1]
       nebData[o + 2] = cellColor[i * 3 + 2]
-      nebData[o + 3] = 1.0
+      // エッジ: 全144次元 U-matrix(4近傍との重み距離平均)を alpha に
+      const gx = i % G,
+        gy = (i / G) | 0
+      let uAcc = 0,
+        uCnt = 0
+      if (gx > 0) {
+        uAcc += wdist(W, b, (i - 1) * DIM)
+        uCnt++
+      }
+      if (gx < G - 1) {
+        uAcc += wdist(W, b, (i + 1) * DIM)
+        uCnt++
+      }
+      if (gy > 0) {
+        uAcc += wdist(W, b, (i - G) * DIM)
+        uCnt++
+      }
+      if (gy < G - 1) {
+        uAcc += wdist(W, b, (i + G) * DIM)
+        uCnt++
+      }
+      const U = uCnt > 0 ? uAcc / uCnt : 0
+      nebData[o + 3] = U
+      if (U > frameMaxU) frameMaxU = U
       // 体積密度: z=cochleagram帯域(0..NEB_DZ-1)を深さに(index = z*N + i)。max(0,W)
       for (let z = 0; z < NEB_DZ; z++) {
         const w = W[b + z]
@@ -598,11 +644,13 @@ export const FbSparseCortex = () => {
     volTex.needsUpdate = true
     // 自動露出: 体積密度の最大を平滑追従し、最濃ボクセルが NEB_DENS_TARGET 密度になるよう調整
     volMaxRef.current = Math.max(volMaxRef.current * 0.97, frameMaxVol, 1e-3)
+    edgeNormRef.current = Math.max(edgeNormRef.current * 0.97, frameMaxU, 1e-3)
     if (nebMatRef.current) {
       nebMatRef.current.uniforms.uAspect.value =
         size.width / Math.max(1, size.height)
       nebMatRef.current.uniforms.uDensGain.value =
         NEB_DENS_TARGET / Math.max(volMaxRef.current, 0.02)
+      nebMatRef.current.uniforms.uEdgeNorm.value = Math.max(edgeNormRef.current, 1e-3)
     }
   })
 
@@ -647,6 +695,10 @@ export const FbSparseCortex = () => {
             uDensGain: { value: NEB_DENS_TARGET },
             uEmis: { value: NEB_EMIS },
             uOpacity: { value: 1.0 },
+            uEdgeNorm: { value: 1.0 },
+            uEdgeGain: { value: NEB_EDGE_GAIN },
+            uEdgeThr: { value: NEB_EDGE_THR },
+            uEdgeDens: { value: NEB_EDGE_DENS },
             uView: { value: nebView },
             uEye: { value: nebEye },
             uBoxHalf: { value: nebBoxHalf },
