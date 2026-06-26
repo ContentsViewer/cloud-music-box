@@ -68,6 +68,11 @@ const SPLAT_SIZE_BASE = 46.0 // 基本スプラットサイズ(px, 隣と重な�
 const SPLAT_SIZE_FIRE = 38.0 // 発火時の拡大
 const SPLAT_AMBIENT = 0.06 // 地のガス明るさ(全セル, 絶対値)
 const SPLAT_FIRE_GAIN = 0.5 // 発火量=明るさ(絶対値, 大きいほど白く=星)
+// データ由来シード(初期化): BMU近傍を実特徴で成長 + 成熟度ゲート(未シードは非表示)
+const SEED_RAD = 1 // 1フレームで成長させる近傍リング(大=速く成長)
+const SEED_JITTER = 0.04 // シード時の微小ジッタ(セルを分化させる)
+const SEED_MIX = 0.7 // シード重み = mix·入力 + (1-mix)·BMU(秩序を保つ)
+const MATURE_RATE = 0.05 // 成熟度フェードイン速度(0→1, 大=速く現れる)
 
 // 帯域 m の中心周波数(入力層と同式)
 function bandFreq(m: number): number {
@@ -189,6 +194,8 @@ export const FbSparseCortex = () => {
   const drive = useMemo(() => new Float32Array(N), [])
   const driveSorted = useMemo(() => new Float32Array(N), [])
   const heat = useMemo(() => new Float32Array(N), [])
+  const seeded = useMemo(() => new Uint8Array(N), []) // データ由来シード済みフラグ(0=未初期化)
+  const mature = useMemo(() => new Float32Array(N), []) // 成熟度0→1(表示フェードイン)
 
   // ===== OUTPUT 層: 1セル=1ガウス粒子(スプラット) =====
   const cellColor = useMemo(() => new Float32Array(N * 3), []) // 共感覚RGB(=aColor, 毎frame)
@@ -198,21 +205,16 @@ export const FbSparseCortex = () => {
 
   const initInterp = useMemo(
     () => () => {
-      for (let i = 0; i < N; i++) {
-        let norm = 0
-        for (let k = 0; k < DIM; k++) {
-          const v = Math.random() * 2 - 1
-          W[i * DIM + k] = v
-          norm += v * v
-        }
-        const inv = 1 / (Math.sqrt(norm) + 1e-6)
-        for (let k = 0; k < DIM; k++) W[i * DIM + k] *= inv
-      }
+      // ランダム初期化を廃止: データ由来シードまで全セル未初期化(W=0, seeded=0)
+      // → 低密度の空き領域から始まる死にセルが無く、初期重みが画面に出ない
+      W.fill(0)
+      seeded.fill(0)
+      mature.fill(0)
       thr.fill(0)
       usage.fill(P_TARGET)
       heat.fill(0)
     },
-    [W, thr, usage, heat]
+    [W, thr, usage, heat, seeded, mature]
   )
   const inited = useRef(false)
   if (!inited.current) {
@@ -358,15 +360,65 @@ export const FbSparseCortex = () => {
     // ============================================================
     // [INTERPRETATION 層] スパース符号化(k-WTA + Oja + 近傍 + IP)
     // ============================================================
-    // forward: drive = W·x - thr
+    // forward: drive = W·x - thr(シード済みのみ評価。未シードは除外し BMU を求める)
     let maxU = -1e9
+    let bmu = -1
     for (let i = 0; i < N; i++) {
+      if (!seeded[i]) {
+        drive[i] = -1e9 // 未シードは競争に参加しない
+        continue
+      }
       const b = i * DIM
       let s = 0
       for (let k = 0; k < DIM; k++) s += W[b + k] * featVec[k]
       const u = s - thr[i]
       drive[i] = u
-      if (u > maxU) maxU = u
+      if (u > maxU) {
+        maxU = u
+        bmu = i
+      }
+    }
+    // データ由来シード(成長): 初回は中央パッチ、以後は BMU の未シード近傍を実特徴でシード
+    {
+      const seedFrom = (j: number, useBmu: boolean) => {
+        const bj = j * DIM
+        const bb = bmu * DIM
+        let nrm = 0
+        for (let k = 0; k < DIM; k++) {
+          const base = useBmu
+            ? SEED_MIX * featVec[k] + (1 - SEED_MIX) * W[bb + k]
+            : featVec[k]
+          const v = base + (Math.random() * 2 - 1) * SEED_JITTER
+          W[bj + k] = v
+          nrm += v * v
+        }
+        const inv = 1 / (Math.sqrt(nrm) + 1e-6)
+        for (let k = 0; k < DIM; k++) W[bj + k] *= inv
+        seeded[j] = 1
+        mature[j] = 0 // フェードインで現れる
+        thr[j] = 0
+        usage[j] = P_TARGET
+      }
+      if (bmu < 0) {
+        // 初回: 中央パッチを最初の特徴でシード(ここから成長)
+        const cx = G >> 1,
+          cy = G >> 1
+        for (let ny = cy - SEED_RAD; ny <= cy + SEED_RAD; ny++)
+          for (let nx = cx - SEED_RAD; nx <= cx + SEED_RAD; nx++) {
+            if (nx < 0 || nx >= G || ny < 0 || ny >= G) continue
+            seedFrom(ny * G + nx, false)
+          }
+      } else {
+        // BMU の未シード近傍を実特徴で成長(秩序を保ち外へ拡大)
+        const gx = bmu % G,
+          gy = (bmu / G) | 0
+        for (let ny = gy - SEED_RAD; ny <= gy + SEED_RAD; ny++)
+          for (let nx = gx - SEED_RAD; nx <= gx + SEED_RAD; nx++) {
+            if (nx < 0 || nx >= G || ny < 0 || ny >= G) continue
+            const j = ny * G + nx
+            if (!seeded[j]) seedFrom(j, true)
+          }
+      }
     }
     // k-WTA しきい値(上位 K_ACTIVE)
     driveSorted.set(drive)
@@ -376,7 +428,7 @@ export const FbSparseCortex = () => {
 
     // 学習(発火セルのみ)+ 使用率更新
     for (let i = 0; i < N; i++) {
-      const fired = drive[i] >= kThr ? 1 : 0
+      const fired = seeded[i] && drive[i] >= kThr ? 1 : 0 // 未シードは発火しない
       usage[i] = (1 - USE_ALPHA * dtScale) * usage[i] + USE_ALPHA * dtScale * fired
       // IP: 使用率を目標へ(過使用→thr上げ)
       thr[i] += GAMMA_IP * dtScale * (usage[i] - P_TARGET)
@@ -402,7 +454,7 @@ export const FbSparseCortex = () => {
         for (let ny = y0; ny <= y1g; ny++) {
           for (let nx = x0; nx <= x1g; nx++) {
             const j = ny * G + nx
-            if (j === i) continue
+            if (j === i || !seeded[j]) continue // シード済み近傍のみ協調(成長は明示シードが担当)
             const gd2 = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy)
             const h = ETA_NB * dtScale * Math.exp(-gd2 / (2 * NB_RAD * NB_RAD))
             const bj = j * DIM
@@ -452,7 +504,10 @@ export const FbSparseCortex = () => {
       splatPos[o3 + 2] = 0
       // 明るさ/大きさ: 地のガス + 発火
       const hv = heat[i]
-      splatBright[i] = SPLAT_AMBIENT + SPLAT_FIRE_GAIN * hv
+      // 成熟度ゲート: 未シード(mature=0)は不可視、シード後 0→1 にフェードイン
+      if (seeded[i] && mature[i] < 1)
+        mature[i] = Math.min(1, mature[i] + MATURE_RATE * dtScale)
+      splatBright[i] = (SPLAT_AMBIENT + SPLAT_FIRE_GAIN * hv) * mature[i]
       splatSize[i] = SPLAT_SIZE_BASE + SPLAT_SIZE_FIRE * Math.min(1, hv)
       heat[i] *= Math.pow(HEAT_DECAY, dtScale) // 発火残光=光の尾
     }
