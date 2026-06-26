@@ -59,39 +59,19 @@ const HEAT_DECAY = 0.95 // 発火残光(小=キレ/大=尾を引く)
 const USE_ALPHA = 0.02 // 使用率 EMA
 const P_TARGET = K_ACTIVE / N // 目標発火率
 
-// --- OUTPUT 層パラメータ(共感覚カラーの銀河) ---
-const STAR_POINT_SIZE = 26.0 // 発火時(heat=1)の基準ピクセルサイズ
-const STAR_HALO_GAIN = 0.22 // 芯に対する広いハロー(星雲)の明るさ
-const HEAT_GAMMA = 0.6 // 淡い星の知覚的持ち上げ
-const SAT_FLOOR = 0.35 // ITDコヒーレンス0でも残す最低彩度
-// 星雲(膜): ボリュメトリック・レイマーチ(Beer-Lambert)。密度=W由来3D場(z=cochleagram)
-const NEB_DZ = 32 // 体積の深さ(=cochleagram帯域数)
-const NEB_STEPS = 64 // レイマーチ段数
-const NEB_SIGMA = 28.0 // 吸収係数(濃さ)
-const NEB_CARVE = 0.0 // 彫り(0=削らない。可視化確認後に上げてフィラメント化)
-const NEB_DENS_TARGET = 2.5 // 自動露出: 最濃ボクセルがこの密度になるよう uDensGain を毎フレーム調整
-const NEB_EMIS = 1.6 // 発光ゲイン
-const NEB_BOX_HALF = [1.0, 1.0, 0.6] // 体積ボックス半径(z=厚み)
-const NEB_EYE = [0.0, 0.0, 2.2] // 仮想カメラ位置
-const NEB_TILT_X = 0.25 // 静的傾斜(rad, 奥行き/パララックス)
-const NEB_TILT_Y = 0.3
-// エッジ(W全144次元の U-matrix=学習マップの境界)
-const NEB_EDGE_GAIN = 2.5 // エッジ発光(境界の明るさ)
-const NEB_EDGE_THR = 0.45 // エッジの細さ(smoothstep下端)
-const NEB_EDGE_DENS = 0.6 // エッジの密度増(輪郭が締まる)
+// --- OUTPUT 層パラメータ(共感覚カラーの星雲) ---
+const SAT_FLOOR = 0.65 // ITDコヒーレンス0でも残す最低彩度(鮮やかさ)
+// 星雲: 1セル=1ガウス粒子(スプラット)を加算合成 → 連続ガス(四角が出ない)
+const SPLAT_LAYOUT = 0.92 // 格子レイアウトの clip 範囲(±)
+const SPLAT_POS_OFFSET = 0.18 // 重み由来の位置オフセット(pan=ITD, pitch=重心)で格子を崩す
+const SPLAT_SIZE_BASE = 46.0 // 基本スプラットサイズ(px, 隣と重なる)
+const SPLAT_SIZE_FIRE = 38.0 // 発火時の拡大
+const SPLAT_AMBIENT = 0.1 // 地のガス明るさ(全セル)
+const SPLAT_FIRE_GAIN = 0.9 // 発火の明るさ
 
 // 帯域 m の中心周波数(入力層と同式)
 function bandFreq(m: number): number {
   return F_LO * Math.pow(F_HI / F_LO, m / (M - 1))
-}
-// 2セル間の重みベクトル距離(全 DIM=144 次元)。U-matrix 用
-function wdist(W: Float32Array, a: number, c: number): number {
-  let s = 0
-  for (let k = 0; k < DIM; k++) {
-    const d = W[a + k] - W[c + k]
-    s += d * d
-  }
-  return Math.sqrt(s)
 }
 // HSV→RGB(out[off..off+2] に書込)。recurrence-cloud の hsv2rgb を CPU化。
 function hsv2rgb(h: number, s: number, v: number, out: Float32Array, off: number) {
@@ -116,54 +96,6 @@ function hsv2rgb(h: number, s: number, v: number, out: Float32Array, off: number
   out[off + 2] = b
 }
 
-// 星(point sprite): 格子セル→clip空間、サイズ∝発火、無音は不可視
-const STAR_VERT = `
-  attribute float aHeat;
-  attribute vec3 aColor;
-  uniform float uAspect;
-  uniform float uPointSize;
-  uniform float uGamma;
-  const float G_F = ${G.toFixed(1)};
-  varying vec3 vColor;
-  varying float vIntensity;
-  void main() {
-    float gx = position.x;
-    float gy = position.y;
-    float nx = (gx / (G_F - 1.0)) * 1.8 - 0.9;
-    float ny = (gy / (G_F - 1.0)) * 1.8 - 0.9;
-    float sx = 1.0;
-    float sy = 1.0;
-    if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
-    float intensity = pow(clamp(aHeat / 1.5, 0.0, 1.0), uGamma);
-    vIntensity = intensity;
-    vColor = aColor;
-    if (intensity <= 0.001) {        // 発火していない → 不可視
-      gl_PointSize = 0.0;
-      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-      return;
-    }
-    gl_PointSize = uPointSize * intensity;
-    gl_Position = vec4(nx * sx, ny * sy, 0.0, 1.0);
-  }
-`
-// 星 fragment: 明るい芯 + 広いハロー(星雲)、additive
-const STAR_FRAG = `
-  precision highp float;
-  uniform float uHaloGain;
-  uniform float uOpacity;
-  varying vec3 vColor;
-  varying float vIntensity;
-  void main() {
-    if (vIntensity <= 0.0) discard;
-    float r = length(gl_PointCoord - 0.5) * 2.0;
-    if (r > 1.0) discard;
-    float core = smoothstep(0.35, 0.0, r);
-    float halo = smoothstep(1.0, 0.0, r) * uHaloGain;
-    float a = (core + halo) * vIntensity * uOpacity;
-    vec3 rgb = vColor * (1.0 + core * 1.5);   // 芯は白方向にブロー
-    gl_FragColor = vec4(rgb * a, a);
-  }
-`
 // 背景: 暗い宇宙(ほぼ黒 + ごく薄い放射状tint)
 const BG_VERT = `
   varying vec2 vUv;
@@ -182,74 +114,33 @@ const BG_FRAG = `
     gl_FragColor = vec4(col, uOpacity);
   }
 `
-// 星雲(膜): ボリュメトリック・レイマーチ + Beer-Lambert。W由来3D密度(z=cochleagram)を
-// 仮想カメラからマーチし、半透明シェルを累積=膜の重なり。固定ノイズ・bakedアニメ不使用。GLSL3。
-const NEB_VERT = `
-  out vec2 vUv;
-  void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }
-`
-const NEB_FRAG = `
-  precision highp float;
-  precision highp sampler3D;
-  out vec4 fragColor;
-  in vec2 vUv;
-  uniform sampler3D uVolume;   // R=W由来密度(z=cochleagram)
-  uniform sampler2D uColor;    // rgb=共感覚色(2D, セル=(x,y))
+// 星雲: 1セル=1ガウス粒子(スプラット)。加算合成で重なり連続ガスに(四角が出ない)
+const SPLAT_VERT = `
+  attribute vec3 aColor;
+  attribute float aBright;
+  attribute float aSize;
   uniform float uAspect;
-  uniform float uSigma;
-  uniform float uCarve;
-  uniform float uDensGain;
-  uniform float uEmis;
-  uniform float uOpacity;
-  uniform float uEdgeNorm;
-  uniform float uEdgeGain;
-  uniform float uEdgeThr;
-  uniform float uEdgeDens;
-  uniform mat3 uView;
-  uniform vec3 uEye;
-  uniform vec3 uBoxHalf;
-
-  // AABB交差(ボックス [-half, +half])
-  vec2 boxHit(vec3 ro, vec3 rd, vec3 rad){
-    vec3 m = 1.0 / rd;
-    vec3 n = m * ro;
-    vec3 k = abs(m) * rad;
-    vec3 t1 = -n - k;
-    vec3 t2 = -n + k;
-    return vec2(max(max(t1.x, t1.y), t1.z), min(min(t2.x, t2.y), t2.z));
-  }
-
+  varying vec3 vColor;
+  varying float vBright;
   void main(){
-    // 仮想カメラ: 画面uv→レイ、静的傾斜 uView で奥行きを見せる(R3Fカメラ非依存)
-    vec2 sc = (vUv - 0.5) * vec2(uAspect, 1.0);
-    vec3 rd = normalize(uView * vec3(sc, -1.4));
-    vec3 ro = uView * uEye;
-    vec2 tb = boxHit(ro, rd, uBoxHalf);
-    float tn = max(tb.x, 0.0);
-    if (tb.y <= tn) { fragColor = vec4(0.0); return; }
-    float t = tn;
-    float dt = (tb.y - tn) / float(${NEB_STEPS});
-    vec3 col = vec3(0.0);
-    float trans = 1.0;
-    for (int i = 0; i < ${NEB_STEPS}; i++){
-      vec3 p = ro + rd * t;                    // [-half, +half]
-      vec3 uvw = p / uBoxHalf * 0.5 + 0.5;      // [0,1]^3
-      float d = texture(uVolume, uvw).r;
-      d = max(0.0, d * uDensGain - uCarve);     // 彫り=フィラメント化(参照の -128*n 相当)
-      if (d > 0.0){
-        vec4 cs = texture(uColor, uvw.xy);            // rgb=共感覚色, a=U-matrix(raw)
-        float E = clamp(cs.a / uEdgeNorm, 0.0, 1.0);  // 全144次元の境界強度[0,1]
-        float edge = smoothstep(uEdgeThr, 1.0, E);    // 境界=エッジ線
-        vec3 emis = cs.rgb * (1.0 + uEdgeGain * edge); // エッジを発光
-        float dens = d * (1.0 + uEdgeDens * edge);     // エッジを濃く(輪郭が締まる)
-        float a = 1.0 - exp(-dens * uSigma * dt);     // Beer-Lambert(吸収=不透明度)
-        col += trans * a * emis * uEmis;              // 発光累積(front-to-back)
-        trans *= 1.0 - a;
-        if (trans < 0.01) break;
-      }
-      t += dt;
-    }
-    fragColor = vec4(col, (1.0 - trans) * uOpacity); // additive合成
+    vColor = aColor;
+    vBright = aBright;
+    float sx = 1.0, sy = 1.0;
+    if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
+    gl_PointSize = aSize;
+    gl_Position = vec4(position.x * sx, position.y * sy, 0.0, 1.0);
+  }
+`
+const SPLAT_FRAG = `
+  precision highp float;
+  varying vec3 vColor;
+  varying float vBright;
+  void main(){
+    vec2 c = gl_PointCoord - 0.5;
+    float r2 = dot(c, c) * 4.0;            // 0=中心, 1=縁
+    float g = exp(-r2 * 3.0);              // 柔らかいガウス(縁が溶ける)
+    float a = g * vBright;
+    gl_FragColor = vec4(vColor * a, a);    // additive
   }
 `
 
@@ -259,12 +150,9 @@ export const FbSparseCortex = () => {
   const viewport = useThree(s => s.viewport)
   const size = useThree(s => s.size)
   const bgMatRef = useRef<THREE.ShaderMaterial>(null)
-  const nebMatRef = useRef<THREE.ShaderMaterial>(null)
-  const starMatRef = useRef<THREE.ShaderMaterial>(null)
-  const starGeoRef = useRef<THREE.BufferGeometry>(null)
+  const splatMatRef = useRef<THREE.ShaderMaterial>(null)
+  const splatGeoRef = useRef<THREE.BufferGeometry>(null)
   const resetRef = useRef(false)
-  const volMaxRef = useRef(1) // 体積密度の自動露出(フレーム最大の平滑追従)
-  const edgeNormRef = useRef(1) // エッジ(U-matrix)の自動正規化(フレーム最大の平滑追従)
 
   // ===== INPUT 層: フィルタバンク係数 =====
   const coeffs = useMemo(() => {
@@ -302,57 +190,11 @@ export const FbSparseCortex = () => {
   const driveSorted = useMemo(() => new Float32Array(N), [])
   const heat = useMemo(() => new Float32Array(N), [])
 
-  // ===== OUTPUT 層: 星(point sprite)バッファ =====
-  const starPos = useMemo(() => {
-    const a = new Float32Array(N * 3)
-    for (let i = 0; i < N; i++) {
-      a[i * 3 + 0] = i % G // gx
-      a[i * 3 + 1] = (i / G) | 0 // gy
-      a[i * 3 + 2] = 0
-    }
-    return a
-  }, [])
-  const cellColor = useMemo(() => new Float32Array(N * 3), []) // 共感覚RGB(毎frame)
-  const cellHeat = useMemo(() => new Float32Array(N), []) // 発火(=heat, 毎frame)
-  // 星雲(膜): 色場テクスチャ(RGB=共感覚色)
-  const nebData = useMemo(() => new Float32Array(N * 4), [])
-  const nebTex = useMemo(() => {
-    const t = new THREE.DataTexture(nebData, G, G, THREE.RGBAFormat, THREE.FloatType)
-    t.magFilter = THREE.LinearFilter
-    t.minFilter = THREE.LinearFilter
-    t.wrapS = THREE.ClampToEdgeWrapping
-    t.wrapT = THREE.ClampToEdgeWrapping
-    t.needsUpdate = true
-    return t
-  }, [nebData])
-  useEffect(() => () => nebTex.dispose(), [nebTex])
-  // 体積テクスチャ: W由来3D密度(x,y=マップ, z=cochleagram帯域)。Data3DTexture(WebGL2)
-  const volData = useMemo(() => new Float32Array(N * NEB_DZ), [])
-  const volTex = useMemo(() => {
-    const t = new THREE.Data3DTexture(volData, G, G, NEB_DZ)
-    t.format = THREE.RedFormat
-    t.type = THREE.FloatType
-    // Float3Dの線形フィルタは拡張依存(非対応だとサンプル0=黒)。まず Nearest で確実に可視化
-    t.minFilter = THREE.NearestFilter
-    t.magFilter = THREE.NearestFilter
-    t.wrapS = THREE.ClampToEdgeWrapping
-    t.wrapT = THREE.ClampToEdgeWrapping
-    t.wrapR = THREE.ClampToEdgeWrapping
-    t.needsUpdate = true
-    return t
-  }, [volData])
-  useEffect(() => () => volTex.dispose(), [volTex])
-  // 仮想カメラの静的傾斜(mat3) と位置・ボックス
-  const nebView = useMemo(() => {
-    const m4 = new THREE.Matrix4().makeRotationX(NEB_TILT_X)
-    m4.multiply(new THREE.Matrix4().makeRotationY(NEB_TILT_Y))
-    return new THREE.Matrix3().setFromMatrix4(m4)
-  }, [])
-  const nebEye = useMemo(() => new THREE.Vector3(...(NEB_EYE as [number, number, number])), [])
-  const nebBoxHalf = useMemo(
-    () => new THREE.Vector3(...(NEB_BOX_HALF as [number, number, number])),
-    []
-  )
+  // ===== OUTPUT 層: 1セル=1ガウス粒子(スプラット) =====
+  const cellColor = useMemo(() => new Float32Array(N * 3), []) // 共感覚RGB(=aColor, 毎frame)
+  const splatPos = useMemo(() => new Float32Array(N * 3), []) // clip xy(z=0)
+  const splatBright = useMemo(() => new Float32Array(N), []) // 明るさ(=aBright)
+  const splatSize = useMemo(() => new Float32Array(N), []) // サイズpx(=aSize)
 
   const initInterp = useMemo(
     () => () => {
@@ -415,6 +257,10 @@ export const FbSparseCortex = () => {
       initInterp()
       resetRef.current = false
     }
+    // フレームレート非依存化: 60fps基準で学習/減衰を時間スケール(60fps時は1.0)
+    const dtScale = Math.min(4, Math.max(0.25, deltaTime * 60))
+    // 音声処理(あれば): INPUT + INTERPRETATION(学習)。OUTPUT/RT は下で毎フレーム実行
+    const runAudio = () => {
     const frame = clock.frame
     if (!frame || frame.samples0.length === 0) return
     const s0 = frame.samples0
@@ -429,8 +275,6 @@ export const FbSparseCortex = () => {
     const consume = Math.max(0, Math.min(Math.floor(deltaTime * sampleRate), remaining))
     clock.time += deltaTime
     if (consume === 0) return
-    // フレームレート非依存化: 60fps基準で学習/減衰を時間スケール(60fps時は1.0=不変)
-    const dtScale = Math.min(4, Math.max(0.25, deltaTime * 60))
 
     // ============================================================
     // [INPUT 層] フィルタバンク → 特徴ベクトル x (構造保持, ~144次元)
@@ -568,11 +412,11 @@ export const FbSparseCortex = () => {
       }
     }
 
+    } // end runAudio
+    runAudio()
     // ============================================================
-    // [OUTPUT 層] 共感覚カラー(W[i]→色)+ 発火 → 星の属性
+    // [OUTPUT 層] 1セル=1ガウス粒子(毎フレーム): 色=W, 位置=格子+重み, 明るさ/大きさ=発火
     // ============================================================
-    let frameMaxVol = 0
-    let frameMaxU = 0
     for (let i = 0; i < N; i++) {
       const b = i * DIM
       // 色相: cochleagram部のスペクトル重心 → 周波数 → note → hue
@@ -583,7 +427,8 @@ export const FbSparseCortex = () => {
         num += m * e
         den += e
       }
-      const f = bandFreq(num / den)
+      const centroid = num / den // 0..M-1(スペクトル重心=ピッチ/明るさ)
+      const f = bandFreq(centroid)
       const note = 12 * Math.log2(f / 440) + 69
       const hue = (((note % 12) + 12) % 12) / 12
       // 彩度: ITD強度部(コヒーレンス)の平均
@@ -592,65 +437,34 @@ export const FbSparseCortex = () => {
       coh = Math.min(1, Math.max(0, coh / M))
       const sat = SAT_FLOOR + (1 - SAT_FLOOR) * coh
       hsv2rgb(hue, sat, 1.0, cellColor, i * 3)
-      // 星雲(膜): 色場(rgb=共感覚色, a未使用)
-      const o = i * 4
-      nebData[o + 0] = cellColor[i * 3 + 0]
-      nebData[o + 1] = cellColor[i * 3 + 1]
-      nebData[o + 2] = cellColor[i * 3 + 2]
-      // エッジ: 全144次元 U-matrix(4近傍との重み距離平均)を alpha に
+      // 位置: 格子 + 重み由来オフセット(pan=ITD平均, pitch=重心)で格子を崩す
       const gx = i % G,
         gy = (i / G) | 0
-      let uAcc = 0,
-        uCnt = 0
-      if (gx > 0) {
-        uAcc += wdist(W, b, (i - 1) * DIM)
-        uCnt++
-      }
-      if (gx < G - 1) {
-        uAcc += wdist(W, b, (i + 1) * DIM)
-        uCnt++
-      }
-      if (gy > 0) {
-        uAcc += wdist(W, b, (i - G) * DIM)
-        uCnt++
-      }
-      if (gy < G - 1) {
-        uAcc += wdist(W, b, (i + G) * DIM)
-        uCnt++
-      }
-      const U = uCnt > 0 ? uAcc / uCnt : 0
-      nebData[o + 3] = U
-      if (U > frameMaxU) frameMaxU = U
-      // 体積密度: z=cochleagram帯域(0..NEB_DZ-1)を深さに(index = z*N + i)。max(0,W)
-      for (let z = 0; z < NEB_DZ; z++) {
-        const w = W[b + z]
-        const v = w > 0 ? w : 0
-        volData[z * N + i] = v
-        if (v > frameMaxVol) frameMaxVol = v
-      }
-      // 発火 → 星属性 + 残光
-      cellHeat[i] = heat[i]
-      heat[i] *= Math.pow(HEAT_DECAY, dtScale) // 発火残光(時間スケール=フレームレート非依存)
+      const baseX = ((gx / (G - 1)) * 2 - 1) * SPLAT_LAYOUT
+      const baseY = ((gy / (G - 1)) * 2 - 1) * SPLAT_LAYOUT
+      let pan = 0
+      for (let k = 0; k < M; k++) pan += W[b + M + k] // best-ITD ∈ [-1,1]
+      pan /= M
+      const pitchDev = (centroid / (M - 1)) * 2 - 1 // [-1,1]
+      const o3 = i * 3
+      splatPos[o3 + 0] = baseX + SPLAT_POS_OFFSET * pan
+      splatPos[o3 + 1] = baseY + SPLAT_POS_OFFSET * pitchDev
+      splatPos[o3 + 2] = 0
+      // 明るさ/大きさ: 地のガス + 発火
+      const hv = heat[i]
+      splatBright[i] = SPLAT_AMBIENT + SPLAT_FIRE_GAIN * hv
+      splatSize[i] = SPLAT_SIZE_BASE + SPLAT_SIZE_FIRE * Math.min(1, hv)
+      heat[i] *= Math.pow(HEAT_DECAY, dtScale) // 発火残光=光の尾
     }
-    if (starGeoRef.current) {
-      starGeoRef.current.attributes.aColor.needsUpdate = true
-      starGeoRef.current.attributes.aHeat.needsUpdate = true
+    if (splatGeoRef.current) {
+      splatGeoRef.current.attributes.position.needsUpdate = true
+      splatGeoRef.current.attributes.aColor.needsUpdate = true
+      splatGeoRef.current.attributes.aBright.needsUpdate = true
+      splatGeoRef.current.attributes.aSize.needsUpdate = true
     }
-    if (starMatRef.current) {
-      starMatRef.current.uniforms.uAspect.value =
+    if (splatMatRef.current) {
+      splatMatRef.current.uniforms.uAspect.value =
         size.width / Math.max(1, size.height)
-    }
-    nebTex.needsUpdate = true
-    volTex.needsUpdate = true
-    // 自動露出: 体積密度の最大を平滑追従し、最濃ボクセルが NEB_DENS_TARGET 密度になるよう調整
-    volMaxRef.current = Math.max(volMaxRef.current * 0.97, frameMaxVol, 1e-3)
-    edgeNormRef.current = Math.max(edgeNormRef.current * 0.97, frameMaxU, 1e-3)
-    if (nebMatRef.current) {
-      nebMatRef.current.uniforms.uAspect.value =
-        size.width / Math.max(1, size.height)
-      nebMatRef.current.uniforms.uDensGain.value =
-        NEB_DENS_TARGET / Math.max(volMaxRef.current, 0.02)
-      nebMatRef.current.uniforms.uEdgeNorm.value = Math.max(edgeNormRef.current, 1e-3)
     }
   })
 
@@ -674,45 +488,14 @@ export const FbSparseCortex = () => {
           }}
         />
       </mesh>
-      {/* 星雲(膜): W由来3D密度のボリュメトリック・レイマーチ(Beer-Lambert, additive) */}
-      <mesh renderOrder={1}>
-        <planeGeometry args={[planeSize, planeSize]} />
-        <shaderMaterial
-          ref={nebMatRef}
-          vertexShader={NEB_VERT}
-          fragmentShader={NEB_FRAG}
-          glslVersion={THREE.GLSL3}
-          transparent={true}
-          depthTest={false}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          uniforms={{
-            uVolume: { value: volTex },
-            uColor: { value: nebTex },
-            uAspect: { value: 1 },
-            uSigma: { value: NEB_SIGMA },
-            uCarve: { value: NEB_CARVE },
-            uDensGain: { value: NEB_DENS_TARGET },
-            uEmis: { value: NEB_EMIS },
-            uOpacity: { value: 1.0 },
-            uEdgeNorm: { value: 1.0 },
-            uEdgeGain: { value: NEB_EDGE_GAIN },
-            uEdgeThr: { value: NEB_EDGE_THR },
-            uEdgeDens: { value: NEB_EDGE_DENS },
-            uView: { value: nebView },
-            uEye: { value: nebEye },
-            uBoxHalf: { value: nebBoxHalf },
-          }}
-        />
-      </mesh>
-      {/* 星: 共感覚カラーの発光 point sprite(additive) */}
-      <points renderOrder={2} frustumCulled={false}>
-        <bufferGeometry ref={starGeoRef}>
+      {/* 星雲: 1セル=1ガウス粒子(スプラット, additive)→ 重なって連続ガス */}
+      <points renderOrder={1} frustumCulled={false}>
+        <bufferGeometry ref={splatGeoRef}>
           <bufferAttribute
             attach="attributes-position"
             count={N}
             itemSize={3}
-            array={starPos}
+            array={splatPos}
           />
           <bufferAttribute
             attach="attributes-aColor"
@@ -721,26 +504,28 @@ export const FbSparseCortex = () => {
             array={cellColor}
           />
           <bufferAttribute
-            attach="attributes-aHeat"
+            attach="attributes-aBright"
             count={N}
             itemSize={1}
-            array={cellHeat}
+            array={splatBright}
+          />
+          <bufferAttribute
+            attach="attributes-aSize"
+            count={N}
+            itemSize={1}
+            array={splatSize}
           />
         </bufferGeometry>
         <shaderMaterial
-          ref={starMatRef}
-          vertexShader={STAR_VERT}
-          fragmentShader={STAR_FRAG}
+          ref={splatMatRef}
+          vertexShader={SPLAT_VERT}
+          fragmentShader={SPLAT_FRAG}
           transparent={true}
           depthTest={false}
           depthWrite={false}
           blending={THREE.AdditiveBlending}
           uniforms={{
             uAspect: { value: 1 },
-            uPointSize: { value: STAR_POINT_SIZE },
-            uGamma: { value: HEAT_GAMMA },
-            uHaloGain: { value: STAR_HALO_GAIN },
-            uOpacity: { value: 1.0 },
           }}
         />
       </points>
