@@ -66,8 +66,8 @@ const SPLAT_LAYOUT = 0.92 // 格子レイアウトの clip 範囲(±)
 const SPLAT_POS_OFFSET = 0.18 // 重み由来の位置オフセット(pan=ITD, pitch=重心)で格子を崩す
 const SPLAT_SIZE_BASE = 46.0 // 基本スプラットサイズ(px, 隣と重なる)
 const SPLAT_SIZE_FIRE = 38.0 // 発火時の拡大
-const SPLAT_AMBIENT = 0.1 // 地のガス明るさ(全セル)
-const SPLAT_FIRE_GAIN = 0.9 // 発火の明るさ
+const SPLAT_AMBIENT = 0.06 // 地のガス明るさ(全セル, 絶対値)
+const SPLAT_FIRE_GAIN = 0.5 // 発火量=明るさ(絶対値, 大きいほど白く=星)
 
 // 帯域 m の中心周波数(入力層と同式)
 function bandFreq(m: number): number {
@@ -139,8 +139,8 @@ const SPLAT_FRAG = `
     vec2 c = gl_PointCoord - 0.5;
     float r2 = dot(c, c) * 4.0;            // 0=中心, 1=縁
     float g = exp(-r2 * 3.0);              // 柔らかいガウス(縁が溶ける)
-    float a = g * vBright;
-    gl_FragColor = vec4(vColor * a, a);    // additive
+    float a = g * vBright;                 // vBright=絶対値(ambient + 発火量)
+    gl_FragColor = vec4(vColor * a, a);        // additive(src=SrcAlpha)→ result += vColor*a 絶対値・線形。明部は白(星)
   }
 `
 
