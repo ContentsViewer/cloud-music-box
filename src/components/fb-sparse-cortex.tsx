@@ -64,10 +64,12 @@ const SAT_FLOOR = 0.65 // ITDコヒーレンス0でも残す最低彩度(鮮や�
 // 星雲: 1セル=1ガウス粒子(スプラット)を加算合成 → 連続ガス(四角が出ない)
 const SPLAT_LAYOUT = 0.92 // 格子レイアウトの clip 範囲(±)
 const SPLAT_POS_OFFSET = 0.18 // 重み由来の位置オフセット(pan=ITD, pitch=重心)で格子を崩す
-const SPLAT_SIZE_BASE = 46.0 // 基本スプラットサイズ(px, 隣と重なる)
-const SPLAT_SIZE_FIRE = 38.0 // 発火時の拡大
-const SPLAT_AMBIENT = 0.06 // 地のガス明るさ(全セル, 絶対値)
+const SPLAT_SIZE_BASE = 62.0 // 地のガス: 大きく重ねて格子タイルを消す(滑らかな星雲)
+const SPLAT_SIZE_FIRE = -34.0 // 発火で「縮小」→ 凝縮した明点=星(白飛び回避, 冷めるとガスに溶ける)
+const SPLAT_AMBIENT = 0.09 // 地のガス明るさ(全セル, 絶対値)
 const SPLAT_FIRE_GAIN = 0.5 // 発火量=明るさ(絶対値, 大きいほど白く=星)
+// ストリーク(流線)化: 未使用の自己相関重み=トーン性で伸長, SOM重心勾配で方位
+const ELONG_GAIN = 4.0 // 伸長ゲイン(自己相関ピーク → ストリーク長, 大=細長い)
 // データ由来シード(初期化): BMU近傍を実特徴で成長 + 成熟度ゲート(未シードは非表示)
 const SEED_RAD = 1 // 1フレームで成長させる近傍リング(大=速く成長)
 const SEED_JITTER = 0.04 // シード時の微小ジッタ(セルを分化させる)
@@ -124,15 +126,21 @@ const SPLAT_VERT = `
   attribute vec3 aColor;
   attribute float aBright;
   attribute float aSize;
+  attribute float aAngle;
+  attribute float aElong;
   uniform float uAspect;
   varying vec3 vColor;
   varying float vBright;
+  varying float vAngle;
+  varying float vElong;
   void main(){
     vColor = aColor;
     vBright = aBright;
+    vAngle = aAngle;
+    vElong = aElong;
     float sx = 1.0, sy = 1.0;
     if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
-    gl_PointSize = aSize;
+    gl_PointSize = aSize * (1.0 + aElong * 0.8); // ストリークが収まるよう拡大
     gl_Position = vec4(position.x * sx, position.y * sy, 0.0, 1.0);
   }
 `
@@ -140,12 +148,21 @@ const SPLAT_FRAG = `
   precision highp float;
   varying vec3 vColor;
   varying float vBright;
+  varying float vAngle;
+  varying float vElong;
   void main(){
     vec2 c = gl_PointCoord - 0.5;
-    float r2 = dot(c, c) * 4.0;            // 0=中心, 1=縁
-    float g = exp(-r2 * 3.0);              // 柔らかいガウス(縁が溶ける)
-    float a = g * vBright;                 // vBright=絶対値(ambient + 発火量)
-    gl_FragColor = vec4(vColor * a, a);        // additive(src=SrcAlpha)→ result += vColor*a 絶対値・線形。明部は白(星)
+    float rad = length(c);
+    // ストリーク: 方位 vAngle に沿って伸長(=流れ)、直交方向は柔らかく(ハードな四角縁を避ける)
+    float s = sin(vAngle), co = cos(vAngle);
+    vec2 r = vec2(c.x * co + c.y * s, -c.x * s + c.y * co);
+    float ax = 1.0 / (1.0 + vElong * 2.5); // 流れ方向: 緩く=長い尾
+    float ay = 1.0 + vElong * 1.0;         // 直交方向: ほどよく締める
+    float r2 = (r.x * r.x * ax + r.y * r.y * ay) * 12.0;
+    float g = exp(-r2);                     // 異方性ガウス(elong=0で従来の丸)
+    float win = smoothstep(0.5, 0.32, rad); // スプライト縁で必ず0 → 正方形が出ない
+    float a = g * win * vBright;           // vBright=絶対値(ambient + 発火量)
+    gl_FragColor = vec4(vColor * a, a);        // additive→ result += vColor*a。明部は白(星)
   }
 `
 
@@ -202,6 +219,9 @@ export const FbSparseCortex = () => {
   const splatPos = useMemo(() => new Float32Array(N * 3), []) // clip xy(z=0)
   const splatBright = useMemo(() => new Float32Array(N), []) // 明るさ(=aBright)
   const splatSize = useMemo(() => new Float32Array(N), []) // サイズpx(=aSize)
+  const splatAngle = useMemo(() => new Float32Array(N), []) // ストリーク方位(=aAngle, SOM勾配の等高線方向)
+  const splatElong = useMemo(() => new Float32Array(N), []) // 伸長(=aElong, 自己相関=トーン性)
+  const centroidArr = useMemo(() => new Float32Array(N), []) // 一時: 重心(方位の勾配計算用)
 
   const initInterp = useMemo(
     () => () => {
@@ -480,6 +500,14 @@ export const FbSparseCortex = () => {
         den += e
       }
       const centroid = num / den // 0..M-1(スペクトル重心=ピッチ/明るさ)
+      centroidArr[i] = centroid // 方位の勾配計算に使う
+      // 伸長(ストリーク長): 未使用の自己相関部[3M,3M+P)のピーク=トーン性
+      let acMax = 0
+      for (let k = 0; k < P; k++) {
+        const v = W[b + 3 * M + k]
+        if (v > acMax) acMax = v
+      }
+      splatElong[i] = Math.min(1, acMax * ELONG_GAIN)
       const f = bandFreq(centroid)
       const note = 12 * Math.log2(f / 440) + 69
       const hue = (((note % 12) + 12) % 12) / 12
@@ -511,11 +539,25 @@ export const FbSparseCortex = () => {
       splatSize[i] = SPLAT_SIZE_BASE + SPLAT_SIZE_FIRE * Math.min(1, hv)
       heat[i] *= Math.pow(HEAT_DECAY, dtScale) // 発火残光=光の尾
     }
+    // ストリーク方位: SOM上の重心勾配 → 等高線方向(=流れ)に伸長。隣接が揃い銀河の腕状フィラメントに
+    for (let i = 0; i < N; i++) {
+      const gx = i % G,
+        gy = (i / G) | 0
+      const xm = gx > 0 ? i - 1 : i,
+        xp = gx < G - 1 ? i + 1 : i
+      const ym = gy > 0 ? i - G : i,
+        yp = gy < G - 1 ? i + G : i
+      const dcx = centroidArr[xp] - centroidArr[xm]
+      const dcy = centroidArr[yp] - centroidArr[ym]
+      splatAngle[i] = Math.atan2(dcy, dcx) + Math.PI / 2 // 勾配に直交=等高線方向
+    }
     if (splatGeoRef.current) {
       splatGeoRef.current.attributes.position.needsUpdate = true
       splatGeoRef.current.attributes.aColor.needsUpdate = true
       splatGeoRef.current.attributes.aBright.needsUpdate = true
       splatGeoRef.current.attributes.aSize.needsUpdate = true
+      splatGeoRef.current.attributes.aAngle.needsUpdate = true
+      splatGeoRef.current.attributes.aElong.needsUpdate = true
     }
     if (splatMatRef.current) {
       splatMatRef.current.uniforms.uAspect.value =
@@ -569,6 +611,18 @@ export const FbSparseCortex = () => {
             count={N}
             itemSize={1}
             array={splatSize}
+          />
+          <bufferAttribute
+            attach="attributes-aAngle"
+            count={N}
+            itemSize={1}
+            array={splatAngle}
+          />
+          <bufferAttribute
+            attach="attributes-aElong"
+            count={N}
+            itemSize={1}
+            array={splatElong}
           />
         </bufferGeometry>
         <shaderMaterial
