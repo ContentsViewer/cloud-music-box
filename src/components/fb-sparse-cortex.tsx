@@ -16,8 +16,11 @@ import { Hct } from "@material/material-color-utilities"
 //                      = cochleagram(M) + per-band best-ITD(M) + ITD強度(M) + サマリ自己相関(P)
 //     [INTERPRETATION] トポグラフィック・スパース符号化マップ(過完備 N≫DIM)
 //                      = k-WTA で少数発火 + Oja で STRF 学習 + 近傍協調 + IP 恒常性
-//     [OUTPUT]         共感覚カラーの銀河: 各セルの W[i]→色(ピッチ=色相/コヒーレンス=彩度)、
-//                      発火を発光する star (point sprite) として暗い宇宙に additive 描画。
+//     [OUTPUT]         W を3チャンネルで知覚させる(暗い宇宙に additive):
+//                      ・ガス雲 = W全体の色場(柔・連続 → 格子が出ない地)
+//                      ・星     = 発火/活性のセルのみ(疎・高コントラスト = 星空ベース)
+//                      ・幾何シャード = 重心勾配方向(エッジ)に鋭い線分, 長さ=自己相関トーン性
+//                        (サイバー/抽象/幾何のアクセント)
 //
 //   r キーで地図リセット。
 // =============================================================================
@@ -36,20 +39,15 @@ const DIM = 3 * M + P // 32+32+32+48 = 144
 
 // --- INTERPRETATION 層パラメータ ---
 const G = 64 // 格子 G×G
-const N = G * G // 2304 セル (≫ DIM = 過完備)
+const N = G * G // 4096 セル (≫ DIM = 過完備)
 const K_ACTIVE = Math.round(N * 0.02) // スパース: 上位 ~2% 発火
 // ============================================================
 // 挙動プリセット(セット単位で切替: 使うセットの5値を下の定数へ反映)
 //
 //   [A] 落ち着いた挙動(初期セット)
 //       ETA=0.02, ETA_NB=0.008, NB_RAD=2, GAMMA_IP=0.02, HEAT_DECAY=0.85
-//       学習がゆっくりで安定。地図がじっくり組織化し、スイープは遅く滑らか。
-//       全域被覆に時間がかかる(~1分)が、チラつきが少なく落ち着いた絵。
-//
 //   [B] リアクティブ寄り(現行)
 //       ETA=0.06, ETA_NB=0.03, NB_RAD=3, GAMMA_IP=0.05, HEAT_DECAY=0.65
-//       学習が速くスイープ前線が速い + 発火のキレが出て信号追従が良い。
-//       立ち上がり・被覆が速い代わり、やや不安定/チラつきが出やすい。
 // ============================================================
 const ETA = 0.06 // Oja 学習率(STRF)
 const ETA_NB = 0.03 // 近傍協調(スイープ前線)
@@ -59,17 +57,29 @@ const HEAT_DECAY = 0.95 // 発火残光(小=キレ/大=尾を引く)
 const USE_ALPHA = 0.02 // 使用率 EMA
 const P_TARGET = K_ACTIVE / N // 目標発火率
 
-// --- OUTPUT 層パラメータ(共感覚カラーの星雲) ---
+// --- OUTPUT 層: W を3チャンネルで知覚させる(ガス雲 / 星 / 幾何シャード) ---
 const SAT_FLOOR = 0.65 // ITDコヒーレンス0でも残す最低彩度(鮮やかさ)
-// 星雲: 1セル=1ガウス粒子(スプラット)を加算合成 → 連続ガス(四角が出ない)
 const SPLAT_LAYOUT = 0.92 // 格子レイアウトの clip 範囲(±)
-const SPLAT_POS_OFFSET = 0.18 // 重み由来の位置オフセット(pan=ITD, pitch=重心)で格子を崩す
-const SPLAT_SIZE_BASE = 62.0 // 地のガス: 大きく重ねて格子タイルを消す(滑らかな星雲)
-const SPLAT_SIZE_FIRE = -34.0 // 発火で「縮小」→ 凝縮した明点=星(白飛び回避, 冷めるとガスに溶ける)
-const SPLAT_AMBIENT = 0.09 // 地のガス明るさ(全セル, 絶対値)
-const SPLAT_FIRE_GAIN = 0.5 // 発火量=明るさ(絶対値, 大きいほど白く=星)
-// ストリーク(流線)化: 未使用の自己相関重み=トーン性で伸長, SOM重心勾配で方位
-const ELONG_GAIN = 4.0 // 伸長ゲイン(自己相関ピーク → ストリーク長, 大=細長い)
+const SPLAT_POS_OFFSET = 0.24 // 重み由来オフセット(pan=ITD, pitch=重心)で格子を湾曲(滑らか=大スケール)
+const JITTER_GAIN = 0.18 // 各セル固有の学習重み差から作る微小散らし(隣接の行列整列を崩す=格子解消, 信号由来)
+const ELONG_GAIN = 4.0 // 自己相関ピーク → トーン性(=シャード長)
+// 活性メモリ: 発火の緩い残像 → 音が通った所が星として滞留(星空の地)
+const ACT_DECAY = 0.985 // 遅い減衰(大=長く滞留)
+// [ガス] 連続する色雲=W全体の色場。柔・大・低コントラスト → 離散格子が出ない
+const GAS_SIZE = 58.0 // 大きく重ねて連続化(滑らかな雲)
+const GAS_AMBIENT = 0.06 // シード済みの薄い地雲
+const GAS_ACT_GAIN = 0.27 // 活性領域がガス雲として濃く光る(持続成分を連続ガスへ=格子安全)
+// [星] 鋭い点+十字グリント。疎・高コントラスト(活性/発火のみ)=星空ベース
+const STAR_SIZE_BASE = 16.0 // 微光星のサイズ(細点)
+const STAR_SIZE_FIRE = 10.0 // 発火で拡大(光る星)
+const STAR_FLOOR_GAIN = 0.14 // 活性メモリ → 滞留する微光星(局所ピークの所のみ=ランドマーク)
+const STAR_FIRE_GAIN = 1.1 // 発火 → 明るい星/フレア(局所ピークの所のみ=真に疎)
+// [幾何シャード] 重心勾配方向の鋭い線分。長さ=トーン性, 発火セルのみ=サイバー/幾何/抽象
+const SHARD_LEN_BASE = 0.014 // clip空間の最小半長
+const SHARD_LEN_ELONG = 0.07 // トーン性で伸長(長め=交差する棒でなく光跡に)
+const SHARD_GAIN = 0.7 // シャードの明るさ(発火依存)
+const SHARD_FIRE_MIN = 0.15 // この heat 未満はシャードを出さない(より疎=網にしない)
+const SHARD_PEAK_MIN = 0.18 // 局所ピーク未満はシャードを出さない(一様域・弱い縁を間引く=交差網を出さない)
 // データ由来シード(初期化): BMU近傍を実特徴で成長 + 成熟度ゲート(未シードは非表示)
 const SEED_RAD = 1 // 1フレームで成長させる近傍リング(大=速く成長)
 const SEED_JITTER = 0.04 // シード時の微小ジッタ(セルを分化させる)
@@ -80,7 +90,7 @@ const MATURE_RATE = 0.05 // 成熟度フェードイン速度(0→1, 大=速く�
 function bandFreq(m: number): number {
   return F_LO * Math.pow(F_HI / F_LO, m / (M - 1))
 }
-// HSV→RGB(out[off..off+2] に書込)。recurrence-cloud の hsv2rgb を CPU化。
+// HSV→RGB(out[off..off+2] に書込)。
 function hsv2rgb(h: number, s: number, v: number, out: Float32Array, off: number) {
   const i = Math.floor(h * 6)
   const f = h * 6 - i
@@ -121,49 +131,86 @@ const BG_FRAG = `
     gl_FragColor = vec4(col, uOpacity);
   }
 `
-// 星雲: 1セル=1ガウス粒子(スプラット)。加算合成で重なり連続ガスに(四角が出ない)
-const SPLAT_VERT = `
+// [ガス] 柔らかい大きなガウス粒子。加算合成で重なり連続ガスに(W全体の色場=地)
+const GAS_VERT = `
   attribute vec3 aColor;
   attribute float aBright;
-  attribute float aSize;
-  attribute float aAngle;
-  attribute float aElong;
   uniform float uAspect;
+  uniform float uSize;
   varying vec3 vColor;
   varying float vBright;
-  varying float vAngle;
-  varying float vElong;
   void main(){
     vColor = aColor;
     vBright = aBright;
-    vAngle = aAngle;
-    vElong = aElong;
     float sx = 1.0, sy = 1.0;
     if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
-    gl_PointSize = aSize * (1.0 + aElong * 0.8); // ストリークが収まるよう拡大
+    gl_PointSize = uSize;
     gl_Position = vec4(position.x * sx, position.y * sy, 0.0, 1.0);
   }
 `
-const SPLAT_FRAG = `
+const GAS_FRAG = `
   precision highp float;
   varying vec3 vColor;
   varying float vBright;
-  varying float vAngle;
-  varying float vElong;
   void main(){
     vec2 c = gl_PointCoord - 0.5;
-    float rad = length(c);
-    // ストリーク: 方位 vAngle に沿って伸長(=流れ)、直交方向は柔らかく(ハードな四角縁を避ける)
-    float s = sin(vAngle), co = cos(vAngle);
-    vec2 r = vec2(c.x * co + c.y * s, -c.x * s + c.y * co);
-    float ax = 1.0 / (1.0 + vElong * 2.5); // 流れ方向: 緩く=長い尾
-    float ay = 1.0 + vElong * 1.0;         // 直交方向: ほどよく締める
-    float r2 = (r.x * r.x * ax + r.y * r.y * ay) * 12.0;
-    float g = exp(-r2);                     // 異方性ガウス(elong=0で従来の丸)
-    float win = smoothstep(0.5, 0.32, rad); // スプライト縁で必ず0 → 正方形が出ない
-    float a = g * win * vBright;           // vBright=絶対値(ambient + 発火量)
-    gl_FragColor = vec4(vColor * a, a);        // additive→ result += vColor*a。明部は白(星)
+    float r = length(c);
+    float g = exp(-r * r * 9.0);            // 広く柔らかいガウス → 重なって連続
+    float win = smoothstep(0.5, 0.30, r);   // スプライト縁で0(四角を出さない)
+    float a = g * win * vBright;
+    gl_FragColor = vec4(vColor * a, a);
   }
+`
+// [星] 鋭いコア + 十字グリント。発火/活性セルのみ疎に光る(星空ベース)
+const STAR_VERT = `
+  attribute vec3 aColor;
+  attribute float aBright;
+  attribute float aSize;
+  uniform float uAspect;
+  varying vec3 vColor;
+  varying float vBright;
+  void main(){
+    vColor = aColor;
+    vBright = aBright;
+    float sx = 1.0, sy = 1.0;
+    if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
+    gl_PointSize = aSize;
+    gl_Position = vec4(position.x * sx, position.y * sy, 0.0, 1.0);
+  }
+`
+const STAR_FRAG = `
+  precision highp float;
+  varying vec3 vColor;
+  varying float vBright;
+  void main(){
+    vec2 c = gl_PointCoord - 0.5;
+    float r = dot(c, c);
+    float core = exp(-r * 46.0);            // 鋭いコア(幾何的な点)
+    float env  = exp(-r * 7.0);
+    float sx = exp(-c.y * c.y * 340.0);     // 横スパイク
+    float sy = exp(-c.x * c.x * 340.0);     // 縦スパイク
+    float spike = (sx + sy) * env;          // 十字グリント=星
+    float g = core + 0.3 * spike;
+    float a = g * vBright;
+    gl_FragColor = vec4(vColor * a, a);
+  }
+`
+// [幾何シャード] 重心勾配方向の鋭い線分(色=premultiplied, additive)。aspect補正は星/ガスと共通
+const SHARD_VERT = `
+  attribute vec3 aLCol;
+  uniform float uAspect;
+  varying vec3 vLCol;
+  void main(){
+    vLCol = aLCol;
+    float sx = 1.0, sy = 1.0;
+    if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
+    gl_Position = vec4(position.x * sx, position.y * sy, 0.0, 1.0);
+  }
+`
+const SHARD_FRAG = `
+  precision highp float;
+  varying vec3 vLCol;
+  void main(){ gl_FragColor = vec4(vLCol, 1.0); }
 `
 
 export const FbSparseCortex = () => {
@@ -172,8 +219,12 @@ export const FbSparseCortex = () => {
   const viewport = useThree(s => s.viewport)
   const size = useThree(s => s.size)
   const bgMatRef = useRef<THREE.ShaderMaterial>(null)
-  const splatMatRef = useRef<THREE.ShaderMaterial>(null)
-  const splatGeoRef = useRef<THREE.BufferGeometry>(null)
+  const gasMatRef = useRef<THREE.ShaderMaterial>(null)
+  const gasGeoRef = useRef<THREE.BufferGeometry>(null)
+  const starMatRef = useRef<THREE.ShaderMaterial>(null)
+  const starGeoRef = useRef<THREE.BufferGeometry>(null)
+  const shardMatRef = useRef<THREE.ShaderMaterial>(null)
+  const shardGeoRef = useRef<THREE.BufferGeometry>(null)
   const resetRef = useRef(false)
 
   // ===== INPUT 層: フィルタバンク係数 =====
@@ -213,28 +264,35 @@ export const FbSparseCortex = () => {
   const heat = useMemo(() => new Float32Array(N), [])
   const seeded = useMemo(() => new Uint8Array(N), []) // データ由来シード済みフラグ(0=未初期化)
   const mature = useMemo(() => new Float32Array(N), []) // 成熟度0→1(表示フェードイン)
+  const actMem = useMemo(() => new Float32Array(N), []) // 活性メモリ(発火の緩い残像=星の滞留)
 
-  // ===== OUTPUT 層: 1セル=1ガウス粒子(スプラット) =====
-  const cellColor = useMemo(() => new Float32Array(N * 3), []) // 共感覚RGB(=aColor, 毎frame)
-  const splatPos = useMemo(() => new Float32Array(N * 3), []) // clip xy(z=0)
-  const splatBright = useMemo(() => new Float32Array(N), []) // 明るさ(=aBright)
-  const splatSize = useMemo(() => new Float32Array(N), []) // サイズpx(=aSize)
-  const splatAngle = useMemo(() => new Float32Array(N), []) // ストリーク方位(=aAngle, SOM勾配の等高線方向)
-  const splatElong = useMemo(() => new Float32Array(N), []) // 伸長(=aElong, 自己相関=トーン性)
-  const centroidArr = useMemo(() => new Float32Array(N), []) // 一時: 重心(方位の勾配計算用)
+  // ===== OUTPUT 層: 3チャンネル(ガス雲 / 星 / 幾何シャード) =====
+  const cellColor = useMemo(() => new Float32Array(N * 3), []) // 共感覚RGB(ガス・星で共有)
+  const splatPos = useMemo(() => new Float32Array(N * 3), []) // clip xy(ガス・星で共有)
+  const centroidArr = useMemo(() => new Float32Array(N), []) // 重心(勾配=方位の計算用)
+  const centroidSmooth = useMemo(() => new Float32Array(N), []) // 平滑化した重心場(シャード方位を滑らかに)
+  const splatElong = useMemo(() => new Float32Array(N), []) // トーン性(自己相関=シャード長)
+  const splatAngle = useMemo(() => new Float32Array(N), []) // 重心勾配の等高線方向(シャード方位)
+  const splatFire = useMemo(() => new Float32Array(N), []) // min(1, heat)(シャード/星の発火量)
+  const heatSnap = useMemo(() => new Float32Array(N), []) // 発火スナップ(局所ピーク=コントラスト計算用)
+  const gasBright = useMemo(() => new Float32Array(N), []) // ガス明るさ
+  const starBright = useMemo(() => new Float32Array(N), []) // 星明るさ
+  const starSize = useMemo(() => new Float32Array(N), []) // 星サイズpx
+  const linePos = useMemo(() => new Float32Array(N * 2 * 3), []) // シャード: 1セル=1線分(2頂点)
+  const lineCol = useMemo(() => new Float32Array(N * 2 * 3), []) // premultiplied RGB(明るさ込み)
 
   const initInterp = useMemo(
     () => () => {
       // ランダム初期化を廃止: データ由来シードまで全セル未初期化(W=0, seeded=0)
-      // → 低密度の空き領域から始まる死にセルが無く、初期重みが画面に出ない
       W.fill(0)
       seeded.fill(0)
       mature.fill(0)
       thr.fill(0)
       usage.fill(P_TARGET)
       heat.fill(0)
+      actMem.fill(0)
     },
-    [W, thr, usage, heat, seeded, mature]
+    [W, thr, usage, heat, seeded, mature, actMem]
   )
   const inited = useRef(false)
   if (!inited.current) {
@@ -487,7 +545,9 @@ export const FbSparseCortex = () => {
     } // end runAudio
     runAudio()
     // ============================================================
-    // [OUTPUT 層] 1セル=1ガウス粒子(毎フレーム): 色=W, 位置=格子+重み, 明るさ/大きさ=発火
+    // [OUTPUT 層] W を3チャンネルで毎フレーム描画:
+    //   色=W(重心→色相 / コヒーレンス→彩度), 位置=格子+重み(pan/pitch)
+    //   ガス明るさ/星明るさ/星サイズ = ambient + 活性メモリ + 発火
     // ============================================================
     for (let i = 0; i < N; i++) {
       const b = i * DIM
@@ -500,8 +560,8 @@ export const FbSparseCortex = () => {
         den += e
       }
       const centroid = num / den // 0..M-1(スペクトル重心=ピッチ/明るさ)
-      centroidArr[i] = centroid // 方位の勾配計算に使う
-      // 伸長(ストリーク長): 未使用の自己相関部[3M,3M+P)のピーク=トーン性
+      centroidArr[i] = centroid // 勾配=方位の計算に使う
+      // トーン性(シャード長): 未使用だった自己相関部[3M,3M+P)のピーク
       let acMax = 0
       for (let k = 0; k < P; k++) {
         const v = W[b + 3 * M + k]
@@ -517,7 +577,7 @@ export const FbSparseCortex = () => {
       coh = Math.min(1, Math.max(0, coh / M))
       const sat = SAT_FLOOR + (1 - SAT_FLOOR) * coh
       hsv2rgb(hue, sat, 1.0, cellColor, i * 3)
-      // 位置: 格子 + 重み由来オフセット(pan=ITD平均, pitch=重心)で格子を崩す
+      // 位置: 格子 + 重み由来オフセット(pan=ITD平均, pitch=重心)で格子を湾曲
       const gx = i % G,
         gy = (i / G) | 0
       const baseX = ((gx / (G - 1)) * 2 - 1) * SPLAT_LAYOUT
@@ -526,20 +586,49 @@ export const FbSparseCortex = () => {
       for (let k = 0; k < M; k++) pan += W[b + M + k] // best-ITD ∈ [-1,1]
       pan /= M
       const pitchDev = (centroid / (M - 1)) * 2 - 1 // [-1,1]
+      // 微小散らし: そのセル固有の学習重み差(高空間周波数=隣接で異なる)→ 行列整列を崩す
+      // 乱数ではなく W の読み出し = 信号由来。大スケールの地図構造は SPLAT_POS_OFFSET が保つ
+      const jx = W[b + M + 5] - W[b + M + 11] + W[b + 3 * M + 7] - W[b + 3 * M + 19]
+      const jy = W[b + 2 * M + 5] - W[b + 2 * M + 11] + W[b + 3 * M + 13] - W[b + 3 * M + 29]
       const o3 = i * 3
-      splatPos[o3 + 0] = baseX + SPLAT_POS_OFFSET * pan
-      splatPos[o3 + 1] = baseY + SPLAT_POS_OFFSET * pitchDev
+      splatPos[o3 + 0] = baseX + SPLAT_POS_OFFSET * pan + JITTER_GAIN * jx
+      splatPos[o3 + 1] = baseY + SPLAT_POS_OFFSET * pitchDev + JITTER_GAIN * jy
       splatPos[o3 + 2] = 0
-      // 明るさ/大きさ: 地のガス + 発火
-      const hv = heat[i]
       // 成熟度ゲート: 未シード(mature=0)は不可視、シード後 0→1 にフェードイン
       if (seeded[i] && mature[i] < 1)
         mature[i] = Math.min(1, mature[i] + MATURE_RATE * dtScale)
-      splatBright[i] = (SPLAT_AMBIENT + SPLAT_FIRE_GAIN * hv) * mature[i]
-      splatSize[i] = SPLAT_SIZE_BASE + SPLAT_SIZE_FIRE * Math.min(1, hv)
+      const mt = mature[i]
+      const hv = heat[i]
+      // 活性メモリ(発火のピークホールド + 遅い減衰)= 音の通り道に滞留する星
+      const am = Math.max(actMem[i] * Math.pow(ACT_DECAY, dtScale), hv)
+      actMem[i] = am
+      heatSnap[i] = hv // 発火スナップ(局所コントラスト=ピーク計算用)
+      const fire = Math.min(1, hv)
+      splatFire[i] = fire
+      // ガス(連続=格子安全)と星サイズは自セルのみで決定。星明るさは loop2 でピーク依存に
+      gasBright[i] = (GAS_AMBIENT + GAS_ACT_GAIN * am) * mt
+      starSize[i] = STAR_SIZE_BASE + STAR_SIZE_FIRE * fire
       heat[i] *= Math.pow(HEAT_DECAY, dtScale) // 発火残光=光の尾
     }
-    // ストリーク方位: SOM上の重心勾配 → 等高線方向(=流れ)に伸長。隣接が揃い銀河の腕状フィラメントに
+    // 重心場を空間平滑化(学習ノイズを除去 → シャード方位が滑らかな流線に。トポ地図なので妥当)
+    for (let i = 0; i < N; i++) {
+      const gx = i % G,
+        gy = (i / G) | 0
+      let sum = 0,
+        cnt = 0
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = gy + dy
+        if (ny < 0 || ny >= G) continue
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = gx + dx
+          if (nx < 0 || nx >= G) continue
+          sum += centroidArr[ny * G + nx]
+          cnt++
+        }
+      }
+      centroidSmooth[i] = sum / cnt
+    }
+    // 平滑化した重心勾配の等高線方向(=エッジ/流れ)+ 幾何シャード生成(発火セルのみ=疎)
     for (let i = 0; i < N; i++) {
       const gx = i % G,
         gy = (i / G) | 0
@@ -547,22 +636,68 @@ export const FbSparseCortex = () => {
         xp = gx < G - 1 ? i + 1 : i
       const ym = gy > 0 ? i - G : i,
         yp = gy < G - 1 ? i + G : i
-      const dcx = centroidArr[xp] - centroidArr[xm]
-      const dcy = centroidArr[yp] - centroidArr[ym]
-      splatAngle[i] = Math.atan2(dcy, dcx) + Math.PI / 2 // 勾配に直交=等高線方向
+      const dcx = centroidSmooth[xp] - centroidSmooth[xm]
+      const dcy = centroidSmooth[yp] - centroidSmooth[ym]
+      const ang = Math.atan2(dcy, dcx) + Math.PI / 2 // 勾配に直交=等高線方向
+      splatAngle[i] = ang
+      // 局所コントラスト(ピーク): 一様ブロックの内部を抑制 → 星/シャードは縁・孤立点のみ。
+      //   一様域は構造が無い=ガス(連続)だけになり格子が出ない。信号の構造がある所だけ点・線が立つ
+      const hs = heatSnap[i]
+      const nh = (heatSnap[xm] + heatSnap[xp] + heatSnap[ym] + heatSnap[yp]) * 0.25
+      const peakNow = hs > 1e-4 ? Math.max(0, (hs - nh) / hs) : 0 // 発火の局所ピーク(0..1)
+      const am = actMem[i]
+      const na = (actMem[xm] + actMem[xp] + actMem[ym] + actMem[yp]) * 0.25
+      const peakMem = am > 1e-4 ? Math.max(0, (am - na) / am) : 0 // 滞留の局所ピーク(0..1)
+      const mt = mature[i]
+      // 星明るさ: 持続ランドマーク(actMemピーク) + 発火フレア(heatピーク)。一様域は0=ガスのみ
+      starBright[i] = (STAR_FLOOR_GAIN * am * peakMem + STAR_FIRE_GAIN * hs * peakNow) * mt
+      // シャード: 構造がある(ピーク高)発火セルのみ、重心勾配方向に鋭い線分(長さ=トーン性)
+      const o3 = i * 3
+      const v0 = i * 6,
+        v1 = v0 + 3
+      const px = splatPos[o3],
+        py = splatPos[o3 + 1]
+      const fire = splatFire[i]
+      if (fire > SHARD_FIRE_MIN && peakNow > SHARD_PEAK_MIN && mt > 0) {
+        const half = SHARD_LEN_BASE + SHARD_LEN_ELONG * splatElong[i]
+        const dx = Math.cos(ang) * half,
+          dy = Math.sin(ang) * half
+        const lb = SHARD_GAIN * fire * peakNow
+        const rr = cellColor[o3] * lb,
+          gg = cellColor[o3 + 1] * lb,
+          bb = cellColor[o3 + 2] * lb
+        linePos[v0] = px - dx; linePos[v0 + 1] = py - dy; linePos[v0 + 2] = 0
+        linePos[v1] = px + dx; linePos[v1 + 1] = py + dy; linePos[v1 + 2] = 0
+        lineCol[v0] = rr; lineCol[v0 + 1] = gg; lineCol[v0 + 2] = bb
+        lineCol[v1] = rr; lineCol[v1 + 1] = gg; lineCol[v1 + 2] = bb
+      } else {
+        // 非表示: 長さ0・色0
+        linePos[v0] = px; linePos[v0 + 1] = py; linePos[v0 + 2] = 0
+        linePos[v1] = px; linePos[v1 + 1] = py; linePos[v1 + 2] = 0
+        lineCol[v0] = 0; lineCol[v0 + 1] = 0; lineCol[v0 + 2] = 0
+        lineCol[v1] = 0; lineCol[v1 + 1] = 0; lineCol[v1 + 2] = 0
+      }
     }
-    if (splatGeoRef.current) {
-      splatGeoRef.current.attributes.position.needsUpdate = true
-      splatGeoRef.current.attributes.aColor.needsUpdate = true
-      splatGeoRef.current.attributes.aBright.needsUpdate = true
-      splatGeoRef.current.attributes.aSize.needsUpdate = true
-      splatGeoRef.current.attributes.aAngle.needsUpdate = true
-      splatGeoRef.current.attributes.aElong.needsUpdate = true
+    // アップロード
+    if (gasGeoRef.current) {
+      gasGeoRef.current.attributes.position.needsUpdate = true
+      gasGeoRef.current.attributes.aColor.needsUpdate = true
+      gasGeoRef.current.attributes.aBright.needsUpdate = true
     }
-    if (splatMatRef.current) {
-      splatMatRef.current.uniforms.uAspect.value =
-        size.width / Math.max(1, size.height)
+    if (starGeoRef.current) {
+      starGeoRef.current.attributes.position.needsUpdate = true
+      starGeoRef.current.attributes.aColor.needsUpdate = true
+      starGeoRef.current.attributes.aBright.needsUpdate = true
+      starGeoRef.current.attributes.aSize.needsUpdate = true
     }
+    if (shardGeoRef.current) {
+      shardGeoRef.current.attributes.position.needsUpdate = true
+      shardGeoRef.current.attributes.aLCol.needsUpdate = true
+    }
+    const asp = size.width / Math.max(1, size.height)
+    if (gasMatRef.current) gasMatRef.current.uniforms.uAspect.value = asp
+    if (starMatRef.current) starMatRef.current.uniforms.uAspect.value = asp
+    if (shardMatRef.current) shardMatRef.current.uniforms.uAspect.value = asp
   })
 
   const planeSize = Math.max(viewport.width, viewport.height) * 1.05
@@ -585,50 +720,58 @@ export const FbSparseCortex = () => {
           }}
         />
       </mesh>
-      {/* 星雲: 1セル=1ガウス粒子(スプラット, additive)→ 重なって連続ガス */}
+      {/* ガス雲: W全体の色場(柔・連続, additive) */}
       <points renderOrder={1} frustumCulled={false}>
-        <bufferGeometry ref={splatGeoRef}>
-          <bufferAttribute
-            attach="attributes-position"
-            count={N}
-            itemSize={3}
-            array={splatPos}
-          />
-          <bufferAttribute
-            attach="attributes-aColor"
-            count={N}
-            itemSize={3}
-            array={cellColor}
-          />
-          <bufferAttribute
-            attach="attributes-aBright"
-            count={N}
-            itemSize={1}
-            array={splatBright}
-          />
-          <bufferAttribute
-            attach="attributes-aSize"
-            count={N}
-            itemSize={1}
-            array={splatSize}
-          />
-          <bufferAttribute
-            attach="attributes-aAngle"
-            count={N}
-            itemSize={1}
-            array={splatAngle}
-          />
-          <bufferAttribute
-            attach="attributes-aElong"
-            count={N}
-            itemSize={1}
-            array={splatElong}
-          />
+        <bufferGeometry ref={gasGeoRef}>
+          <bufferAttribute attach="attributes-position" count={N} itemSize={3} array={splatPos} />
+          <bufferAttribute attach="attributes-aColor" count={N} itemSize={3} array={cellColor} />
+          <bufferAttribute attach="attributes-aBright" count={N} itemSize={1} array={gasBright} />
         </bufferGeometry>
         <shaderMaterial
-          ref={splatMatRef}
-          vertexShader={SPLAT_VERT}
-          fragmentShader={SPLAT_FRAG}
+          ref={gasMatRef}
+          vertexShader={GAS_VERT}
+          fragmentShader={GAS_FRAG}
+          transparent={true}
+          depthTest={false}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          uniforms={{
+            uAspect: { value: 1 },
+            uSize: { value: GAS_SIZE },
+          }}
+        />
+      </points>
+      {/* 幾何シャード: 重心勾配方向の鋭い線分(発火セルのみ, additive) */}
+      <lineSegments renderOrder={2} frustumCulled={false}>
+        <bufferGeometry ref={shardGeoRef}>
+          <bufferAttribute attach="attributes-position" count={N * 2} itemSize={3} array={linePos} />
+          <bufferAttribute attach="attributes-aLCol" count={N * 2} itemSize={3} array={lineCol} />
+        </bufferGeometry>
+        <shaderMaterial
+          ref={shardMatRef}
+          vertexShader={SHARD_VERT}
+          fragmentShader={SHARD_FRAG}
+          transparent={true}
+          depthTest={false}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          uniforms={{
+            uAspect: { value: 1 },
+          }}
+        />
+      </lineSegments>
+      {/* 星: 鋭い点+十字グリント(発火/活性のみ疎に, additive) */}
+      <points renderOrder={3} frustumCulled={false}>
+        <bufferGeometry ref={starGeoRef}>
+          <bufferAttribute attach="attributes-position" count={N} itemSize={3} array={splatPos} />
+          <bufferAttribute attach="attributes-aColor" count={N} itemSize={3} array={cellColor} />
+          <bufferAttribute attach="attributes-aBright" count={N} itemSize={1} array={starBright} />
+          <bufferAttribute attach="attributes-aSize" count={N} itemSize={1} array={starSize} />
+        </bufferGeometry>
+        <shaderMaterial
+          ref={starMatRef}
+          vertexShader={STAR_VERT}
+          fragmentShader={STAR_FRAG}
           transparent={true}
           depthTest={false}
           depthWrite={false}
