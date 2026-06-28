@@ -52,8 +52,10 @@ const P_TARGET = K_ACTIVE / N // 目標発火率
 // --- OUTPUT 層: 場(ガス) + 流れる粒子(星) ---
 const SAT_FLOOR = 0.65 // ITDコヒーレンス0でも残す最低彩度(鮮やかさ)
 const SPLAT_LAYOUT = 0.92 // 格子レイアウトの clip 範囲(±)
-const SPLAT_POS_OFFSET = 0.24 // 重み由来オフセット(pan=ITD, pitch=重心)で場を湾曲(銀河的湾曲)
-const ELONG_GAIN = 4.0 // 自己相関ピーク → トーン性(=流速の加速)
+const SPLAT_POS_OFFSET = 0.07 // 位置=音色マップを安定させる(動的なpan/pitch湾曲は控えめ=花火化を防ぐ)
+// ケプストラム包絡(段1): log(cochleagram) の DCT 低次 = ピッチ不変な音色ベクトル(SOM入力)
+const NCEP = 16 // 残す係数(c1..c16, c0=ラウドネスは捨てる)
+const DISP_A = 0.35 // 表示状態のEMA追従(発火時に live 入力へ寄せる)
 const ACT_DECAY = 0.985 // 活性メモリ減衰(ガスの滞留)
 // [ガス] 場(SOM)の色雲=不動の地(星雲)。柔・大・連続 → 離散格子が出ない
 const GAS_SIZE = 58.0 // 大きく重ねて連続化(滑らかな雲)
@@ -70,7 +72,7 @@ const P_BRIGHT_FLOOR = 0.05 // 粒子の地明るさ(流れがうっすら見え
 const P_BRIGHT_GAIN = 1.6 // 活性で輝く(音が鳴る腕で星が光る)
 const P_SIZE = 13.0 // 粒子(星)サイズ
 const P_SIZE_FIRE = 9.0 // 発火で拡大
-const P_TRAIL = 4.0 // トレイル長(1フレーム変位の倍率=残像で流れの筋)
+const P_TRAIL = 2.5 // トレイル長(1フレーム変位の倍率=残像で流れの筋)
 const P_TRAIL_DIM = 0.14 // トレイル尾の輝度(頭=明, 尾=暗)
 const P_LIFE = 3.2 // 寿命(秒)— リサイクル
 // データ由来シード(初期化): BMU近傍を実特徴で成長 + 成熟度ゲート(未シードは非表示)
@@ -279,9 +281,18 @@ export const FbSparseCortex = () => {
   const y2 = useMemo(() => new Float32Array(M * 2), [])
   const ringRef = useRef({ idx: 0, filled: 0 })
   const featVec = useMemo(() => new Float32Array(DIM), [])
+  // ケプストラム(段1): DCT 低次の音色ベクトル + 事前計算 cos テーブル
+  const cepVec = useMemo(() => new Float32Array(NCEP), [])
+  const dctCos = useMemo(() => {
+    const t = new Float32Array(NCEP * M)
+    for (let k = 0; k < NCEP; k++)
+      for (let m = 0; m < M; m++)
+        t[k * M + m] = Math.cos((Math.PI * (m + 0.5) * (k + 1)) / M) // c0(DC)は捨て c1..
+    return t
+  }, [])
 
   // ===== INTERPRETATION 層: 重み・状態 =====
-  const W = useMemo(() => new Float32Array(N * DIM), [])
+  const W = useMemo(() => new Float32Array(N * NCEP), []) // 重み=ケプストラム音色プロトタイプ
   const thr = useMemo(() => new Float32Array(N), [])
   const usage = useMemo(() => new Float32Array(N), [])
   const drive = useMemo(() => new Float32Array(N), [])
@@ -290,6 +301,11 @@ export const FbSparseCortex = () => {
   const seeded = useMemo(() => new Uint8Array(N), []) // データ由来シード済みフラグ(0=未初期化)
   const mature = useMemo(() => new Float32Array(N), []) // 成熟度0→1(表示フェードイン)
   const actMem = useMemo(() => new Float32Array(N), []) // 活性メモリ(ガスの滞留)
+  // 表示状態(段1, 案A): 出力が読む量。発火時に live 入力から EMA 更新(位置=音色/色=今の音程)
+  const dispPitch = useMemo(() => new Float32Array(N), []) // 直近の重心(音程→色相/縦位置)
+  const dispPan = useMemo(() => new Float32Array(N), []) // 直近のITD平均(定位→横位置)
+  const dispCoh = useMemo(() => new Float32Array(N), []) // 直近のコヒーレンス(→彩度)
+  const dispTone = useMemo(() => new Float32Array(N), []) // 直近のトーン性(→流速)
 
   // ===== OUTPUT 層: 場(グリッド配列)+ 流れる粒子 =====
   const cellColor = useMemo(() => new Float32Array(N * 3), []) // 共感覚RGB場(ガス + 粒子サンプル)
@@ -327,8 +343,12 @@ export const FbSparseCortex = () => {
       usage.fill(P_TARGET)
       heat.fill(0)
       actMem.fill(0)
+      dispPitch.fill(M / 2)
+      dispPan.fill(0)
+      dispCoh.fill(0)
+      dispTone.fill(0)
     },
-    [W, thr, usage, heat, seeded, mature, actMem]
+    [W, thr, usage, heat, seeded, mature, actMem, dispPitch, dispPan, dispCoh, dispTone]
   )
   const inited = useRef(false)
   if (!inited.current) {
@@ -472,11 +492,38 @@ export const FbSparseCortex = () => {
         featVec[3 * M + p] += ac * invE0
       }
     }
-    // x を L2 正規化(形に着目)
-    let xn = 0
-    for (let k = 0; k < DIM; k++) xn += featVec[k] * featVec[k]
-    const xInv = 1 / (Math.sqrt(xn) + 1e-6)
-    for (let k = 0; k < DIM; k++) featVec[k] *= xInv
+    // --- live 読み出し量(出力用): 色=重心(音程), 横=ITD(定位), 彩度=コヒーレンス, 流速=トーン性 ---
+    let cnum = 0,
+      cden = 1e-9
+    for (let m = 0; m < M; m++) {
+      const e = featVec[m] > 0 ? featVec[m] : 0
+      cnum += m * e
+      cden += e
+    }
+    const liveCentroid = cnum / cden
+    let psum = 0
+    for (let m = 0; m < M; m++) psum += featVec[M + m]
+    const livePan = psum / M
+    let csum = 0
+    for (let m = 0; m < M; m++) csum += featVec[2 * M + m]
+    const liveCoh = Math.min(1, Math.max(0, csum / M))
+    const ac0 = featVec[3 * M] + 1e-9 // SAC のラグ0(≒帯域数)= 正規化基準
+    let acm = 0
+    for (let p = 2; p < P; p++) {
+      const v = featVec[3 * M + p]
+      if (v > acm) acm = v
+    }
+    const liveTone = Math.min(1, Math.max(0, acm / ac0)) // 周期性の強さ(0..1)
+    // --- ケプストラム包絡(段1): log(cochleagram) の DCT 低次 = ピッチ不変な音色ベクトル(SOM入力)---
+    for (let k = 0; k < NCEP; k++) {
+      let acc = 0
+      for (let m = 0; m < M; m++) acc += Math.log(featVec[m] + 1e-4) * dctCos[k * M + m]
+      cepVec[k] = acc
+    }
+    let cn = 0
+    for (let k = 0; k < NCEP; k++) cn += cepVec[k] * cepVec[k]
+    const cInv = 1 / (Math.sqrt(cn) + 1e-6)
+    for (let k = 0; k < NCEP; k++) cepVec[k] *= cInv
 
     // ============================================================
     // [INTERPRETATION 層] スパース符号化(k-WTA + Oja + 近傍 + IP)
@@ -489,9 +536,9 @@ export const FbSparseCortex = () => {
         drive[i] = -1e9 // 未シードは競争に参加しない
         continue
       }
-      const b = i * DIM
+      const b = i * NCEP
       let s = 0
-      for (let k = 0; k < DIM; k++) s += W[b + k] * featVec[k]
+      for (let k = 0; k < NCEP; k++) s += W[b + k] * cepVec[k]
       const u = s - thr[i]
       drive[i] = u
       if (u > maxU) {
@@ -502,23 +549,28 @@ export const FbSparseCortex = () => {
     // データ由来シード(成長): 初回は中央パッチ、以後は BMU の未シード近傍を実特徴でシード
     {
       const seedFrom = (j: number, useBmu: boolean) => {
-        const bj = j * DIM
-        const bb = bmu * DIM
+        const bj = j * NCEP
+        const bb = bmu * NCEP
         let nrm = 0
-        for (let k = 0; k < DIM; k++) {
+        for (let k = 0; k < NCEP; k++) {
           const base = useBmu
-            ? SEED_MIX * featVec[k] + (1 - SEED_MIX) * W[bb + k]
-            : featVec[k]
+            ? SEED_MIX * cepVec[k] + (1 - SEED_MIX) * W[bb + k]
+            : cepVec[k]
           const v = base + (Math.random() * 2 - 1) * SEED_JITTER
           W[bj + k] = v
           nrm += v * v
         }
         const inv = 1 / (Math.sqrt(nrm) + 1e-6)
-        for (let k = 0; k < DIM; k++) W[bj + k] *= inv
+        for (let k = 0; k < NCEP; k++) W[bj + k] *= inv
         seeded[j] = 1
         mature[j] = 0 // フェードインで現れる
         thr[j] = 0
         usage[j] = P_TARGET
+        // 表示状態を live 入力で初期化(その領域が今鳴らした音程/定位/トーン)
+        dispPitch[j] = liveCentroid
+        dispPan[j] = livePan
+        dispCoh[j] = liveCoh
+        dispTone[j] = liveTone
       }
       if (bmu < 0) {
         // 初回: 中央パッチを最初の特徴でシード(ここから成長)
@@ -555,18 +607,24 @@ export const FbSparseCortex = () => {
       thr[i] += GAMMA_IP * dtScale * (usage[i] - P_TARGET)
       if (fired) {
         const y = (drive[i] - kThr) * invMaxU // 0..1
-        const b = i * DIM
+        const b = i * NCEP
         // Oja: w += η·y·(x - y·w)
         let nrm = 0
-        for (let k = 0; k < DIM; k++) {
-          const wv = W[b + k] + ETA * dtScale * y * (featVec[k] - y * W[b + k])
+        for (let k = 0; k < NCEP; k++) {
+          const wv = W[b + k] + ETA * dtScale * y * (cepVec[k] - y * W[b + k])
           W[b + k] = wv
           nrm += wv * wv
         }
         // 単位ノルム化
         const inv = 1 / (Math.sqrt(nrm) + 1e-6)
-        for (let k = 0; k < DIM; k++) W[b + k] *= inv
+        for (let k = 0; k < NCEP; k++) W[b + k] *= inv
         heat[i] = Math.min(1.5, heat[i] + y * dtScale)
+        // 表示状態を live 入力へ EMA(発火=その音色領域が今鳴らした音程/定位/トーン)
+        const da = DISP_A * dtScale
+        dispPitch[i] += da * (liveCentroid - dispPitch[i])
+        dispPan[i] += da * (livePan - dispPan[i])
+        dispCoh[i] += da * (liveCoh - dispCoh[i])
+        dispTone[i] += da * (liveTone - dispTone[i])
 
         // 近傍協調(トポグラフィック)
         const gx = i % G, gy = (i / G) | 0
@@ -578,8 +636,8 @@ export const FbSparseCortex = () => {
             if (j === i || !seeded[j]) continue // シード済み近傍のみ協調(成長は明示シードが担当)
             const gd2 = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy)
             const h = ETA_NB * dtScale * Math.exp(-gd2 / (2 * NB_RAD * NB_RAD))
-            const bj = j * DIM
-            for (let k = 0; k < DIM; k++) W[bj + k] += h * (featVec[k] - W[bj + k])
+            const bj = j * NCEP
+            for (let k = 0; k < NCEP; k++) W[bj + k] += h * (cepVec[k] - W[bj + k])
           }
         }
       }
@@ -592,42 +650,24 @@ export const FbSparseCortex = () => {
     // ============================================================
     let sumFire = 0
     for (let i = 0; i < N; i++) {
-      const b = i * DIM
-      // 色相: cochleagram部のスペクトル重心 → 周波数 → note → hue
-      let num = 0,
-        den = 1e-9
-      for (let m = 0; m < M; m++) {
-        const e = W[b + m] > 0 ? W[b + m] : 0
-        num += m * e
-        den += e
-      }
-      const centroid = num / den // 0..M-1(スペクトル重心=ピッチ/明るさ)
+      // 色相: そのセルが直近に鳴らした音程(dispPitch=live重心のEMA)→ note → hue
+      const centroid = dispPitch[i]
       centroidArr[i] = centroid
-      // トーン性(流速): 自己相関部[3M,3M+P)のピーク
-      let acMax = 0
-      for (let k = 0; k < P; k++) {
-        const v = W[b + 3 * M + k]
-        if (v > acMax) acMax = v
-      }
-      splatElong[i] = Math.min(1, acMax * ELONG_GAIN)
-      const f = bandFreq(centroid)
+      splatElong[i] = dispTone[i] // トーン性(=流速)
+      const cc = Math.min(M - 1, Math.max(0, centroid))
+      const f = bandFreq(cc)
       const note = 12 * Math.log2(f / 440) + 69
       const hue = (((note % 12) + 12) % 12) / 12
-      // 彩度: ITD強度部(コヒーレンス)の平均
-      let coh = 0
-      for (let k = 0; k < M; k++) coh += W[b + 2 * M + k]
-      coh = Math.min(1, Math.max(0, coh / M))
-      const sat = SAT_FLOOR + (1 - SAT_FLOOR) * coh
+      // 彩度: 直近のコヒーレンス
+      const sat = SAT_FLOOR + (1 - SAT_FLOOR) * dispCoh[i]
       hsv2rgb(hue, sat, 1.0, cellColor, i * 3)
-      // 位置: 格子 + 重み由来オフセット(pan=ITD平均, pitch=重心)で場を湾曲
+      // 位置: 格子(=音色マップ) + 表示状態(pan=定位, pitch=音程)で湾曲
       const gx = i % G,
         gy = (i / G) | 0
       const baseX = ((gx / (G - 1)) * 2 - 1) * SPLAT_LAYOUT
       const baseY = ((gy / (G - 1)) * 2 - 1) * SPLAT_LAYOUT
-      let pan = 0
-      for (let k = 0; k < M; k++) pan += W[b + M + k] // best-ITD ∈ [-1,1]
-      pan /= M
-      const pitchDev = (centroid / (M - 1)) * 2 - 1 // [-1,1]
+      const pan = dispPan[i]
+      const pitchDev = (cc / (M - 1)) * 2 - 1 // [-1,1]
       const o3 = i * 3
       splatPos[o3 + 0] = baseX + SPLAT_POS_OFFSET * pan
       splatPos[o3 + 1] = baseY + SPLAT_POS_OFFSET * pitchDev
