@@ -45,8 +45,8 @@ const LOUD_FLOOR = 0.3 // 入力エネルギー床(無音・微小音では学�
 // --- INTERPRETATION 層パラメータ ---
 const G = 64 // 格子 G×G
 const N = G * G // 4096 セル
-const K_ACTIVE = 12 // スパース: 同時発火数(旧82。多勝者の混合学習=均質化を防ぐ)
-const ETA = 0.02 // 学習率(遅く=セルは結晶。適応は成長=シードが担う)
+const K_ACTIVE = 24 // スパース: 同時発火数(12=分化優先 ⇔ 82=単色化。24=動きとの折衷)
+const ETA = 0.06 // 学習率(上げると地図が音楽と共に呼吸。0.06=流転しすぎ, 0.02=結晶)
 const ETA_NB = 0.004 // 近傍協調(弱め=部品が混合平均へ均質化せず分化する)
 const NB_RAD = 3 // 近傍半径
 const GAMMA_IP = 0.0003 // IP(恒常性)。使われすぎるセルを抑え分化を促す
@@ -54,7 +54,7 @@ const HEAT_DECAY = 0.95 // 発火残光(小=キレ/大=尾を引く)
 const USE_ALPHA = 0.02 // 使用率 EMA
 const P_TARGET = K_ACTIVE / N // 目標発火率
 // ソフトWTA表示: 発火(学習)は上位12のまま、表示の熱だけ共鳴上位へ広く注ぐ
-const DISP_K = 40 // 共鳴表示の対象セル数
+const DISP_K = 80 // 共鳴表示の対象セル数(大きく=広い裾野の発光)
 const DISP_GAIN = 0.6 // 表示熱の強さ(発火セルの 1.0 より弱く=チャンピオンは際立つ)
 
 // --- OUTPUT 層: 場(ガス) + 流れる粒子(星) ---
@@ -81,8 +81,7 @@ const P_SIZE_FIRE = 9.0
 const P_TRAIL = 2.5
 const P_TRAIL_DIM = 0.14
 const P_LIFE = 3.2
-// データ由来シード(初期化): BMU近傍を実特徴で成長 + 成熟度ゲート(未シードは非表示)
-const SEED_RAD = 2
+// データ由来シード(初期化): 最初の実入力+ジッタで全セル一括初期化(古典SOM流)
 const SEED_JITTER = 0.04
 const SEED_MIX = 0.7
 const MATURE_RATE = 0.05
@@ -579,22 +578,11 @@ export const FbSparseCortex = () => {
           updateCellVisual(j)
         }
         if (bmu < 0) {
-          const cx = G >> 1,
-            cy = G >> 1
-          for (let ny = cy - SEED_RAD; ny <= cy + SEED_RAD; ny++)
-            for (let nx = cx - SEED_RAD; nx <= cx + SEED_RAD; nx++) {
-              if (nx < 0 || nx >= G || ny < 0 || ny >= G) continue
-              seedFrom(ny * G + nx, false)
-            }
-        } else {
-          const gx = bmu % G,
-            gy = (bmu / G) | 0
-          for (let ny = gy - SEED_RAD; ny <= gy + SEED_RAD; ny++)
-            for (let nx = gx - SEED_RAD; nx <= gx + SEED_RAD; nx++) {
-              if (nx < 0 || nx >= G || ny < 0 || ny >= G) continue
-              const j = ny * G + nx
-              if (!seeded[j]) seedFrom(j, true)
-            }
+          // 初回のみ: 全セルを「最初の実入力+微小ジッタ」で一括初期化(古典SOM流)。
+          // 中央からの成長(フロンティア播種)は廃止 — 全域が最初から競争と学習に
+          // 参加するため、クラスタ(音色地区)は場全体にまんべんなく分布して形成される。
+          // ジッタが対称性を破り、k-WTA+近傍協調+IP が場のあちこちで分化を進める。
+          for (let j = 0; j < N; j++) seedFrom(j, false)
         }
       }
       // k-WTA しきい値(上位 K_ACTIVE が活性 = スパース)
