@@ -53,6 +53,9 @@ const GAMMA_IP = 0.0003 // IP(恒常性)。使われすぎるセルを抑え分�
 const HEAT_DECAY = 0.95 // 発火残光(小=キレ/大=尾を引く)
 const USE_ALPHA = 0.02 // 使用率 EMA
 const P_TARGET = K_ACTIVE / N // 目標発火率
+// ソフトWTA表示: 発火(学習)は上位12のまま、表示の熱だけ共鳴上位へ広く注ぐ
+const DISP_K = 40 // 共鳴表示の対象セル数
+const DISP_GAIN = 0.6 // 表示熱の強さ(発火セルの 1.0 より弱く=チャンピオンは際立つ)
 
 // --- OUTPUT 層: 場(ガス) + 流れる粒子(星) ---
 const SAT_FLOOR = 0.65 // 最低彩度(鮮やかさ)
@@ -79,7 +82,7 @@ const P_TRAIL = 2.5
 const P_TRAIL_DIM = 0.14
 const P_LIFE = 3.2
 // データ由来シード(初期化): BMU近傍を実特徴で成長 + 成熟度ゲート(未シードは非表示)
-const SEED_RAD = 1
+const SEED_RAD = 2
 const SEED_JITTER = 0.04
 const SEED_MIX = 0.7
 const MATURE_RATE = 0.05
@@ -669,6 +672,19 @@ export const FbSparseCortex = () => {
               updateCellVisual(j)
             }
           }
+        }
+      }
+      // ソフトWTA表示: 学習(発火12セル)とは独立に、共鳴上位 DISP_K セルへ
+      // 表示用の熱をスコア勾配で注ぐ。発火セルは「今の音に実際に共鳴している
+      // 家系の代表」であり、その次点たちも共鳴の事実がある=信号由来の発光。
+      // usage/IP には数えない=学習への影響ゼロ(均質化は起こり得ない)。
+      {
+        const dThr = driveSorted[N - Math.min(DISP_K, seededCountRef.current)]
+        const dInv = 1 / (maxU - dThr + 1e-6)
+        for (let i = 0; i < N; i++) {
+          if (!seeded[i] || drive[i] < dThr) continue
+          const g2 = Math.max(0, (drive[i] - dThr) * dInv)
+          heat[i] = Math.min(1.5, heat[i] + DISP_GAIN * g2 * dtScale)
         }
       }
     } // end runAudio
