@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef } from "react"
 import { useFrame, useThree } from "@react-three/fiber"
 import * as THREE from "three"
-import {
-  AudioFrame,
-  useAudioDynamicsStore,
-} from "../stores/audio-dynamics-store"
+import { AudioFrame } from "../stores/audio-dynamics-store"
+import { audioBus } from "../audio/audio-bus"
 import { useThemeStore } from "../stores/theme-store"
 import { Hct } from "@material/material-color-utilities"
 
@@ -44,6 +42,13 @@ const TAU_CYCLES = 2.5 // 観測時定数 = 中心周波数の何周期ぶんか
 const TAU_MIN_MS = 4.0 // 時定数の下限(高域が個々のサンプルノイズに反応しないよう)
 const SR = 44100 // フィルタ・時定数の基準サンプルレート
 const WARMUP = 1024 // 漏れ積分のウォームアップ(サンプル)
+// Logic はフレーム(View)と切り離し、ファイル位置基準のホップ刻みで駆動する。
+// 1ホップ=20ms=882サンプル。結果は音声データのみの関数(fps・壁時計に非依存)。
+const HOP_SAMPLES = Math.round(HOP_SEC * SR) // 882
+const MAX_HOPS_FRAME = 1 // 1フレームで消化するホップ数の上限(フレーム予算の保護)
+// 定常需要は50ホップ/秒=0.83個/フレームなので1で足りる(実行ペーシングが均等化)。
+// 2以上にすると補給直後に2ホップ載るフレームが生じ、p95フレーム時間が悪化する
+// (実測: 上限4=51fps, 上限2=p95 25.6ms, 上限1が最も滑らか)
 const SHARP = 0.6 // 側抑制(平均床を引く)。床の共有で全パッチが似るのを防ぐ
 const LOUD_FLOOR = 0.3 // 入力エネルギー床(無音・微小音では学習もシードもしない)
 
@@ -264,7 +269,6 @@ const TRAIL_FRAG = `
 `
 
 export const FbSparseCortex = () => {
-  const [audioDynamicsState] = useAudioDynamicsStore()
   const [themeStoreState] = useThemeStore()
   const viewport = useThree(s => s.viewport)
   const size = useThree(s => s.size)
@@ -310,7 +314,6 @@ export const FbSparseCortex = () => {
   // パッチ履歴(T_HIST スライスのリング)→ 特徴 x
   const hist = useMemo(() => new Float32Array(DIM), [])
   const histHeadRef = useRef(0)
-  const nextSnapRef = useRef(0)
   const featVec = useMemo(() => new Float32Array(DIM), [])
   // 加算再構成 r と残差 e、活性 a の一時バッファ
   const recon = useMemo(() => new Float32Array(DIM), [])
@@ -442,11 +445,25 @@ export const FbSparseCortex = () => {
     ;(window as any).__fbcx = { G, M, DIM, seeded, mature, heat, W, centroidArr, featVec, env2, stats }
   }, [seeded, mature, heat, W, centroidArr, featVec, env2, stats])
 
-  const clock = useMemo(() => ({ frame: null as AudioFrame | null, time: 0 }), [])
+  // [Logic入力] オーディオバスを購読し、0.5秒窓スナップショットをファイル位置で縫合。
+  // React state を経由しない push 受信(再レンダーなし・レンダー起因の中間値ロスなし)。
+  // 窓は~50%重複して届くので、lastPos(処理済みファイル位置)で重複を読み飛ばせば
+  // 継ぎ目のない決定的なサンプル列になる。ギャップ・シーク・曲替わりは窓頭から再開。
+  const streamRef = useRef<{ frame: AudioFrame | null; lastPos: number }>({
+    frame: null,
+    lastPos: 0,
+  })
   useEffect(() => {
-    clock.frame = audioDynamicsState.frame
-    clock.time = audioDynamicsState.frame.timeSeconds
-  }, [audioDynamicsState.frame, clock])
+    return audioBus.subscribe(frame => {
+      const st = streamRef.current
+      const winStart = Math.round(frame.timeSeconds * frame.sampleRate)
+      const winEnd = winStart + frame.samples0.length
+      if (st.lastPos < winStart || st.lastPos >= winEnd) st.lastPos = winStart
+      st.frame = frame
+    })
+  }, [])
+  // 実行ペーシング用の時間口座(壁時計は「いつ実行するか」のみに関与。結果は不変)
+  const hopAccumRef = useRef(0)
 
   const colors = useMemo(() => {
     const base = Hct.fromInt(themeStoreState.sourceColor)
@@ -469,78 +486,75 @@ export const FbSparseCortex = () => {
       initInterp()
       resetRef.current = false
     }
-    // フレームレート非依存化: 60fps基準で学習/減衰/流れを時間スケール
+    // View側の時間スケール(熱の減衰・流れ・粒子用)。Logicは下のホップ固定刻み
     const dtScale = Math.min(4, Math.max(0.25, deltaTime * 60))
-    // 音声処理(あれば): INPUT + INTERPRETATION(学習)。OUTPUT は下で毎フレーム実行
-    const runAudio = () => {
-      const frame = clock.frame
-      if (!frame || frame.samples0.length === 0) return
+    // ============================================================
+    // [Logic] ファイル位置基準・ホップ駆動の処理。
+    //   結果は音声データのみの関数(fps・壁時計に非依存=決定的)。
+    //   実行はフレームに間借りするが、1フレームの消化数は上限で保護。
+    // ============================================================
+    const processHops = (maxHops: number): number => {
+      const st = streamRef.current
+      const frame = st.frame
+      if (!frame || frame.samples0.length === 0) return 0
+      let done = 0
       const s0 = frame.samples0
       const s1 = frame.samples1
-      const len = s0.length
-      const sampleRate = frame.sampleRate
-      const startOffset = Math.max(
-        0,
-        Math.floor((clock.time - frame.timeSeconds) * sampleRate)
-      )
-      const remaining = len - startOffset
-      const consume = Math.max(0, Math.min(Math.floor(deltaTime * sampleRate), remaining))
-      clock.time += deltaTime
-      if (consume === 0) return
-
-      // ============================================================
-      // [INPUT 層] フィルタバンク → 生パッチ x(L/R × T スライス, 非負)
-      // ============================================================
+      const winStart = Math.round(frame.timeSeconds * frame.sampleRate)
+      const winEnd = winStart + s0.length
       const { b0, b2, a1, a2, envA } = coeffs
-      for (let i = 0; i < consume; i++) {
-        const sL = s0[startOffset + i]
-        const sR = s1[startOffset + i]
-        for (let m = 0; m < M; m++) {
-          const iL = m * 2, iR = m * 2 + 1
-          const aE = envA[m]
-          const yL = b0[m] * sL + b2[m] * x2[iL] - a1[m] * y1[iL] - a2[m] * y2[iL]
-          x2[iL] = x1[iL]; x1[iL] = sL; y2[iL] = y1[iL]; y1[iL] = yL
-          env2[iL] += aE * (yL * yL - env2[iL]) // 帯域別漏れ積分(蝸牛的包絡)
-          const yR = b0[m] * sR + b2[m] * x2[iR] - a1[m] * y1[iR] - a2[m] * y2[iR]
-          x2[iR] = x1[iR]; x1[iR] = sR; y2[iR] = y1[iR]; y1[iR] = yR
-          env2[iR] += aE * (yR * yR - env2[iR])
+      // Logicの時間刻みは常に1ホップ=20ms(定数)。外側のView用dtScaleをシャドウする
+      const dtScale = HOP_SEC * 60
+      for (let hopN = 0; hopN < maxHops; hopN++) {
+        if (st.lastPos + HOP_SAMPLES > winEnd) return done // 次の窓の到着待ち
+        let idx = st.lastPos - winStart
+        // --- [INPUT] 1ホップぶんのフィルタ+帯域別漏れ積分 ---
+        for (let i = 0; i < HOP_SAMPLES; i++, idx++) {
+          const sL = s0[idx]
+          const sR = s1[idx]
+          for (let m = 0; m < M; m++) {
+            const iL = m * 2, iR = m * 2 + 1
+            const aE = envA[m]
+            const yL = b0[m] * sL + b2[m] * x2[iL] - a1[m] * y1[iL] - a2[m] * y2[iL]
+            x2[iL] = x1[iL]; x1[iL] = sL; y2[iL] = y1[iL]; y1[iL] = yL
+            env2[iL] += aE * (yL * yL - env2[iL]) // 帯域別漏れ積分(蝸牛的包絡)
+            const yR = b0[m] * sR + b2[m] * x2[iR] - a1[m] * y1[iR] - a2[m] * y2[iR]
+            x2[iR] = x1[iR]; x1[iR] = sR; y2[iR] = y1[iR]; y1[iR] = yR
+            env2[iR] += aE * (yR * yR - env2[iR])
+          }
         }
-      }
-      ringRef.current.filled = Math.min(WARMUP, ringRef.current.filled + consume)
-      if (ringRef.current.filled < WARMUP) return
+        st.lastPos += HOP_SAMPLES
+        done++
+        ringRef.current.filled = Math.min(WARMUP, ringRef.current.filled + HOP_SAMPLES)
+        if (ringRef.current.filled < WARMUP) continue
 
-      // 包絡(L/R別・圧縮・側抑制)を現スライスへ書込。漏れ積分の平方根 = RMS包絡
-      const slot = histHeadRef.current * SLICE
-      let meanL = 0,
-        meanR = 0
-      for (let m = 0; m < M; m++) {
-        const envL = Math.pow(Math.sqrt(env2[m * 2]), COMPRESS)
-        const envR = Math.pow(Math.sqrt(env2[m * 2 + 1]), COMPRESS)
-        hist[slot + m] = envL
-        hist[slot + M + m] = envR
-        meanL += envL / M
-        meanR += envR / M
-      }
-      for (let m = 0; m < M; m++) {
-        hist[slot + m] = Math.max(0, hist[slot + m] - SHARP * meanL)
-        hist[slot + M + m] = Math.max(0, hist[slot + M + m] - SHARP * meanR)
-      }
-      // スライス確定(HOP間隔)。次スライスは現値から連続に始める
-      if (clock.time >= nextSnapRef.current) {
-        histHeadRef.current = (histHeadRef.current + 1) % T_HIST
-        hist.copyWithin(histHeadRef.current * SLICE, slot, slot + SLICE)
-        nextSnapRef.current = Math.max(nextSnapRef.current + HOP_SEC, clock.time)
-      }
-      // x = 履歴を古→新の順に連結
-      const head = histHeadRef.current
-      for (let k = 0; k < T_HIST; k++) {
-        const src = ((head + 1 + k) % T_HIST) * SLICE
-        featVec.set(hist.subarray(src, src + SLICE), k * SLICE)
-      }
-      let inputE = 0
-      for (let d = 0; d < DIM; d++) inputE += featVec[d] * featVec[d]
-      stats.inputE = inputE
-      if (inputE < LOUD_FLOOR) return
+        // --- スライス確定(1ホップ=1スライス。壁時計判定を廃止し決定的に) ---
+        const slot = histHeadRef.current * SLICE
+        let meanL = 0,
+          meanR = 0
+        for (let m = 0; m < M; m++) {
+          const envL = Math.pow(Math.sqrt(env2[m * 2]), COMPRESS)
+          const envR = Math.pow(Math.sqrt(env2[m * 2 + 1]), COMPRESS)
+          hist[slot + m] = envL
+          hist[slot + M + m] = envR
+          meanL += envL / M
+          meanR += envR / M
+        }
+        for (let m = 0; m < M; m++) {
+          hist[slot + m] = Math.max(0, hist[slot + m] - SHARP * meanL)
+          hist[slot + M + m] = Math.max(0, hist[slot + M + m] - SHARP * meanR)
+        }
+        // x = 履歴を古→新の順に連結(いま書いたスロットが最新)
+        const head = histHeadRef.current
+        for (let k = 0; k < T_HIST; k++) {
+          const src = ((head + 1 + k) % T_HIST) * SLICE
+          featVec.set(hist.subarray(src, src + SLICE), k * SLICE)
+        }
+        histHeadRef.current = (head + 1) % T_HIST
+        let inputE = 0
+        for (let d = 0; d < DIM; d++) inputE += featVec[d] * featVec[d]
+        stats.inputE = inputE
+        if (inputE < LOUD_FLOOR) continue
 
       // ============================================================
       // [INTERPRETATION 層] 前向き(適合度)→ シード成長 → k-WTA → 残差学習
@@ -629,7 +643,7 @@ export const FbSparseCortex = () => {
 
       // SOMアニーリング: 地図年齢(音が鳴っていた累積秒)で近傍半径と協調強度を
       // 大→小へ指数収束させる。序盤=地図全体の粗い整列、以後=局所を磨く。
-      mapAgeRef.current += deltaTime
+      mapAgeRef.current += HOP_SEC // 1ホップ=20msの音声時間(壁時計でなく)
       const annealT = Math.exp(-mapAgeRef.current / ANNEAL_TAU)
       const nbRad = NB_RAD + (NB_RAD_START - NB_RAD) * annealT
       const etaNb = ETA_NB + (ETA_NB_START - ETA_NB) * annealT
@@ -696,8 +710,18 @@ export const FbSparseCortex = () => {
           heat[i] = Math.min(1.5, heat[i] + DISP_GAIN * g2 * dtScale)
         }
       }
-    } // end runAudio
-    runAudio()
+      } // end hop loop
+      return done
+    } // end processHops
+    // 実行ペーシング: ホップを音声の実時間レート(50個/秒)で均等に消化する。
+    // 一気に消化すると (a) 4Hzの負荷バースト、(b) 熱の注入が250ms周期で脈動、
+    // (c) まだ聴こえていない先の音声に映像が反応(映像の先行)、の3つが起こる。
+    hopAccumRef.current = Math.min(0.25, hopAccumRef.current + deltaTime)
+    const hopBudget = Math.min(MAX_HOPS_FRAME, Math.floor(hopAccumRef.current / HOP_SEC))
+    if (hopBudget > 0) {
+      const doneHops = processHops(hopBudget)
+      hopAccumRef.current -= doneHops * HOP_SEC
+    }
     stats.seededCount = seededCountRef.current
     // ============================================================
     // [OUTPUT 層 / 場の構築] 色・位置は差分更新済み。ここは毎フレームのスカラー場のみ

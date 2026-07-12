@@ -6,6 +6,7 @@ import { enqueueSnackbar } from "notistack"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
 import { useAudioDynamicsStore } from "../stores/audio-dynamics-store"
+import { audioBus } from "./audio-bus"
 import FFT from "fft.js"
 
 const makeAudioAnalyser = () => {
@@ -224,7 +225,8 @@ export const AudioPlayer = () => {
       audioAnalyser
         .requestAnalyze(audio.currentTime)
         .then(frame => {
-          dynamicThemeActionsRef.current.setFrame(frame)
+          audioBus.emit(frame) // Logic層(可視化)への直接配信。Reactを経由しない
+          dynamicThemeActionsRef.current.setFrame(frame) // 背景色などReact系の消費者向け
         })
         .catch(error => {
           console.warn("Failed to analyze audio", error)
