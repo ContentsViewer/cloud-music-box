@@ -33,12 +33,17 @@ const T_HIST = 6 // パッチの時間スライス数
 const HOP_SEC = 0.02 // スライス間隔(~20ms → パッチ長 ~120ms)
 const SLICE = M * 2 // 1スライス = [L(32) | R(32)]
 const DIM = SLICE * T_HIST // 384
-const ENV_W = 256 // 包絡の観測窓(サンプル)
-const RING = 512
-const F_LO = 60
+const F_LO = 45 // 下限(≈4弦ベース最低音域 E1〜/キック胴体を取り込む)
 const F_HI = 16000
 const Q = 5.0
 const COMPRESS = 0.3 // 蝸牛的圧縮
+// 包絡は帯域別の漏れ積分(蝸牛的): 固定窓でなく、各帯域が自分の中心周波数の
+// TAU_CYCLES 周期ぶんの時定数で y² を平滑化。低域=長い窓(震え除去)、高域=短い窓。
+// 旧固定窓(256サンプル≈5.8ms)は低域で周期未満=測定リップルを生んでいた。
+const TAU_CYCLES = 2.5 // 観測時定数 = 中心周波数の何周期ぶんか
+const TAU_MIN_MS = 4.0 // 時定数の下限(高域が個々のサンプルノイズに反応しないよう)
+const SR = 44100 // フィルタ・時定数の基準サンプルレート
+const WARMUP = 1024 // 漏れ積分のウォームアップ(サンプル)
 const SHARP = 0.6 // 側抑制(平均床を引く)。床の共有で全パッチが似るのを防ぐ
 const LOUD_FLOOR = 0.3 // 入力エネルギー床(無音・微小音では学習もシードもしない)
 
@@ -259,32 +264,36 @@ export const FbSparseCortex = () => {
   const trailGeoRef = useRef<THREE.BufferGeometry>(null)
   const resetRef = useRef(false)
 
-  // ===== INPUT 層: フィルタバンク係数 =====
+  // ===== INPUT 層: フィルタバンク係数 + 帯域別包絡EMA係数 =====
   const coeffs = useMemo(() => {
-    const sr = 44100
     const b0 = new Float32Array(M)
     const b2 = new Float32Array(M)
     const a1 = new Float32Array(M)
     const a2 = new Float32Array(M)
+    const envA = new Float32Array(M) // 包絡EMA係数(帯域別時定数)
+    const tauMin = TAU_MIN_MS * 0.001
     for (let m = 0; m < M; m++) {
       const f = F_LO * Math.pow(F_HI / F_LO, m / (M - 1))
-      const w0 = (2 * Math.PI * f) / sr
+      const w0 = (2 * Math.PI * f) / SR
       const alpha = Math.sin(w0) / (2 * Q)
       const a0 = 1 + alpha
       b0[m] = alpha / a0
       b2[m] = -alpha / a0
       a1[m] = (-2 * Math.cos(w0)) / a0
       a2[m] = (1 - alpha) / a0
+      // 時定数 τ = max(下限, TAU_CYCLES / f)。1サンプルあたりのEMA係数
+      const tau = Math.max(tauMin, TAU_CYCLES / f)
+      envA[m] = 1 - Math.exp(-1 / (tau * SR))
     }
-    return { b0, b2, a1, a2 }
+    return { b0, b2, a1, a2, envA }
   }, [])
 
-  const bandBuf = useMemo(() => new Float32Array(M * 2 * RING), [])
   const x1 = useMemo(() => new Float32Array(M * 2), [])
   const x2 = useMemo(() => new Float32Array(M * 2), [])
   const y1 = useMemo(() => new Float32Array(M * 2), [])
   const y2 = useMemo(() => new Float32Array(M * 2), [])
-  const ringRef = useRef({ idx: 0, filled: 0 })
+  const env2 = useMemo(() => new Float32Array(M * 2), []) // 帯域別 y² の漏れ積分(L/R)
+  const ringRef = useRef({ filled: 0 })
   // パッチ履歴(T_HIST スライスのリング)→ 特徴 x
   const hist = useMemo(() => new Float32Array(DIM), [])
   const histHeadRef = useRef(0)
@@ -415,8 +424,8 @@ export const FbSparseCortex = () => {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
   useEffect(() => {
-    ;(window as any).__fbcx = { G, M, DIM, seeded, mature, heat, W, centroidArr, stats }
-  }, [seeded, mature, heat, W, centroidArr, stats])
+    ;(window as any).__fbcx = { G, M, DIM, seeded, mature, heat, W, centroidArr, featVec, env2, stats }
+  }, [seeded, mature, heat, W, centroidArr, featVec, env2, stats])
 
   const clock = useMemo(() => ({ frame: null as AudioFrame | null, time: 0 }), [])
   useEffect(() => {
@@ -467,47 +476,31 @@ export const FbSparseCortex = () => {
       // ============================================================
       // [INPUT 層] フィルタバンク → 生パッチ x(L/R × T スライス, 非負)
       // ============================================================
-      const { b0, b2, a1, a2 } = coeffs
-      let idx = ringRef.current.idx
+      const { b0, b2, a1, a2, envA } = coeffs
       for (let i = 0; i < consume; i++) {
         const sL = s0[startOffset + i]
         const sR = s1[startOffset + i]
         for (let m = 0; m < M; m++) {
           const iL = m * 2, iR = m * 2 + 1
+          const aE = envA[m]
           const yL = b0[m] * sL + b2[m] * x2[iL] - a1[m] * y1[iL] - a2[m] * y2[iL]
           x2[iL] = x1[iL]; x1[iL] = sL; y2[iL] = y1[iL]; y1[iL] = yL
-          bandBuf[iL * RING + idx] = yL
+          env2[iL] += aE * (yL * yL - env2[iL]) // 帯域別漏れ積分(蝸牛的包絡)
           const yR = b0[m] * sR + b2[m] * x2[iR] - a1[m] * y1[iR] - a2[m] * y2[iR]
           x2[iR] = x1[iR]; x1[iR] = sR; y2[iR] = y1[iR]; y1[iR] = yR
-          bandBuf[iR * RING + idx] = yR
+          env2[iR] += aE * (yR * yR - env2[iR])
         }
-        idx = idx + 1
-        if (idx >= RING) idx -= RING
       }
-      ringRef.current.idx = idx
-      ringRef.current.filled = Math.min(RING, ringRef.current.filled + consume)
-      if (ringRef.current.filled < ENV_W + 8) return
+      ringRef.current.filled = Math.min(WARMUP, ringRef.current.filled + consume)
+      if (ringRef.current.filled < WARMUP) return
 
-      // 包絡(L/R別・圧縮・側抑制)を現スライスへ書込
-      const last = (idx - 1 + RING) % RING
+      // 包絡(L/R別・圧縮・側抑制)を現スライスへ書込。漏れ積分の平方根 = RMS包絡
       const slot = histHeadRef.current * SLICE
       let meanL = 0,
         meanR = 0
       for (let m = 0; m < M; m++) {
-        const baseL = (m * 2) * RING
-        const baseR = (m * 2 + 1) * RING
-        let eL = 1e-9,
-          eR = 1e-9
-        for (let w = 0; w < ENV_W; w++) {
-          let t = last - w
-          if (t < 0) t += RING
-          const vL = bandBuf[baseL + t],
-            vR = bandBuf[baseR + t]
-          eL += vL * vL
-          eR += vR * vR
-        }
-        const envL = Math.pow(Math.sqrt(eL / ENV_W), COMPRESS)
-        const envR = Math.pow(Math.sqrt(eR / ENV_W), COMPRESS)
+        const envL = Math.pow(Math.sqrt(env2[m * 2]), COMPRESS)
+        const envR = Math.pow(Math.sqrt(env2[m * 2 + 1]), COMPRESS)
         hist[slot + m] = envL
         hist[slot + M + m] = envR
         meanL += envL / M
