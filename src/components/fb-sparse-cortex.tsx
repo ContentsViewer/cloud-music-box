@@ -45,10 +45,10 @@ const WARMUP = 1024 // 漏れ積分のウォームアップ(サンプル)
 // Logic はフレーム(View)と切り離し、ファイル位置基準のホップ刻みで駆動する。
 // 1ホップ=20ms=882サンプル。結果は音声データのみの関数(fps・壁時計に非依存)。
 const HOP_SAMPLES = Math.round(HOP_SEC * SR) // 882
-const MAX_HOPS_FRAME = 1 // 1フレームで消化するホップ数の上限(フレーム予算の保護)
-// 定常需要は50ホップ/秒=0.83個/フレームなので1で足りる(実行ペーシングが均等化)。
-// 2以上にすると補給直後に2ホップ載るフレームが生じ、p95フレーム時間が悪化する
-// (実測: 上限4=51fps, 上限2=p95 25.6ms, 上限1が最も滑らか)
+const MAX_HOPS_FRAME = 2 // 1フレームで消化するホップ数の上限(フレーム予算の保護)
+// 需要は50ホップ/秒。60fpsでは口座が2に達せず実質1個/フレーム(=最も滑らか)。
+// 30fps環境では毎フレーム1.67個必要なので上限2が必須(1だと消化不足で縫合が破れる)。
+// 4以上はバーストでフレーム落ち(実測51fps)
 const SHARP = 0.6 // 側抑制(平均床を引く)。床の共有で全パッチが似るのを防ぐ
 const LOUD_FLOOR = 0.3 // 入力エネルギー床(無音・微小音では学習もシードもしない)
 
@@ -331,7 +331,15 @@ export const FbSparseCortex = () => {
   const mature = useMemo(() => new Float32Array(N), [])
   const actMem = useMemo(() => new Float32Array(N), [])
   const stats = useMemo(
-    () => ({ seededCount: 0, inputE: 0, kThr: 0, resFrac: 0 }),
+    () => ({
+      seededCount: 0,
+      inputE: 0,
+      kThr: 0,
+      resFrac: 0,
+      windows: 0, // 受信した窓の数
+      seams: 0, // 縫合が破れた回数(初回を除く。0なら完全連続)
+      lagMs: 0, // 窓到着時の処理遅れ(窓頭 − lastPos)
+    }),
     []
   )
   const seededCountRef = useRef(0)
@@ -449,21 +457,37 @@ export const FbSparseCortex = () => {
   // React state を経由しない push 受信(再レンダーなし・レンダー起因の中間値ロスなし)。
   // 窓は~50%重複して届くので、lastPos(処理済みファイル位置)で重複を読み飛ばせば
   // 継ぎ目のない決定的なサンプル列になる。ギャップ・シーク・曲替わりは窓頭から再開。
-  const streamRef = useRef<{ frame: AudioFrame | null; lastPos: number }>({
+  const streamRef = useRef<{
+    frame: AudioFrame | null // 現在処理中の窓
+    pending: AudioFrame | null // 到着済みの次の窓(処理位置が窓頭に達したら乗り換え)
+    lastPos: number
+    arrivalMs: number // 現窓の到着時刻(再生ヘッド位置の推定に使用)
+    pendingArrivalMs: number
+  }>({
     frame: null,
+    pending: null,
     lastPos: 0,
+    arrivalMs: 0,
+    pendingArrivalMs: 0,
   })
   useEffect(() => {
     return audioBus.subscribe(frame => {
       const st = streamRef.current
       const winStart = Math.round(frame.timeSeconds * frame.sampleRate)
-      const winEnd = winStart + frame.samples0.length
-      if (st.lastPos < winStart || st.lastPos >= winEnd) st.lastPos = winStart
-      st.frame = frame
+      stats.windows++
+      stats.lagMs = ((winStart - st.lastPos) / frame.sampleRate) * 1000
+      // ここでは乗り換えない(窓は再生ヘッドから未来方向に伸びるため、即乗り換えると
+      // lastPos〜窓頭の間を取りこぼす)。pending に置き、処理位置が窓頭に達した時点で
+      // processHops 側が無縫で乗り換える。
+      st.pending = frame
+      st.pendingArrivalMs = performance.now()
+      if (!st.frame) {
+        st.frame = frame
+        st.arrivalMs = st.pendingArrivalMs
+        st.lastPos = winStart
+      }
     })
-  }, [])
-  // 実行ペーシング用の時間口座(壁時計は「いつ実行するか」のみに関与。結果は不変)
-  const hopAccumRef = useRef(0)
+  }, [stats])
 
   const colors = useMemo(() => {
     const base = Hct.fromInt(themeStoreState.sourceColor)
@@ -495,18 +519,52 @@ export const FbSparseCortex = () => {
     // ============================================================
     const processHops = (maxHops: number): number => {
       const st = streamRef.current
-      const frame = st.frame
-      if (!frame || frame.samples0.length === 0) return 0
+      if (!st.frame || st.frame.samples0.length === 0) return 0
       let done = 0
-      const s0 = frame.samples0
-      const s1 = frame.samples1
-      const winStart = Math.round(frame.timeSeconds * frame.sampleRate)
-      const winEnd = winStart + s0.length
+      let frame = st.frame
+      let s0 = frame.samples0
+      let s1 = frame.samples1
+      let sr = frame.sampleRate
+      let winStart = Math.round(frame.timeSeconds * sr)
+      let winEnd = winStart + s0.length
+      // 窓の乗り換え: 処理位置が pending の範囲内なら無縫で切替。範囲外
+      // (旧窓が尽きた/シーク/曲替わり/長い停滞)のときだけ窓頭へジャンプ=真の継ぎ目
+      const trySwap = (): boolean => {
+        const p = st.pending
+        if (!p || p === frame) return false
+        const pStart = Math.round(p.timeSeconds * p.sampleRate)
+        const pEnd = pStart + p.samples0.length
+        if (st.lastPos < pStart || st.lastPos >= pEnd) {
+          stats.seams++ // 実際に連続性が破れた
+          st.lastPos = pStart
+        }
+        st.frame = p
+        st.arrivalMs = st.pendingArrivalMs
+        st.pending = null
+        frame = p
+        s0 = p.samples0
+        s1 = p.samples1
+        sr = p.sampleRate
+        winStart = pStart
+        winEnd = pEnd
+        return true
+      }
       const { b0, b2, a1, a2, envA } = coeffs
       // Logicの時間刻みは常に1ホップ=20ms(定数)。外側のView用dtScaleをシャドウする
       const dtScale = HOP_SEC * 60
       for (let hopN = 0; hopN < maxHops; hopN++) {
-        if (st.lastPos + HOP_SAMPLES > winEnd) return done // 次の窓の到着待ち
+        // 処理位置が pending の窓頭に達していたら乗り換え(通常経路=無縫)
+        if (st.pending && st.pending !== frame) {
+          const pStart = Math.round(st.pending.timeSeconds * st.pending.sampleRate)
+          if (st.lastPos >= pStart) trySwap()
+        }
+        if (st.lastPos + HOP_SAMPLES > winEnd) {
+          if (!trySwap()) return done // 旧窓が尽き、次窓も未到着
+          if (st.lastPos + HOP_SAMPLES > winEnd) return done
+        }
+        // 再生ヘッド推定(窓頭+到着からの経過)を追い越さない=映像の先行を防ぐ
+        const playhead = winStart + ((performance.now() - st.arrivalMs) / 1000) * sr
+        if (st.lastPos + HOP_SAMPLES > playhead) return done
         let idx = st.lastPos - winStart
         // --- [INPUT] 1ホップぶんのフィルタ+帯域別漏れ積分 ---
         for (let i = 0; i < HOP_SAMPLES; i++, idx++) {
@@ -713,15 +771,9 @@ export const FbSparseCortex = () => {
       } // end hop loop
       return done
     } // end processHops
-    // 実行ペーシング: ホップを音声の実時間レート(50個/秒)で均等に消化する。
-    // 一気に消化すると (a) 4Hzの負荷バースト、(b) 熱の注入が250ms周期で脈動、
-    // (c) まだ聴こえていない先の音声に映像が反応(映像の先行)、の3つが起こる。
-    hopAccumRef.current = Math.min(0.25, hopAccumRef.current + deltaTime)
-    const hopBudget = Math.min(MAX_HOPS_FRAME, Math.floor(hopAccumRef.current / HOP_SEC))
-    if (hopBudget > 0) {
-      const doneHops = processHops(hopBudget)
-      hopAccumRef.current -= doneHops * HOP_SEC
-    }
+    // 実行ペーシングは「再生ヘッドを追い越さない」ゲート(processHops内)が担う。
+    // 遅れた場合の追いつきは MAX_HOPS_FRAME が上限。
+    processHops(MAX_HOPS_FRAME)
     stats.seededCount = seededCountRef.current
     // ============================================================
     // [OUTPUT 層 / 場の構築] 色・位置は差分更新済み。ここは毎フレームのスカラー場のみ
