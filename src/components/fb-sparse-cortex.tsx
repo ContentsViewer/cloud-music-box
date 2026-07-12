@@ -9,77 +9,80 @@ import { useThemeStore } from "../stores/theme-store"
 import { Hct } from "@material/material-color-utilities"
 
 // =============================================================================
-// 蝸牛フロントエンド → スパース皮質マップ(現状案の実装)
+// 蝸牛フロントエンド → スパース皮質マップ(v4: 生パッチ入力)
 //
-//   3層を明確に区切る(入力層は維持、解釈/出力は差し替えやすく):
-//     [INPUT]          蝸牛フロントエンド → 特徴ベクトル x (~144次元, 構造保持)
-//                      = cochleagram(M) + per-band best-ITD(M) + ITD強度(M) + サマリ自己相関(P)
-//     [INTERPRETATION] トポグラフィック・スパース符号化マップ(過完備 N≫DIM)
-//                      = k-WTA で少数発火 + Oja で STRF 学習 + 近傍協調 + IP 恒常性
-//     [OUTPUT]         「星の流れ」: SOM を不動の"場"とし、その上を粒子(トレーサ星)が流れる。
-//                      ・ガス雲   = 場(SOM)の色場 = 不動の地(星雲)
-//                      ・粒子星   = 場の速度ベクトルに沿って流れる。速度 = 等高線方向(セルの棒)
-//                                   + 発火中心への引力 → 発火コアへ螺旋流入。輝度=その場の発火
-//                      場は動かさない(セルを動かすと SOM が歪む)。粒子だけが流れ近接性は不変。
+//   3層を明確に区切る。場(セル)+粒子のシャーシは不変、入力だけを豊かに:
+//     [INPUT]          蝸牛フィルタバンク → 生スペクトロ・テンポラルパッチ x
+//                      = 直近 T=6 スライス(~120ms)の cochleagram L/R をそのまま積む
+//                      (384次元, 非負)。アタック・減衰・ビブラート・定位は検出せず
+//                      生データとして窓に写っている。圧縮と側抑制のみ(蝸牛の一般非線形)。
+//     [INTERPRETATION] トポグラフィック・スパース符号化マップ(N=4096 セル)
+//                      = k-WTA 少数発火 + 加算再構成の残差学習 + 近傍協調 + IP 恒常性
+//                      パッチ空間では音色(時間構造)の距離が大きい → 近傍協調が
+//                      そのまま「音色の地区」を描く(クラスタ判定・島・閾値は作らない)。
+//     [OUTPUT]         「星の流れ」: 場は不動、粒子(トレーサ星)が流れる。
+//                      色相=ピッチクラス, 彩度=トーン性, 輝度=発火。
+//                      流れ = 等高線方向 + 発火中心への引力。
 //
-//   r キーで地図リセット。
+//   r キーで地図リセット。window.__fbcx にデバッグ統計。
 // =============================================================================
 
-// --- INPUT 層パラメータ(維持) ---
-const M = 32
-const D_ITD = 16 // ITD 探索遅延 (δ = d - D/2)
-const P = 48 // サマリ自己相関ラグ
-const CORR_W = 256
-const RING = 2048
+// --- INPUT 層パラメータ ---
+const M = 32 // 帯域数
+const T_HIST = 6 // パッチの時間スライス数
+const HOP_SEC = 0.02 // スライス間隔(~20ms → パッチ長 ~120ms)
+const SLICE = M * 2 // 1スライス = [L(32) | R(32)]
+const DIM = SLICE * T_HIST // 384
+const ENV_W = 256 // 包絡の観測窓(サンプル)
+const RING = 512
 const F_LO = 60
 const F_HI = 16000
 const Q = 5.0
-const COMPRESS = 0.3
-const DIM = 3 * M + P // 32+32+32+48 = 144
+const COMPRESS = 0.3 // 蝸牛的圧縮
+const SHARP = 0.6 // 側抑制(平均床を引く)。床の共有で全パッチが似るのを防ぐ
+const LOUD_FLOOR = 0.3 // 入力エネルギー床(無音・微小音では学習もシードもしない)
 
 // --- INTERPRETATION 層パラメータ ---
 const G = 64 // 格子 G×G
-const N = G * G // 4096 セル (≫ DIM = 過完備)
-const K_ACTIVE = Math.round(N * 0.02) // スパース: 上位 ~2% 発火
-const ETA = 0.06 // Oja 学習率(STRF)
+const N = G * G // 4096 セル
+const K_ACTIVE = 12 // スパース: 同時発火数(旧82。多勝者の混合学習=均質化を防ぐ)
+const ETA = 0.02 // 学習率(遅く=セルは結晶。適応は成長=シードが担う)
 const ETA_NB = 0.004 // 近傍協調(弱め=部品が混合平均へ均質化せず分化する)
 const NB_RAD = 3 // 近傍半径
-const GAMMA_IP = 0.000001 // IP(恒常性)
+const GAMMA_IP = 0.0003 // IP(恒常性)。使われすぎるセルを抑え分化を促す
 const HEAT_DECAY = 0.95 // 発火残光(小=キレ/大=尾を引く)
 const USE_ALPHA = 0.02 // 使用率 EMA
 const P_TARGET = K_ACTIVE / N // 目標発火率
 
 // --- OUTPUT 層: 場(ガス) + 流れる粒子(星) ---
-const SAT_FLOOR = 0.65 // ITDコヒーレンス0でも残す最低彩度(鮮やかさ)
+const SAT_FLOOR = 0.65 // 最低彩度(鮮やかさ)
 const SPLAT_LAYOUT = 0.92 // 格子レイアウトの clip 範囲(±)
-const SPLAT_POS_OFFSET = 0.07 // 位置=音色マップを安定させる(動的なpan/pitch湾曲は控えめ=花火化を防ぐ)
-// NMF 部品分解(Stage A): 混合スペクトル p ≈ Σ a_i D_i(非負・加算)。各原子 D_i = 部品(楽器/音)
-// 競合(1勝者=混合まるごと)→ 加算(複数部品が同時活性)へ。色=原子の重心(ピッチ)
-const SAT_TONE = 2.0 // 原子のスペクトル集中度(トーン性)→ 彩度・流速のスケール
+const SPLAT_POS_OFFSET = 0.07 // 位置=音色マップを安定させる(動的湾曲は控えめ)
+const SAT_TONE = 2.0 // スペクトル集中度(トーン性)→ 彩度・流速のスケール
 const ACT_DECAY = 0.985 // 活性メモリ減衰(ガスの滞留)
-// [ガス] 場(SOM)の色雲=不動の地(星雲)。柔・大・連続 → 離散格子が出ない
-const GAS_SIZE = 58.0 // 大きく重ねて連続化(滑らかな雲)
-const GAS_AMBIENT = 0.06 // シード済みの薄い地雲
-const GAS_ACT_GAIN = 0.27 // 活性領域がガス雲として濃く光る
-// [粒子] SOM場の上を流れるトレーサ星(=星の流れ)
-const NUM_P = 2400 // 粒子数
-const FLOW_BASE = 0.12 // 基準流速(グリッド単位/フレーム at 60fps)
-const FLOW_TONE = 0.18 // トーン性(自己相関)で加速
-const FLOW_ALPHA = 1.0 // 接線成分(等高線=腕に沿う流れ。=セルの棒)
-const FLOW_BETA = 1.3 // 重心引力成分(発火中心=∇heat へ吸い込む)
-const FLOW_AUDIO = 14.0 // 音(全体活性)で流速変調
-const P_BRIGHT_FLOOR = 0.05 // 粒子の地明るさ(流れがうっすら見える)
-const P_BRIGHT_GAIN = 1.6 // 活性で輝く(音が鳴る腕で星が光る)
-const P_SIZE = 13.0 // 粒子(星)サイズ
-const P_SIZE_FIRE = 9.0 // 発火で拡大
-const P_TRAIL = 2.5 // トレイル長(1フレーム変位の倍率=残像で流れの筋)
-const P_TRAIL_DIM = 0.14 // トレイル尾の輝度(頭=明, 尾=暗)
-const P_LIFE = 3.2 // 寿命(秒)— リサイクル
+// [ガス] 場の色雲=不動の地(星雲)。柔・大・連続 → 離散格子が出ない
+const GAS_SIZE = 58.0
+const GAS_AMBIENT = 0.06
+const GAS_ACT_GAIN = 0.27
+// [粒子] 場の上を流れるトレーサ星(=星の流れ)
+const NUM_P = 2400
+const FLOW_BASE = 0.12
+const FLOW_TONE = 0.18
+const FLOW_ALPHA = 1.0
+const FLOW_BETA = 1.3
+const FLOW_AUDIO = 14.0
+const P_BRIGHT_FLOOR = 0.05
+const P_BRIGHT_GAIN = 1.6
+const P_SIZE = 13.0
+const P_SIZE_FIRE = 9.0
+const P_TRAIL = 2.5
+const P_TRAIL_DIM = 0.14
+const P_LIFE = 3.2
 // データ由来シード(初期化): BMU近傍を実特徴で成長 + 成熟度ゲート(未シードは非表示)
-const SEED_RAD = 1 // 1フレームで成長させる近傍リング(大=速く成長)
-const SEED_JITTER = 0.04 // シード時の微小ジッタ(セルを分化させる)
-const SEED_MIX = 0.7 // シード重み = mix·入力 + (1-mix)·BMU(秩序を保つ)
-const MATURE_RATE = 0.05 // 成熟度フェードイン速度(0→1, 大=速く現れる)
+const SEED_RAD = 1
+const SEED_JITTER = 0.04
+const SEED_MIX = 0.7
+const MATURE_RATE = 0.05
 
 // 帯域 m の中心周波数(入力層と同式)
 function bandFreq(m: number): number {
@@ -158,7 +161,7 @@ const BG_FRAG = `
     gl_FragColor = vec4(col, uOpacity);
   }
 `
-// [ガス] 柔らかい大きなガウス粒子。加算合成で重なり連続ガスに(場=SOMの色場)
+// [ガス] 柔らかい大きなガウス粒子。加算合成で重なり連続ガスに(場の色場)
 const GAS_VERT = `
   attribute vec3 aColor;
   attribute float aBright;
@@ -280,39 +283,47 @@ export const FbSparseCortex = () => {
   const y1 = useMemo(() => new Float32Array(M * 2), [])
   const y2 = useMemo(() => new Float32Array(M * 2), [])
   const ringRef = useRef({ idx: 0, filled: 0 })
+  // パッチ履歴(T_HIST スライスのリング)→ 特徴 x
+  const hist = useMemo(() => new Float32Array(DIM), [])
+  const histHeadRef = useRef(0)
+  const nextSnapRef = useRef(0)
   const featVec = useMemo(() => new Float32Array(DIM), [])
-  // NMF(Stage A): 再構成 r と残差 e、活性 a の一時バッファ
-  const recon = useMemo(() => new Float32Array(M), []) // r[m] = Σ a_i D_i[m]
-  const resid = useMemo(() => new Float32Array(M), []) // e[m] = p[m] - α r[m]
-  const act = useMemo(() => new Float32Array(N), []) // a_i(活性, 一時)
+  // 加算再構成 r と残差 e、活性 a の一時バッファ
+  const recon = useMemo(() => new Float32Array(DIM), [])
+  const resid = useMemo(() => new Float32Array(DIM), [])
+  const act = useMemo(() => new Float32Array(N), [])
 
   // ===== INTERPRETATION 層: 重み・状態 =====
-  const W = useMemo(() => new Float32Array(N * M), []) // 重み=非負スペクトル原子(部品)D_i
+  const W = useMemo(() => new Float32Array(N * DIM), []) // 重み=非負パッチ原子(部品)
   const thr = useMemo(() => new Float32Array(N), [])
   const usage = useMemo(() => new Float32Array(N), [])
   const drive = useMemo(() => new Float32Array(N), [])
   const driveSorted = useMemo(() => new Float32Array(N), [])
   const heat = useMemo(() => new Float32Array(N), [])
-  const seeded = useMemo(() => new Uint8Array(N), []) // データ由来シード済みフラグ(0=未初期化)
-  const mature = useMemo(() => new Float32Array(N), []) // 成熟度0→1(表示フェードイン)
-  const actMem = useMemo(() => new Float32Array(N), []) // 活性メモリ(ガスの滞留)
+  const seeded = useMemo(() => new Uint8Array(N), [])
+  const mature = useMemo(() => new Float32Array(N), [])
+  const actMem = useMemo(() => new Float32Array(N), [])
+  const stats = useMemo(
+    () => ({ seededCount: 0, inputE: 0, kThr: 0, resFrac: 0 }),
+    []
+  )
+  const seededCountRef = useRef(0)
 
   // ===== OUTPUT 層: 場(グリッド配列)+ 流れる粒子 =====
-  const cellColor = useMemo(() => new Float32Array(N * 3), []) // 共感覚RGB場(ガス + 粒子サンプル)
-  const splatPos = useMemo(() => new Float32Array(N * 3), []) // 歪んだ画面位置場(clip xy)
-  const centroidArr = useMemo(() => new Float32Array(N), []) // 重心(勾配=方位の計算用)
-  const centroidSmooth = useMemo(() => new Float32Array(N), []) // 平滑化重心場(流れ方位を滑らかに)
-  const splatElong = useMemo(() => new Float32Array(N), []) // トーン性(自己相関=流速)
-  const splatAngle = useMemo(() => new Float32Array(N), []) // 等高線方向(=セルの棒=接線流向)
-  const heatSnap = useMemo(() => new Float32Array(N), []) // 発火スナップ(引力∇heat / 粒子輝度)
-  const gasBright = useMemo(() => new Float32Array(N), []) // ガス明るさ場
-  const velX = useMemo(() => new Float32Array(N), []) // 速度場 x(grid空間)
-  const velY = useMemo(() => new Float32Array(N), []) // 速度場 y(grid空間)
+  const cellColor = useMemo(() => new Float32Array(N * 3), [])
+  const splatPos = useMemo(() => new Float32Array(N * 3), [])
+  const centroidArr = useMemo(() => new Float32Array(N), [])
+  const centroidSmooth = useMemo(() => new Float32Array(N), [])
+  const splatElong = useMemo(() => new Float32Array(N), [])
+  const heatSnap = useMemo(() => new Float32Array(N), [])
+  const gasBright = useMemo(() => new Float32Array(N), [])
+  const velX = useMemo(() => new Float32Array(N), [])
+  const velY = useMemo(() => new Float32Array(N), [])
 
-  // 粒子状態(SOMグリッド座標 u,v で生かす → サンプリング自明・トポロジ保存)
+  // 粒子状態(グリッド座標 u,v で生かす → サンプリング自明・トポロジ保存)
   const pU = useMemo(() => new Float32Array(NUM_P), [])
   const pV = useMemo(() => new Float32Array(NUM_P), [])
-  const pPrevX = useMemo(() => new Float32Array(NUM_P), []) // 前フレーム画面位置(トレイル用)
+  const pPrevX = useMemo(() => new Float32Array(NUM_P), [])
   const pPrevY = useMemo(() => new Float32Array(NUM_P), [])
   const pAge = useMemo(() => new Float32Array(NUM_P), [])
   // 粒子描画バッファ
@@ -323,9 +334,51 @@ export const FbSparseCortex = () => {
   const trailPos = useMemo(() => new Float32Array(NUM_P * 2 * 3), [])
   const trailCol = useMemo(() => new Float32Array(NUM_P * 2 * 3), [])
 
+  // セルの見た目(色相=ピッチ, 彩度=トーン性, 位置湾曲)を W から更新。
+  // 全セル毎フレーム走査は重い(N×DIM)ため、W が変わったセルだけ呼ぶ(差分更新)。
+  const updateCellVisual = useMemo(
+    () => (i: number) => {
+      const b = i * DIM
+      let cnum = 0,
+        cden = 1e-9,
+        sumSq = 0
+      for (let t = 0; t < T_HIST; t++) {
+        const bt = b + t * SLICE
+        for (let m = 0; m < M; m++) {
+          const e = W[bt + m] + W[bt + M + m]
+          cnum += m * e
+          cden += e
+          sumSq += e * e
+        }
+      }
+      const centroid = cnum / cden
+      centroidArr[i] = centroid
+      const nBins = M * T_HIST
+      const conc = (sumSq * nBins) / (cden * cden + 1e-9)
+      const tone = Math.min(1, ((conc - 1) / (nBins - 1)) * SAT_TONE * T_HIST)
+      splatElong[i] = tone
+      const cc = Math.min(M - 1, Math.max(0, centroid))
+      const f = bandFreq(cc)
+      const note = 12 * Math.log2(f / 440) + 69
+      const hue = (((note % 12) + 12) % 12) / 12
+      const sat = SAT_FLOOR + (1 - SAT_FLOOR) * tone
+      hsv2rgb(hue, sat, 1.0, cellColor, i * 3)
+      const gx = i % G,
+        gy = (i / G) | 0
+      const baseX = ((gx / (G - 1)) * 2 - 1) * SPLAT_LAYOUT
+      const baseY = ((gy / (G - 1)) * 2 - 1) * SPLAT_LAYOUT
+      const pitchDev = (cc / (M - 1)) * 2 - 1
+      const o3 = i * 3
+      splatPos[o3 + 0] = baseX
+      splatPos[o3 + 1] = baseY + SPLAT_POS_OFFSET * pitchDev
+      splatPos[o3 + 2] = 0
+    },
+    [W, centroidArr, splatElong, cellColor, splatPos]
+  )
+
   const initInterp = useMemo(
     () => () => {
-      // ランダム初期化を廃止: データ由来シードまで全セル未初期化(W=0, seeded=0)
+      // ランダム初期化なし: データ由来シードまで全セル未初期化
       W.fill(0)
       seeded.fill(0)
       mature.fill(0)
@@ -333,13 +386,16 @@ export const FbSparseCortex = () => {
       usage.fill(P_TARGET)
       heat.fill(0)
       actMem.fill(0)
+      hist.fill(0)
+      cellColor.fill(0)
+      gasBright.fill(0)
+      seededCountRef.current = 0
     },
-    [W, thr, usage, heat, seeded, mature, actMem]
+    [W, thr, usage, heat, seeded, mature, actMem, hist, cellColor, gasBright]
   )
   const inited = useRef(false)
   if (!inited.current) {
     initInterp()
-    // 粒子をグリッド全域にばら撒く(寿命をずらして連続リサイクル)
     for (let k = 0; k < NUM_P; k++) {
       pU[k] = Math.random() * (G - 1)
       pV[k] = Math.random() * (G - 1)
@@ -356,6 +412,9 @@ export const FbSparseCortex = () => {
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [])
+  useEffect(() => {
+    ;(window as any).__fbcx = { G, M, DIM, seeded, mature, heat, W, centroidArr, stats }
+  }, [seeded, mature, heat, W, centroidArr, stats])
 
   const clock = useMemo(() => ({ frame: null as AudioFrame | null, time: 0 }), [])
   useEffect(() => {
@@ -366,15 +425,13 @@ export const FbSparseCortex = () => {
   const colors = useMemo(() => {
     const base = Hct.fromInt(themeStoreState.sourceColor)
     const low = Hct.from(base.hue, Math.max(22, base.chroma * 0.4), 16)
-    const high = Hct.from((base.hue + 35) % 360, Math.max(55, base.chroma * 0.8), 60)
-    const accent = Hct.from((base.hue + 70) % 360, Math.max(85, base.chroma), 82)
     const toVec = (argb: number) =>
       new THREE.Vector3(
         ((argb >> 16) & 255) / 255,
         ((argb >> 8) & 255) / 255,
         (argb & 255) / 255
       )
-    return { low: toVec(low.toInt()), high: toVec(high.toInt()), accent: toVec(accent.toInt()) }
+    return { low: toVec(low.toInt()) }
   }, [themeStoreState.sourceColor])
 
   useEffect(() => {
@@ -386,288 +443,254 @@ export const FbSparseCortex = () => {
       initInterp()
       resetRef.current = false
     }
-    // フレームレート非依存化: 60fps基準で学習/減衰/流れを時間スケール(60fps時は1.0)
+    // フレームレート非依存化: 60fps基準で学習/減衰/流れを時間スケール
     const dtScale = Math.min(4, Math.max(0.25, deltaTime * 60))
-    // 音声処理(あれば): INPUT + INTERPRETATION(学習)。OUTPUT/RT は下で毎フレーム実行
+    // 音声処理(あれば): INPUT + INTERPRETATION(学習)。OUTPUT は下で毎フレーム実行
     const runAudio = () => {
-    const frame = clock.frame
-    if (!frame || frame.samples0.length === 0) return
-    const s0 = frame.samples0
-    const s1 = frame.samples1
-    const len = s0.length
-    const sampleRate = frame.sampleRate
-    const startOffset = Math.max(
-      0,
-      Math.floor((clock.time - frame.timeSeconds) * sampleRate)
-    )
-    const remaining = len - startOffset
-    const consume = Math.max(0, Math.min(Math.floor(deltaTime * sampleRate), remaining))
-    clock.time += deltaTime
-    if (consume === 0) return
+      const frame = clock.frame
+      if (!frame || frame.samples0.length === 0) return
+      const s0 = frame.samples0
+      const s1 = frame.samples1
+      const len = s0.length
+      const sampleRate = frame.sampleRate
+      const startOffset = Math.max(
+        0,
+        Math.floor((clock.time - frame.timeSeconds) * sampleRate)
+      )
+      const remaining = len - startOffset
+      const consume = Math.max(0, Math.min(Math.floor(deltaTime * sampleRate), remaining))
+      clock.time += deltaTime
+      if (consume === 0) return
 
-    // ============================================================
-    // [INPUT 層] フィルタバンク → 特徴ベクトル x (構造保持, ~144次元)
-    // ============================================================
-    const { b0, b2, a1, a2 } = coeffs
-    let idx = ringRef.current.idx
-    for (let i = 0; i < consume; i++) {
-      const sL = s0[startOffset + i]
-      const sR = s1[startOffset + i]
+      // ============================================================
+      // [INPUT 層] フィルタバンク → 生パッチ x(L/R × T スライス, 非負)
+      // ============================================================
+      const { b0, b2, a1, a2 } = coeffs
+      let idx = ringRef.current.idx
+      for (let i = 0; i < consume; i++) {
+        const sL = s0[startOffset + i]
+        const sR = s1[startOffset + i]
+        for (let m = 0; m < M; m++) {
+          const iL = m * 2, iR = m * 2 + 1
+          const yL = b0[m] * sL + b2[m] * x2[iL] - a1[m] * y1[iL] - a2[m] * y2[iL]
+          x2[iL] = x1[iL]; x1[iL] = sL; y2[iL] = y1[iL]; y1[iL] = yL
+          bandBuf[iL * RING + idx] = yL
+          const yR = b0[m] * sR + b2[m] * x2[iR] - a1[m] * y1[iR] - a2[m] * y2[iR]
+          x2[iR] = x1[iR]; x1[iR] = sR; y2[iR] = y1[iR]; y1[iR] = yR
+          bandBuf[iR * RING + idx] = yR
+        }
+        idx = idx + 1
+        if (idx >= RING) idx -= RING
+      }
+      ringRef.current.idx = idx
+      ringRef.current.filled = Math.min(RING, ringRef.current.filled + consume)
+      if (ringRef.current.filled < ENV_W + 8) return
+
+      // 包絡(L/R別・圧縮・側抑制)を現スライスへ書込
+      const last = (idx - 1 + RING) % RING
+      const slot = histHeadRef.current * SLICE
+      let meanL = 0,
+        meanR = 0
       for (let m = 0; m < M; m++) {
-        const iL = m * 2, iR = m * 2 + 1
-        const yL = b0[m] * sL + b2[m] * x2[iL] - a1[m] * y1[iL] - a2[m] * y2[iL]
-        x2[iL] = x1[iL]; x1[iL] = sL; y2[iL] = y1[iL]; y1[iL] = yL
-        bandBuf[iL * RING + idx] = yL
-        const yR = b0[m] * sR + b2[m] * x2[iR] - a1[m] * y1[iR] - a2[m] * y2[iR]
-        x2[iR] = x1[iR]; x1[iR] = sR; y2[iR] = y1[iR]; y1[iR] = yR
-        bandBuf[iR * RING + idx] = yR
-      }
-      idx = idx + 1
-      if (idx >= RING) idx -= RING
-    }
-    ringRef.current.idx = idx
-    ringRef.current.filled = Math.min(RING, ringRef.current.filled + consume)
-    if (ringRef.current.filled < CORR_W + D_ITD + P + 8) return
-
-    const last = (idx - 1 + RING) % RING
-    const halfD = D_ITD >> 1
-    const W_ = CORR_W
-    // summary autocorr バッファ
-    for (let p = 0; p < P; p++) featVec[3 * M + p] = 0
-
-    for (let m = 0; m < M; m++) {
-      const baseL = (m * 2) * RING
-      const baseR = (m * 2 + 1) * RING
-      // 包絡 (cochleagram)
-      let eAcc = 0, eL = 1e-9, eR = 1e-9, e0 = 1e-9
-      for (let w = 0; w < W_; w++) {
-        let t = last - w; if (t < 0) t += RING
-        const vL = bandBuf[baseL + t], vR = bandBuf[baseR + t]
-        const mono = 0.5 * (vL + vR)
-        if (w < 256) eAcc += mono * mono
-        eL += vL * vL; eR += vR * vR; e0 += mono * mono
-      }
-      featVec[m] = Math.pow(Math.sqrt(eAcc / 256), COMPRESS) // env
-      // best-ITD + 強度
-      const crossNorm = 1 / Math.sqrt(eL * eR)
-      let bestCC = -1e9, bestD = 0
-      for (let d = 0; d < D_ITD; d++) {
-        const delta = d - halfD
-        let cc = 0
-        for (let w = 0; w < W_; w++) {
-          let t = last - w; if (t < 0) t += RING
-          let tr = t - delta; if (tr < 0) tr += RING; else if (tr >= RING) tr -= RING
-          cc += bandBuf[baseL + t] * bandBuf[baseR + tr]
+        const baseL = (m * 2) * RING
+        const baseR = (m * 2 + 1) * RING
+        let eL = 1e-9,
+          eR = 1e-9
+        for (let w = 0; w < ENV_W; w++) {
+          let t = last - w
+          if (t < 0) t += RING
+          const vL = bandBuf[baseL + t],
+            vR = bandBuf[baseR + t]
+          eL += vL * vL
+          eR += vR * vR
         }
-        cc *= crossNorm
-        if (cc > bestCC) { bestCC = cc; bestD = delta }
+        const envL = Math.pow(Math.sqrt(eL / ENV_W), COMPRESS)
+        const envR = Math.pow(Math.sqrt(eR / ENV_W), COMPRESS)
+        hist[slot + m] = envL
+        hist[slot + M + m] = envR
+        meanL += envL / M
+        meanR += envR / M
       }
-      featVec[M + m] = bestD / halfD // best-ITD ∈ [-1,1]
-      featVec[2 * M + m] = bestCC // 強度
-      // サマリ自己相関に加算 (帯域エネルギーで正規化)
-      const invE0 = 1 / e0
-      for (let p = 0; p < P; p++) {
-        let ac = 0
-        for (let w = 0; w < W_; w++) {
-          let t = last - w; if (t < 0) t += RING
-          let t2 = t - p; if (t2 < 0) t2 += RING
-          const m1 = 0.5 * (bandBuf[baseL + t] + bandBuf[baseR + t])
-          const m2 = 0.5 * (bandBuf[baseL + t2] + bandBuf[baseR + t2])
-          ac += m1 * m2
-        }
-        featVec[3 * M + p] += ac * invE0
+      for (let m = 0; m < M; m++) {
+        hist[slot + m] = Math.max(0, hist[slot + m] - SHARP * meanL)
+        hist[slot + M + m] = Math.max(0, hist[slot + M + m] - SHARP * meanR)
       }
-    }
-    // NMF の入力 p = 非負スペクトル(cochleagram = featVec[0..M))。前処理不要(featVec を直接使用)
+      // スライス確定(HOP間隔)。次スライスは現値から連続に始める
+      if (clock.time >= nextSnapRef.current) {
+        histHeadRef.current = (histHeadRef.current + 1) % T_HIST
+        hist.copyWithin(histHeadRef.current * SLICE, slot, slot + SLICE)
+        nextSnapRef.current = Math.max(nextSnapRef.current + HOP_SEC, clock.time)
+      }
+      // x = 履歴を古→新の順に連結
+      const head = histHeadRef.current
+      for (let k = 0; k < T_HIST; k++) {
+        const src = ((head + 1 + k) % T_HIST) * SLICE
+        featVec.set(hist.subarray(src, src + SLICE), k * SLICE)
+      }
+      let inputE = 0
+      for (let d = 0; d < DIM; d++) inputE += featVec[d] * featVec[d]
+      stats.inputE = inputE
+      if (inputE < LOUD_FLOOR) return
 
-    // ============================================================
-    // [INTERPRETATION 層] NMF 部品分解(非負スパース符号化 + 近傍 + IP)
-    // ============================================================
-    // forward: 適合度 s_i = D_i · p(非負原子と非負スペクトルの内積)。シード済みのみ。BMU=最良一致
-    let maxU = -1e9
-    let bmu = -1
-    for (let i = 0; i < N; i++) {
-      if (!seeded[i]) {
-        drive[i] = -1e9 // 未シードは競争に参加しない
-        continue
-      }
-      const b = i * M
-      let s = 0
-      for (let m = 0; m < M; m++) s += W[b + m] * featVec[m]
-      const u = s - thr[i]
-      drive[i] = u
-      if (u > maxU) {
-        maxU = u
-        bmu = i
-      }
-    }
-    // データ由来シード(成長): 初回は中央パッチ、以後は BMU の未シード近傍を実特徴でシード
-    {
-      const seedFrom = (j: number, useBmu: boolean) => {
-        const bj = j * M
-        const bb = bmu * M
-        let nrm = 0
-        for (let m = 0; m < M; m++) {
-          const base = useBmu
-            ? SEED_MIX * featVec[m] + (1 - SEED_MIX) * W[bb + m]
-            : featVec[m]
-          const v = Math.max(0, base + (Math.random() * 2 - 1) * SEED_JITTER) // 非負
-          W[bj + m] = v
-          nrm += v * v
+      // ============================================================
+      // [INTERPRETATION 層] 前向き(適合度)→ シード成長 → k-WTA → 残差学習
+      // ============================================================
+      let maxU = -1e9
+      let bmu = -1
+      for (let i = 0; i < N; i++) {
+        if (!seeded[i]) {
+          drive[i] = -1e9
+          continue
         }
-        const inv = 1 / (Math.sqrt(nrm) + 1e-6)
-        for (let m = 0; m < M; m++) W[bj + m] *= inv
-        seeded[j] = 1
-        mature[j] = 0 // フェードインで現れる
-        thr[j] = 0
-        usage[j] = P_TARGET
+        const b = i * DIM
+        let s = 0
+        for (let d = 0; d < DIM; d++) s += W[b + d] * featVec[d]
+        const u = s - thr[i]
+        drive[i] = u
+        if (u > maxU) {
+          maxU = u
+          bmu = i
+        }
       }
-      if (bmu < 0) {
-        // 初回: 中央パッチを最初の特徴でシード(ここから成長)
-        const cx = G >> 1,
-          cy = G >> 1
-        for (let ny = cy - SEED_RAD; ny <= cy + SEED_RAD; ny++)
-          for (let nx = cx - SEED_RAD; nx <= cx + SEED_RAD; nx++) {
-            if (nx < 0 || nx >= G || ny < 0 || ny >= G) continue
-            seedFrom(ny * G + nx, false)
+      // データ由来シード(成長): 初回は中央パッチ、以後は BMU の未シード近傍を実特徴で
+      {
+        const seedFrom = (j: number, useBmu: boolean) => {
+          const bj = j * DIM
+          const bb = bmu * DIM
+          let nrm = 0
+          for (let d = 0; d < DIM; d++) {
+            const base = useBmu
+              ? SEED_MIX * featVec[d] + (1 - SEED_MIX) * W[bb + d]
+              : featVec[d]
+            const v = Math.max(0, base + (Math.random() * 2 - 1) * SEED_JITTER)
+            W[bj + d] = v
+            nrm += v * v
           }
-      } else {
-        // BMU の未シード近傍を実特徴で成長(秩序を保ち外へ拡大)
-        const gx = bmu % G,
-          gy = (bmu / G) | 0
-        for (let ny = gy - SEED_RAD; ny <= gy + SEED_RAD; ny++)
-          for (let nx = gx - SEED_RAD; nx <= gx + SEED_RAD; nx++) {
-            if (nx < 0 || nx >= G || ny < 0 || ny >= G) continue
-            const j = ny * G + nx
-            if (!seeded[j]) seedFrom(j, true)
-          }
-      }
-    }
-    // k-WTA しきい値(上位 K_ACTIVE が活性 = スパース)
-    driveSorted.set(drive)
-    driveSorted.sort() // 昇順
-    const kThr = driveSorted[N - K_ACTIVE]
-    const invMaxU = 1 / (maxU - kThr + 1e-6)
-
-    // 加算再構成 r = Σ_active a_i D_i(a_i = max(0, s_i - kThr))
-    recon.fill(0)
-    for (let i = 0; i < N; i++) {
-      if (!seeded[i] || drive[i] < kThr) {
-        act[i] = 0
-        continue
-      }
-      const a = drive[i] - kThr
-      act[i] = a
-      const b = i * M
-      for (let m = 0; m < M; m++) recon[m] += a * W[b + m]
-    }
-    // 最小二乗スケール α と残差 e = p - α r(部品の和が p を最良近似)
-    let pr = 0,
-      rr = 0
-    for (let m = 0; m < M; m++) {
-      pr += featVec[m] * recon[m]
-      rr += recon[m] * recon[m]
-    }
-    const alpha = pr / (rr + 1e-9)
-    for (let m = 0; m < M; m++) resid[m] = featVec[m] - alpha * recon[m]
-
-    // 学習(活性セルのみ)+ 使用率更新
-    for (let i = 0; i < N; i++) {
-      const fired = seeded[i] && drive[i] >= kThr ? 1 : 0 // 未シードは活性しない
-      usage[i] = (1 - USE_ALPHA * dtScale) * usage[i] + USE_ALPHA * dtScale * fired
-      // IP: 使用率を目標へ(過使用→thr上げ=部品を分散)
-      thr[i] += GAMMA_IP * dtScale * (usage[i] - P_TARGET)
-      if (fired) {
-        const yi = (drive[i] - kThr) * invMaxU // 0..1(明るさ)
-        const aeff = alpha * act[i] // 実効活性(再構成スケール込み)
-        const b = i * M
-        // 非負スパース辞書学習: D_i += η·aeff·e ; clamp(≥0) ; 単位L2(各原子=部品に特化)
-        let nrm = 0
-        for (let m = 0; m < M; m++) {
-          let wv = W[b + m] + ETA * dtScale * aeff * resid[m]
-          if (wv < 0) wv = 0
-          W[b + m] = wv
-          nrm += wv * wv
+          const inv = 1 / (Math.sqrt(nrm) + 1e-6)
+          for (let d = 0; d < DIM; d++) W[bj + d] *= inv
+          seeded[j] = 1
+          mature[j] = 0
+          thr[j] = 0
+          usage[j] = P_TARGET
+          seededCountRef.current++
+          updateCellVisual(j)
         }
-        const inv = 1 / (Math.sqrt(nrm) + 1e-6)
-        for (let m = 0; m < M; m++) W[b + m] *= inv
-        heat[i] = Math.min(1.5, heat[i] + yi * dtScale)
+        if (bmu < 0) {
+          const cx = G >> 1,
+            cy = G >> 1
+          for (let ny = cy - SEED_RAD; ny <= cy + SEED_RAD; ny++)
+            for (let nx = cx - SEED_RAD; nx <= cx + SEED_RAD; nx++) {
+              if (nx < 0 || nx >= G || ny < 0 || ny >= G) continue
+              seedFrom(ny * G + nx, false)
+            }
+        } else {
+          const gx = bmu % G,
+            gy = (bmu / G) | 0
+          for (let ny = gy - SEED_RAD; ny <= gy + SEED_RAD; ny++)
+            for (let nx = gx - SEED_RAD; nx <= gx + SEED_RAD; nx++) {
+              if (nx < 0 || nx >= G || ny < 0 || ny >= G) continue
+              const j = ny * G + nx
+              if (!seeded[j]) seedFrom(j, true)
+            }
+        }
+      }
+      // k-WTA しきい値(上位 K_ACTIVE が活性 = スパース)
+      driveSorted.set(drive)
+      driveSorted.sort() // 昇順
+      const kThr = driveSorted[N - K_ACTIVE]
+      const invMaxU = 1 / (maxU - kThr + 1e-6)
+      stats.kThr = kThr
 
-        // 近傍協調(トポグラフィック, 非負)
-        const gx = i % G, gy = (i / G) | 0
-        const x0 = Math.max(0, gx - NB_RAD), x1g = Math.min(G - 1, gx + NB_RAD)
-        const y0 = Math.max(0, gy - NB_RAD), y1g = Math.min(G - 1, gy + NB_RAD)
-        for (let ny = y0; ny <= y1g; ny++) {
-          for (let nx = x0; nx <= x1g; nx++) {
-            const j = ny * G + nx
-            if (j === i || !seeded[j]) continue
-            const gd2 = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy)
-            const h = ETA_NB * dtScale * Math.exp(-gd2 / (2 * NB_RAD * NB_RAD))
-            const bj = j * M
-            for (let m = 0; m < M; m++) {
-              let wv = W[bj + m] + h * (featVec[m] - W[bj + m])
-              if (wv < 0) wv = 0
-              W[bj + m] = wv
+      // 加算再構成 r = Σ_active a_i D_i(a_i = max(0, s_i - kThr))
+      recon.fill(0)
+      for (let i = 0; i < N; i++) {
+        if (!seeded[i] || drive[i] < kThr) {
+          act[i] = 0
+          continue
+        }
+        const a = drive[i] - kThr
+        act[i] = a
+        const b = i * DIM
+        for (let d = 0; d < DIM; d++) recon[d] += a * W[b + d]
+      }
+      // 最小二乗スケール α と残差 e = x - α r
+      let pr = 0,
+        rr = 0
+      for (let d = 0; d < DIM; d++) {
+        pr += featVec[d] * recon[d]
+        rr += recon[d] * recon[d]
+      }
+      const alpha = pr / (rr + 1e-9)
+      let resE = 0
+      for (let d = 0; d < DIM; d++) {
+        resid[d] = featVec[d] - alpha * recon[d]
+        resE += resid[d] * resid[d]
+      }
+      stats.resFrac = resE / inputE
+
+      // 学習(活性セルのみ)+ 使用率更新
+      for (let i = 0; i < N; i++) {
+        const fired = seeded[i] && drive[i] >= kThr ? 1 : 0
+        usage[i] = (1 - USE_ALPHA * dtScale) * usage[i] + USE_ALPHA * dtScale * fired
+        thr[i] += GAMMA_IP * dtScale * (usage[i] - P_TARGET)
+        if (fired) {
+          const yi = (drive[i] - kThr) * invMaxU // 0..1(明るさ)
+          const aeff = alpha * act[i]
+          const b = i * DIM
+          // 非負スパース辞書学習: D_i += η·aeff·e ; clamp(≥0) ; 単位L2
+          let nrm = 0
+          for (let d = 0; d < DIM; d++) {
+            let wv = W[b + d] + ETA * dtScale * aeff * resid[d]
+            if (wv < 0) wv = 0
+            W[b + d] = wv
+            nrm += wv * wv
+          }
+          const inv = 1 / (Math.sqrt(nrm) + 1e-6)
+          for (let d = 0; d < DIM; d++) W[b + d] *= inv
+          heat[i] = Math.min(1.5, heat[i] + yi * dtScale)
+          updateCellVisual(i)
+
+          // 近傍協調(トポグラフィック)
+          const gx = i % G, gy = (i / G) | 0
+          const x0 = Math.max(0, gx - NB_RAD), x1g = Math.min(G - 1, gx + NB_RAD)
+          const y0 = Math.max(0, gy - NB_RAD), y1g = Math.min(G - 1, gy + NB_RAD)
+          for (let ny = y0; ny <= y1g; ny++) {
+            for (let nx = x0; nx <= x1g; nx++) {
+              const j = ny * G + nx
+              if (j === i || !seeded[j]) continue
+              const gd2 = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy)
+              const h = ETA_NB * dtScale * Math.exp(-gd2 / (2 * NB_RAD * NB_RAD))
+              const bj = j * DIM
+              for (let d = 0; d < DIM; d++) {
+                let wv = W[bj + d] + h * (featVec[d] - W[bj + d])
+                if (wv < 0) wv = 0
+                W[bj + d] = wv
+              }
+              updateCellVisual(j)
             }
           }
         }
       }
-    }
-
     } // end runAudio
     runAudio()
+    stats.seededCount = seededCountRef.current
     // ============================================================
-    // [OUTPUT 層 / 場の構築] 各セル: 色=W, 位置=格子+重み, 活性=発火。粒子はこの場をサンプルする
+    // [OUTPUT 層 / 場の構築] 色・位置は差分更新済み。ここは毎フレームのスカラー場のみ
     // ============================================================
     let sumFire = 0
     for (let i = 0; i < N; i++) {
-      // 色相: 原子 D_i のスペクトル重心 → ピッチ → note → hue
-      const b = i * M
-      let cnum = 0,
-        cden = 1e-9,
-        sumSq = 0
-      for (let m = 0; m < M; m++) {
-        const e = W[b + m]
-        cnum += m * e
-        cden += e
-        sumSq += e * e
-      }
-      const centroid = cnum / cden
-      centroidArr[i] = centroid
-      // スペクトル集中度(トーン性): L2²·M / L1² ∈[1,M] → 0..1。彩度/流速に
-      const conc = (sumSq * M) / (cden * cden + 1e-9)
-      const tone = Math.min(1, ((conc - 1) / (M - 1)) * SAT_TONE)
-      splatElong[i] = tone
-      const cc = Math.min(M - 1, Math.max(0, centroid))
-      const f = bandFreq(cc)
-      const note = 12 * Math.log2(f / 440) + 69
-      const hue = (((note % 12) + 12) % 12) / 12
-      const sat = SAT_FLOOR + (1 - SAT_FLOOR) * tone
-      hsv2rgb(hue, sat, 1.0, cellColor, i * 3)
-      // 位置: 格子(=部品マップ) + ピッチで微小に縦湾曲
-      const gx = i % G,
-        gy = (i / G) | 0
-      const baseX = ((gx / (G - 1)) * 2 - 1) * SPLAT_LAYOUT
-      const baseY = ((gy / (G - 1)) * 2 - 1) * SPLAT_LAYOUT
-      const pitchDev = (cc / (M - 1)) * 2 - 1 // [-1,1]
-      const o3 = i * 3
-      splatPos[o3 + 0] = baseX
-      splatPos[o3 + 1] = baseY + SPLAT_POS_OFFSET * pitchDev
-      splatPos[o3 + 2] = 0
-      // 成熟度ゲート + 活性メモリ
       if (seeded[i] && mature[i] < 1)
         mature[i] = Math.min(1, mature[i] + MATURE_RATE * dtScale)
       const mt = mature[i]
       const hv = heat[i]
       const am = Math.max(actMem[i] * Math.pow(ACT_DECAY, dtScale), hv)
       actMem[i] = am
-      heatSnap[i] = hv // 引力(∇heat)と粒子輝度に使う発火スナップ
+      heatSnap[i] = hv
       sumFire += hv
-      // ガス(場の色雲, 連続=格子安全)
       gasBright[i] = (GAS_AMBIENT + GAS_ACT_GAIN * am) * mt
-      heat[i] *= Math.pow(HEAT_DECAY, dtScale) // 発火残光=光の尾
+      heat[i] *= Math.pow(HEAT_DECAY, dtScale)
     }
-    // 重心場を空間平滑化(学習ノイズ除去 → 流れ方位が滑らかに。トポ地図なので妥当)
+    // 重心場を空間平滑化(流れ方位を滑らかに)
     for (let i = 0; i < N; i++) {
       const gx = i % G,
         gy = (i / G) | 0
@@ -685,9 +708,7 @@ export const FbSparseCortex = () => {
       }
       centroidSmooth[i] = sum / cnt
     }
-    // ============================================================
-    // [速度場] V(grid) = 接線(等高線=セルの棒) + 重心引力(∇heat=発火中心へ)
-    // ============================================================
+    // [速度場] V(grid) = 接線(等高線) + 重心引力(∇heat=発火中心へ)
     for (let i = 0; i < N; i++) {
       const gx = i % G,
         gy = (i / G) | 0
@@ -695,14 +716,11 @@ export const FbSparseCortex = () => {
         xp = gx < G - 1 ? i + 1 : i
       const ym = gy > 0 ? i - G : i,
         yp = gy < G - 1 ? i + G : i
-      // 接線: 平滑化重心勾配に直交(=等高線方向=セルの棒)
       const dcx = centroidSmooth[xp] - centroidSmooth[xm]
       const dcy = centroidSmooth[yp] - centroidSmooth[ym]
       const ang = Math.atan2(dcy, dcx) + Math.PI / 2
-      splatAngle[i] = ang
       const tx = Math.cos(ang),
         ty = Math.sin(ang)
-      // 引力: 発火場を登る方向(発火中心=重心へ吸い込む)
       const dHx = heatSnap[xp] - heatSnap[xm],
         dHy = heatSnap[yp] - heatSnap[ym]
       const gm = Math.sqrt(dHx * dHx + dHy * dHy)
@@ -712,7 +730,6 @@ export const FbSparseCortex = () => {
         ghx = dHx / gm
         ghy = dHy / gm
       }
-      // 合成方向(単位化)× 流速(トーン性で加速)
       let vx = FLOW_ALPHA * tx + FLOW_BETA * ghx
       let vy = FLOW_ALPHA * ty + FLOW_BETA * ghy
       const vm = Math.sqrt(vx * vx + vy * vy) + 1e-6
@@ -720,26 +737,21 @@ export const FbSparseCortex = () => {
       velX[i] = (vx / vm) * spd
       velY[i] = (vy / vm) * spd
     }
-    // ============================================================
-    // [粒子] 場の速度に沿って流れるトレーサ星(SOMグリッド座標 u,v)
-    // ============================================================
+    // [粒子] 場の速度に沿って流れるトレーサ星
     const gAct = sumFire / N
-    const audioMul = Math.min(3, 1 + FLOW_AUDIO * gAct) // 音で流速変調
+    const audioMul = Math.min(3, 1 + FLOW_AUDIO * gAct)
     for (let k = 0; k < NUM_P; k++) {
       let u = pU[k],
         v = pV[k]
       let age = pAge[k] + deltaTime
-      // 速度サンプル → 前進
       u += sampleGrid1(velX, u, v) * dtScale * audioMul
       v += sampleGrid1(velY, u, v) * dtScale * audioMul
-      // リサイクル(場外/寿命): シード域へ再配置, トレイル切断
       if (u < 0 || u >= G - 1 || v < 0 || v >= G - 1 || age > P_LIFE) {
         u = Math.random() * (G - 1)
         v = Math.random() * (G - 1)
         age = 0
         pPrevX[k] = NaN
       }
-      // 場のサンプル: 画面位置 / 発火 / 成熟 / 色
       const cx = sampleGrid3(splatPos, u, v, 0),
         cy = sampleGrid3(splatPos, u, v, 1)
       const sH = sampleGrid1(heatSnap, u, v)
@@ -748,20 +760,17 @@ export const FbSparseCortex = () => {
         g = sampleGrid3(cellColor, u, v, 1),
         bl = sampleGrid3(cellColor, u, v, 2)
       const bright = (P_BRIGHT_FLOOR + P_BRIGHT_GAIN * sH) * sM
-      // 頭(星)
       const h3 = k * 3
       headPos[h3] = cx; headPos[h3 + 1] = cy; headPos[h3 + 2] = 0
       headColor[h3] = r; headColor[h3 + 1] = g; headColor[h3 + 2] = bl
       headBright[k] = bright
       headSize[k] = P_SIZE + P_SIZE_FIRE * Math.min(1, sH)
-      // 尾(トレイル): 前フレーム位置から伸ばす(頭=明, 尾=暗)
       let pxv = pPrevX[k],
         pyv = pPrevY[k]
       if (Number.isNaN(pxv)) {
         pxv = cx
         pyv = cy
       }
-      // 暗い粒子はトレイルを出さない(薄いスクラッチ状ノイズを除去)
       const showTrail = bright > 0.08 ? P_TRAIL : 0
       const dxs = cx - pxv,
         dys = cy - pyv
@@ -774,7 +783,6 @@ export const FbSparseCortex = () => {
       trailPos[t1] = cx; trailPos[t1 + 1] = cy; trailPos[t1 + 2] = 0
       trailCol[t6] = r * tb; trailCol[t6 + 1] = g * tb; trailCol[t6 + 2] = bl * tb
       trailCol[t1] = r * bright; trailCol[t1 + 1] = g * bright; trailCol[t1 + 2] = bl * bright
-      // 保存
       pU[k] = u; pV[k] = v; pAge[k] = age
       pPrevX[k] = cx; pPrevY[k] = cy
     }
@@ -820,7 +828,7 @@ export const FbSparseCortex = () => {
           }}
         />
       </mesh>
-      {/* ガス雲: 場(SOM)の色場=不動の地(additive) */}
+      {/* ガス雲: 場の色場=不動の地(additive) */}
       <points renderOrder={1} frustumCulled={false}>
         <bufferGeometry ref={gasGeoRef}>
           <bufferAttribute attach="attributes-position" count={N} itemSize={3} array={splatPos} />
