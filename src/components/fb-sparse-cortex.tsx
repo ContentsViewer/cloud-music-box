@@ -50,16 +50,29 @@ const LOUD_FLOOR = 0.3 // 入力エネルギー床(無音・微小音では学�
 // --- INTERPRETATION 層パラメータ ---
 const G = 64 // 格子 G×G
 const N = G * G // 4096 セル
-const K_ACTIVE = 24 // スパース: 同時発火数(12=分化優先 ⇔ 82=単色化。24=動きとの折衷)
+const K_ACTIVE = 82 // スパース: 同時発火数(12=分化優先 ⇔ 82=単色化。24=動きとの折衷)
 const ETA = 0.06 // 学習率(上げると地図が音楽と共に呼吸。0.06=流転しすぎ, 0.02=結晶)
-const ETA_NB = 0.004 // 近傍協調(弱め=部品が混合平均へ均質化せず分化する)
-const NB_RAD = 3 // 近傍半径
-const GAMMA_IP = 0.0003 // IP(恒常性)。使われすぎるセルを抑え分化を促す
+// SOMアニーリング(コホネンの定石): 初期化直後は大きな近傍半径・強い協調で
+// 地図全体を粗く整列させ、時間とともに縮めて局所を磨く。一括初期化直後の地図は
+// 空間構造ゼロ(無相関ジッタ)なので、大域的に滑らかな地図(クラスタ同士の
+// 滑らかな接合・長い等高線=長い流れ)を育てるにはこの初期の広い協調が必須。
+const NB_RAD = 3 // 近傍半径(収束後)
+const NB_RAD_START = 12 // 近傍半径(初期)
+const ETA_NB = 0.004 // 近傍協調の強さ(収束後)
+const ETA_NB_START = 0.05 // 近傍協調の強さ(初期)
+const ANNEAL_TAU = 25 // 収束の時定数(秒。音が鳴っていた時間で計る)
+// IP(恒常性): 使われすぎるセルにハンデ(thr)を積み、発火機会を輪番させる。
+// γ=交代のテンポ(毎秒+0.0012 → 隣人との僅差~0.05を越えるまで約40秒)。
+// THR_MAX=交代が許される相手の範囲: 地区内の僅差(≤0.1)は逆転できるが、
+// 別地区との大差(≥0.5)は埋まらない → 領域の丸ごと反転を構造的に防ぐ。
+// 下限0で休眠セルの人工ブースト(負のハンデ)も防止。
+const GAMMA_IP = 0.00002
+const THR_MAX = 0.3
 const HEAT_DECAY = 0.95 // 発火残光(小=キレ/大=尾を引く)
 const USE_ALPHA = 0.02 // 使用率 EMA
 const P_TARGET = K_ACTIVE / N // 目標発火率
 // ソフトWTA表示: 発火(学習)は上位12のまま、表示の熱だけ共鳴上位へ広く注ぐ
-const DISP_K = 80 // 共鳴表示の対象セル数(大きく=広い裾野の発光)
+const DISP_K = 82 // 共鳴表示の対象セル数(大きく=広い裾野の発光)
 const DISP_GAIN = 0.6 // 表示熱の強さ(発火セルの 1.0 より弱く=チャンピオンは際立つ)
 
 // --- OUTPUT 層: 場(ガス) + 流れる粒子(星) ---
@@ -319,6 +332,7 @@ export const FbSparseCortex = () => {
     []
   )
   const seededCountRef = useRef(0)
+  const mapAgeRef = useRef(0) // 地図年齢=音が鳴っていた累積秒(アニーリングの時計)
 
   // ===== OUTPUT 層: 場(グリッド配列)+ 流れる粒子 =====
   const cellColor = useMemo(() => new Float32Array(N * 3), [])
@@ -401,6 +415,7 @@ export const FbSparseCortex = () => {
       cellColor.fill(0)
       gasBright.fill(0)
       seededCountRef.current = 0
+      mapAgeRef.current = 0 // リセット時はアニーリングも最初から
     },
     [W, thr, usage, heat, seeded, mature, actMem, hist, cellColor, gasBright]
   )
@@ -612,11 +627,24 @@ export const FbSparseCortex = () => {
       }
       stats.resFrac = resE / inputE
 
+      // SOMアニーリング: 地図年齢(音が鳴っていた累積秒)で近傍半径と協調強度を
+      // 大→小へ指数収束させる。序盤=地図全体の粗い整列、以後=局所を磨く。
+      mapAgeRef.current += deltaTime
+      const annealT = Math.exp(-mapAgeRef.current / ANNEAL_TAU)
+      const nbRad = NB_RAD + (NB_RAD_START - NB_RAD) * annealT
+      const etaNb = ETA_NB + (ETA_NB_START - ETA_NB) * annealT
+      const nbR = Math.round(nbRad)
+      // 大半径時は遠距離を間引いて計算量を半径3相当に固定(ガウス重みは正確な距離で評価)
+      const nbStep = Math.max(1, Math.round(nbRad / NB_RAD))
+      const inv2r2 = 1 / (2 * nbRad * nbRad)
+
       // 学習(活性セルのみ)+ 使用率更新
       for (let i = 0; i < N; i++) {
         const fired = seeded[i] && drive[i] >= kThr ? 1 : 0
         usage[i] = (1 - USE_ALPHA * dtScale) * usage[i] + USE_ALPHA * dtScale * fired
         thr[i] += GAMMA_IP * dtScale * (usage[i] - P_TARGET)
+        if (thr[i] > THR_MAX) thr[i] = THR_MAX
+        else if (thr[i] < 0) thr[i] = 0
         if (fired) {
           const yi = (drive[i] - kThr) * invMaxU // 0..1(明るさ)
           const aeff = alpha * act[i]
@@ -634,23 +662,23 @@ export const FbSparseCortex = () => {
           heat[i] = Math.min(1.5, heat[i] + yi * dtScale)
           updateCellVisual(i)
 
-          // 近傍協調(トポグラフィック)
+          // 近傍協調(トポグラフィック, アニーリングで半径・強度が収束)
           const gx = i % G, gy = (i / G) | 0
-          const x0 = Math.max(0, gx - NB_RAD), x1g = Math.min(G - 1, gx + NB_RAD)
-          const y0 = Math.max(0, gy - NB_RAD), y1g = Math.min(G - 1, gy + NB_RAD)
-          for (let ny = y0; ny <= y1g; ny++) {
-            for (let nx = x0; nx <= x1g; nx++) {
+          const x0 = Math.max(0, gx - nbR), x1g = Math.min(G - 1, gx + nbR)
+          const y0 = Math.max(0, gy - nbR), y1g = Math.min(G - 1, gy + nbR)
+          for (let ny = y0; ny <= y1g; ny += nbStep) {
+            for (let nx = x0; nx <= x1g; nx += nbStep) {
               const j = ny * G + nx
               if (j === i || !seeded[j]) continue
               const gd2 = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy)
-              const h = ETA_NB * dtScale * Math.exp(-gd2 / (2 * NB_RAD * NB_RAD))
+              const h = etaNb * dtScale * Math.exp(-gd2 * inv2r2)
               const bj = j * DIM
               for (let d = 0; d < DIM; d++) {
                 let wv = W[bj + d] + h * (featVec[d] - W[bj + d])
                 if (wv < 0) wv = 0
                 W[bj + d] = wv
               }
-              updateCellVisual(j)
+              if (h > 0.0008) updateCellVisual(j) // 変化が無視できる遠方は色更新を省略
             }
           }
         }
