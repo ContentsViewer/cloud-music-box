@@ -339,6 +339,7 @@ export const FbSparseCortex = () => {
       windows: 0, // 受信した窓の数
       seams: 0, // 縫合が破れた回数(初回を除く。0なら完全連続)
       lagMs: 0, // 窓到着時の処理遅れ(窓頭 − lastPos)
+      mapAge: 0, // 地図年齢(音声秒)。リセット/リロード/Fast Refreshで0に戻る
     }),
     []
   )
@@ -702,6 +703,7 @@ export const FbSparseCortex = () => {
       // SOMアニーリング: 地図年齢(音が鳴っていた累積秒)で近傍半径と協調強度を
       // 大→小へ指数収束させる。序盤=地図全体の粗い整列、以後=局所を磨く。
       mapAgeRef.current += HOP_SEC // 1ホップ=20msの音声時間(壁時計でなく)
+      stats.mapAge = mapAgeRef.current
       const annealT = Math.exp(-mapAgeRef.current / ANNEAL_TAU)
       const nbRad = NB_RAD + (NB_RAD_START - NB_RAD) * annealT
       const etaNb = ETA_NB + (ETA_NB_START - ETA_NB) * annealT
