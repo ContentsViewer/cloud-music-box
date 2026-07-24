@@ -165,6 +165,30 @@ default `lissajous`):
   them into a continuous sample stream by file position; its learning loop is
   fps-independent (hop-driven). Debug stats at `window.__fbcx`; `r` resets the map.
 
+### sparse-cortex performance notes (2026-07)
+
+- CPU hot paths are written as equivalence-preserving transforms: band-major
+  filterbank with `Math.fround`-emulated f32 state (bit-identical), zero-skip
+  forward pass (bit-identical), quickselect k-WTA thresholds (identical values),
+  batched neighborhood cooperation (`W·Π(1−h) + x·(1−Π(1−h))`, exact composition
+  of the sequential blends; only the interleave order with dictionary updates
+  differs), and a per-hop dirty set that defers `updateCellVisual` to one call
+  per changed cell.
+- The gas layer renders into a **half-resolution offscreen RT** (`GAS_RT_SCALE`,
+  half-float with 8-bit fallback) and is composited by a fullscreen triangle with
+  CustomBlending ONE/ONE — mathematically equivalent to direct additive rendering
+  (verified: accumulated luminance differs by ~1% vs full-res), at ~1/4 the
+  fragment cost. `gl.render(points, camera)` at the end of the priority-0
+  `useFrame` follows three's own FullScreenQuad pattern; a positive-priority
+  `useFrame` would disable R3F auto-render.
+- Uniform objects are hoisted to `useMemo` — an inline `uniforms={{...}}` prop is
+  re-applied on re-render and silently resets runtime-written values.
+- Verification harness (permanent): `__fbcx` exposes `audioBus`, `setSeedRng`,
+  `thr`/`usage`, and stage timings (`stats.tInput/tForward/tSelect/tLearn/tVisual/
+  tField/tParticles`, EMA ms) plus `stats.lastPos`. Recorded AudioFrame streams
+  can be re-emitted through the bus for deterministic cross-build replays
+  (checksum W/thr/usage at a target `lastPos`).
+
 `DynamicBackground` hosts the R3F `<Canvas>` (dpr=1, module-level camera/renderer
 config) and the pitch-colored CSS backdrop (`PitchBackdrop`, a memo leaf).
 
