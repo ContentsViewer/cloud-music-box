@@ -1,9 +1,10 @@
 "use client"
 
-import { useFileStore } from "@/src/stores/file-store"
+import { useFileStore } from "@/src/features/files"
 import { enqueueSnackbar } from "notistack"
 import { useEffect, useRef, useState } from "react"
-import { FileList } from "@/src/components/file-list"
+import { FileList } from "@/src/features/files"
+import { usePlayerStore } from "@/src/features/player"
 import {
   Badge,
   Box,
@@ -28,7 +29,7 @@ import {
   ArrowUpwardRounded,
   ChevronRightRounded,
 } from "@mui/icons-material"
-import { useRouter } from "@/src/router"
+import { useRouter } from "@/src/stores/router"
 import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
@@ -41,11 +42,12 @@ import DownloadingIndicator from "@/src/components/downloading-indicator"
 import {
   AudioTrackFileItem,
   BaseFileItem,
-} from "@/src/drive-clients/base-drive-client"
+} from "@/src/features/files"
 import { css } from "@emotion/react"
 
 export default function OneDrivePage() {
   const [fileStoreState, fileStoreActions] = useFileStore()
+  const [playerState, playerActions] = usePlayerStore()
 
   const networkMonitor = useNetworkMonitor()
   const scrollTargetRef = useRef<Node | undefined>(undefined)
@@ -298,6 +300,8 @@ export default function OneDrivePage() {
           cssStyle={css({ maxWidth: "1040px", margin: "0 auto", width: "100%" })}
           files={files}
           folderId={folderId}
+          activeFileId={playerState.activeTrack?.file.id}
+          onPlayTracks={playerActions.playTrack}
         />
       </Box>
     </Box>

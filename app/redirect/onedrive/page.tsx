@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter } from "@/src/router"
+import { useRouter } from "@/src/stores/router"
 import { Backdrop, Box, CircularProgress, Grow } from "@mui/material"
 import { useEffect, useRef, useState } from "react"
 

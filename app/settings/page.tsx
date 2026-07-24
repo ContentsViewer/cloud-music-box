@@ -2,8 +2,12 @@
 "use client"
 
 import AppTopBar from "@/src/components/app-top-bar"
-import { useRouter } from "@/src/router"
-import { useFileStore } from "@/src/stores/file-store"
+import { useRouter } from "@/src/stores/router"
+import {
+  useAudioDynamicsSettingsStore,
+  VisualizerType,
+} from "@/src/stores/audio-dynamics-settings"
+import { useFileStore } from "@/src/features/files"
 import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
@@ -30,6 +34,8 @@ import {
   Backdrop,
   CircularProgress,
   Switch,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material"
 import Dialog from "@mui/material/Dialog"
 import DialogTitle from "@mui/material/DialogTitle"
@@ -288,6 +294,53 @@ function ScreenSettingsArea() {
   )
 }
 
+function VisualizerSettingsArea() {
+  const [themeStoreState] = useThemeStore()
+  const [audioDynamicsSettings, audioDynamicsSettingsActions] =
+    useAudioDynamicsSettingsStore()
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
+  return (
+    <div
+      css={css({
+        display: "flex",
+        flexDirection: "column",
+        marginTop: "16px",
+      })}
+    >
+      <Typography variant="h6">Visualizer</Typography>
+      <List>
+        <ListItem>
+          <ListItemText
+            primary="Type"
+            secondary="Select the background visualizer."
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
+          />
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={audioDynamicsSettings.visualizerType}
+            onChange={(_, value: VisualizerType | null) => {
+              if (value) {
+                audioDynamicsSettingsActions.setVisualizerType(value)
+              }
+            }}
+          >
+            <ToggleButton value="lissajous">Lissajous</ToggleButton>
+            <ToggleButton value="sparse-cortex">Sparse Cortex</ToggleButton>
+          </ToggleButtonGroup>
+        </ListItem>
+      </List>
+    </div>
+  )
+}
+
 function ResetSettingsArea() {
   const [resetAppDialogOpen, setResetAppDialogOpen] = useState(false)
   const [backdropOpen, setBackdropOpen] = useState(false)
@@ -380,7 +433,7 @@ function ResetSettingsArea() {
                 const deleteReq = indexedDB.deleteDatabase("file-db")
                 deleteReq.onsuccess = () => resolve()
                 deleteReq.onerror = () => reject(deleteReq.error)
-                deleteReq.onblocked = () => resolve() // ブロック時も続行
+                deleteReq.onblocked = () => resolve() // continue even when blocked
               })
 
               // const databases = await indexedDB.databases()
@@ -488,6 +541,7 @@ export default function Page() {
         >
           <StorageSettingsArea />
           <ScreenSettingsArea />
+          <VisualizerSettingsArea />
           <ResetSettingsArea />
           <Typography variant="h6" sx={{ mt: 2 }}>
             About

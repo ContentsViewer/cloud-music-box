@@ -235,12 +235,12 @@ const defaultCache: RuntimeCaching[] =
                 const url = new URL(request.url);
                 console.log('Original Request URL:', url.toString());
 
-                // キャッシュ内の全エントリを確認
+                // Inspect every entry in the cache
                 const cache = await caches.open("serwist-precache");
                 const keys = await cache.keys();
                 // console.log('Available Cache Keys:', keys.map(k => k.url));
 
-                // パス名が一致するキャッシュエントリを探す
+                // Find a cache entry whose pathname matches
                 const matchingKey = keys.find(key => {
                   const keyUrl = new URL(key.url);
                   return keyUrl.pathname === url.pathname;
@@ -248,7 +248,7 @@ const defaultCache: RuntimeCaching[] =
 
                 if (matchingKey) {
                   console.log('Found matching cache key:', matchingKey.url);
-                  // リクエストヘッダーを保持しながら、URLのみを置き換える
+                  // Replace only the URL while preserving the request headers
                   return new Request(matchingKey.url, {
                     headers: request.headers,
                     method: request.method,
@@ -257,7 +257,7 @@ const defaultCache: RuntimeCaching[] =
                   });
                 }
 
-                // マッチするキャッシュが見つからない場合
+                // When no matching cache entry is found
                 url.searchParams.delete('_rsc');
                 const newRequest = new Request(url.toString(), request);
                 console.log('No cache match, using:', newRequest.url);

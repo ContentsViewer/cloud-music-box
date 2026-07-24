@@ -5,7 +5,7 @@ import { CssBaseline } from "@mui/material"
 import { AppLayout } from "./app-layout"
 import { ThemeStoreProvider } from "@/src/stores/theme-store"
 import type { Viewport, Metadata } from "next"
-import { GA_MEASUREMENT_ID } from "@/src/gtag"
+import { GA_MEASUREMENT_ID } from "@/src/lib/gtag"
 import { GoogleAnalytics } from "@next/third-parties/google"
 
 export const viewport: Viewport = {

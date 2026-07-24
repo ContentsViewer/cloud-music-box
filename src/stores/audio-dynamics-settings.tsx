@@ -9,21 +9,40 @@ import {
   useRef,
 } from "react"
 
+export type VisualizerType = "lissajous" | "sparse-cortex"
+
+const VISUALIZER_TYPE_STORAGE_KEY = "visualizerType"
+
+const loadVisualizerType = (): VisualizerType => {
+  if (typeof window === "undefined") return "lissajous"
+  const value = window.localStorage.getItem(VISUALIZER_TYPE_STORAGE_KEY)
+  return value === "sparse-cortex" ? "sparse-cortex" : "lissajous"
+}
+
 export interface AudioDynamicsSettingsProps {
   dynamicsEffectAppeal: boolean
+  visualizerType: VisualizerType
 }
 
 export const AudioDynamicsSettingsStateContext =
   createContext<AudioDynamicsSettingsProps>({
     dynamicsEffectAppeal: false,
+    visualizerType: "lissajous",
   })
 
-type AudioDynamicsSettingsAction = {
-  type: "setDynamicsEffectAppeal"
-  payload: {
-    dynamicsEffectAppeal: boolean
-  }
-}
+type AudioDynamicsSettingsAction =
+  | {
+      type: "setDynamicsEffectAppeal"
+      payload: {
+        dynamicsEffectAppeal: boolean
+      }
+    }
+  | {
+      type: "setVisualizerType"
+      payload: {
+        visualizerType: VisualizerType
+      }
+    }
 
 export const AudioDynamicsSettingsDispatchContext = createContext<
   Dispatch<AudioDynamicsSettingsAction>
@@ -45,6 +64,15 @@ export const useAudioDynamicsSettingsStore = () => {
           },
         })
       },
+      setVisualizerType: (visualizerType: VisualizerType) => {
+        window.localStorage.setItem(VISUALIZER_TYPE_STORAGE_KEY, visualizerType)
+        dispatch({
+          type: "setVisualizerType",
+          payload: {
+            visualizerType,
+          },
+        })
+      },
     }),
     []
   )
@@ -62,6 +90,11 @@ const reducer = (
         ...state,
         dynamicsEffectAppeal: action.payload.dynamicsEffectAppeal,
       }
+    case "setVisualizerType":
+      return {
+        ...state,
+        visualizerType: action.payload.visualizerType,
+      }
     default:
       return state
   }
@@ -72,9 +105,10 @@ export const AudioDynamicsSettingsProvider = ({
 }: {
   children: ReactNode
 }) => {
-  const [state, dispatch] = useReducer(reducer, {
+  const [state, dispatch] = useReducer(reducer, null, () => ({
     dynamicsEffectAppeal: false,
-  })
+    visualizerType: loadVisualizerType(),
+  }))
   return (
     <AudioDynamicsSettingsStateContext.Provider value={state}>
       <AudioDynamicsSettingsDispatchContext.Provider value={dispatch}>
