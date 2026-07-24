@@ -87,7 +87,7 @@ const SPLAT_POS_OFFSET = 0.07 // 位置=音色マップを安定させる(動的
 const SAT_TONE = 2.0 // スペクトル集中度(トーン性)→ 彩度・流速のスケール
 const ACT_DECAY = 0.985 // 活性メモリ減衰(ガスの滞留)
 // [ガス] 場の色雲=不動の地(星雲)。柔・大・連続 → 離散格子が出ない
-const GAS_SIZE = 58.0
+const GAS_SIZE = 66.0 // 円盤化でリング縞(重なりリップル)が出ないようσ>格子間隔を確保
 const GAS_AMBIENT = 0.06
 const GAS_ACT_GAIN = 0.27
 // [粒子] 場の上を流れるトレーサ星(=星の流れ)
@@ -108,6 +108,20 @@ const P_LIFE = 3.2
 const SEED_JITTER = 0.04
 const SEED_MIX = 0.7
 const MATURE_RATE = 0.05
+// [円盤化+外郭発散] 格子の直線縁・四隅を円盤写像で消し、さらに外周は半径方向に
+// 発散する引き伸ばし(r→1で無限遠)で「座標そのもの」を散らす。外側ほどセル間隔が
+// 広がり、密度が連続的に薄れて尽きる=「ふち」という場所が存在しなくなる。
+// 減光もノイズも使わない(決定的な半径写像のみ)。セルごとのピッチ/トーン変位が
+// 急勾配部で拡大されるため、外郭は同心円ではなく散った星になる。
+const HALO_K = 0.25 // 外郭の発散強度(大=内側から散り始める)
+const HALO_EPS = 0.02 // 発散のクランプ(最外殻の飛距離を有限に保つ)
+// [外郭の異方性スプラット] 発散は半径方向だけ強く伸ばす(異方性: r=0.9で半径~12倍 vs
+// 接線1.7倍)ため、等方な点では半径方向の隙間が開き「発火時の同心円縞」になる。
+// 対策: ガスの各板をフラグメントで放射方向に引き伸ばす楕円ガウスにして隙間を覆う
+// (EWAスプラッティング流)。点の追加・CPU処理なし、シェーダのみで完結する。
+// 外郭の明るさ補償: 発散は光を広い面積に薄めるため、無補償(0)では縁回りが物理希釈
+// そのままに暗くなる。1で希釈を完全補償(内側と同輝度=溶けずに広がる)。中間が自然
+const HALO_BRIGHT = 0.7
 
 // 帯域 m の中心周波数(入力層と同式)
 function bandFreq(m: number): number {
@@ -186,7 +200,41 @@ const BG_FRAG = `
     gl_FragColor = vec4(col, uOpacity);
   }
 `
-// [ガス] 柔らかい大きなガウス粒子。加算合成で重なり連続ガスに(場の色場)
+// [円盤化+外郭発散] 3つの頂点シェーダで共有: 正方格子→円盤(Shirley-Chow同心写像)
+// + 外周発散(r→1 で半径方向に無限遠へ。内側 r<0.7 はほぼ不変)
+const DISK_GLSL = `
+  vec2 squareToDisk(vec2 p){
+    if (p.x*p.x > p.y*p.y) {
+      float phi = 0.78539816 * (p.y / p.x);
+      return p.x * vec2(cos(phi), sin(phi));
+    } else if (p.y != 0.0) {
+      float phi = 1.57079633 - 0.78539816 * (p.x / p.y);
+      return p.y * vec2(cos(phi), sin(phi));
+    }
+    return vec2(0.0);
+  }
+  // 戻り値: xy=発散後座標, z=接線方向の伸縮率 s, w=半径方向の伸縮率 rs(>s)
+  vec4 diskWarp(vec2 pos){
+    float L = ${(SPLAT_LAYOUT + SPLAT_POS_OFFSET).toFixed(4)};
+    vec2 dp = squareToDisk(pos / L);
+    float r2 = dot(dp, dp);
+    float D = max(1.0 - r2, ${HALO_EPS.toFixed(3)});
+    float r6 = r2 * r2 * r2;
+    float s = 1.0 + ${HALO_K.toFixed(3)} * r6 / D;
+    float r = sqrt(max(r2, 1e-8));
+    float r5 = r6 / r;
+    float ds = (1.0 - r2 > ${HALO_EPS.toFixed(3)})
+      ? ${HALO_K.toFixed(3)} * (6.0 * r5 / D + 2.0 * r5 * r2 / (D * D))
+      : ${HALO_K.toFixed(3)} * 6.0 * r5 / ${HALO_EPS.toFixed(3)};
+    float rs = s + r * ds;
+    return vec4(dp * s * L, s, rs);
+  }
+`
+
+// [ガス] 柔らかい大きなガウス粒子。加算合成で重なり連続ガスに(場の色場)。
+// 外郭では1枚の板を放射方向に引き伸ばす異方性スプラット(EWA流)で隙間を覆う:
+// 点の追加なし・CPU処理なしで、発散の半径方向異方性による同心円縞を防ぐ。
+// 中心部は異方性=1で従来と同一の描画。
 const GAS_VERT = `
   attribute vec3 aColor;
   attribute float aBright;
@@ -194,22 +242,41 @@ const GAS_VERT = `
   uniform float uSize;
   varying vec3 vColor;
   varying float vBright;
+  varying vec2 vDir;
+  varying float vAniso;
+  ${DISK_GLSL}
   void main(){
     vColor = aColor;
-    vBright = aBright;
     float sx = 1.0, sy = 1.0;
     if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
-    gl_PointSize = uSize;
-    gl_Position = vec4(position.x * sx, position.y * sy, 0.0, 1.0);
+    vec4 wp = diskWarp(position.xy);
+    float tScale = min(wp.z, 3.0);  // 接線方向の被覆
+    float rScale = min(wp.w, 6.0);  // 半径方向の被覆(楕円の長軸)
+    gl_PointSize = uSize * rScale;
+    vec2 sd = vec2(wp.x * sx, wp.y * sy);
+    // 放射方向は gl_PointCoord と同じピクセル空間で(クリップ空間のままだと
+    // ウィンドウのアスペクト比ぶん楕円が傾き、外縁の板が痩せて色が消える)
+    vec2 pd = vec2(sd.x * uAspect, sd.y);
+    vDir = dot(pd, pd) > 1e-8 ? normalize(pd) : vec2(1.0, 0.0);
+    vAniso = tScale / rScale;
+    // 輝度: 板面積で正規化し、画面上の減衰 = (面積希釈率)^(HALO_BRIGHT-1) に設計
+    vBright = aBright * pow(max(wp.z * wp.w, 1.0), ${HALO_BRIGHT.toFixed(3)}) / (rScale * tScale);
+    gl_Position = vec4(sd.x, sd.y, 0.0, 1.0);
   }
 `
 const GAS_FRAG = `
   precision highp float;
   varying vec3 vColor;
   varying float vBright;
+  varying vec2 vDir;
+  varying float vAniso;
   void main(){
     vec2 c = gl_PointCoord - 0.5;
-    float r = length(c);
+    c = vec2(c.x, -c.y);                    // PointCoordはy下向き→画面の向きに揃える
+    float u = dot(c, vDir);                 // 放射軸(長軸)
+    float v = dot(c, vec2(-vDir.y, vDir.x)); // 接線軸(短軸)
+    vec2 q = vec2(u, v / max(vAniso, 1e-3));
+    float r = length(q);
     float g = exp(-r * r * 9.0);            // 広く柔らかいガウス → 重なって連続
     float win = smoothstep(0.5, 0.30, r);
     float a = g * win * vBright;
@@ -224,13 +291,15 @@ const STAR_VERT = `
   uniform float uAspect;
   varying vec3 vColor;
   varying float vBright;
+  ${DISK_GLSL}
   void main(){
     vColor = aColor;
     vBright = aBright;
     float sx = 1.0, sy = 1.0;
     if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
-    gl_PointSize = aSize;
-    gl_Position = vec4(position.x * sx, position.y * sy, 0.0, 1.0);
+    vec4 wp = diskWarp(position.xy);
+    gl_PointSize = aSize * min(wp.z, 2.0);
+    gl_Position = vec4(wp.x * sx, wp.y * sy, 0.0, 1.0);
   }
 `
 const STAR_FRAG = `
@@ -255,11 +324,13 @@ const TRAIL_VERT = `
   attribute vec3 aLCol;
   uniform float uAspect;
   varying vec3 vLCol;
+  ${DISK_GLSL}
   void main(){
     vLCol = aLCol;
     float sx = 1.0, sy = 1.0;
     if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
-    gl_Position = vec4(position.x * sx, position.y * sy, 0.0, 1.0);
+    vec4 wp = diskWarp(position.xy);
+    gl_Position = vec4(wp.x * sx, wp.y * sy, 0.0, 1.0);
   }
 `
 const TRAIL_FRAG = `
