@@ -34,8 +34,8 @@ import {
   Backdrop,
   CircularProgress,
   Switch,
-  ToggleButton,
-  ToggleButtonGroup,
+  Select,
+  MenuItem,
 } from "@mui/material"
 import Dialog from "@mui/material/Dialog"
 import DialogTitle from "@mui/material/DialogTitle"
@@ -322,19 +322,31 @@ function VisualizerSettingsArea() {
               },
             }}
           />
-          <ToggleButtonGroup
-            exclusive
+          <Select
             size="small"
             value={audioDynamicsSettings.visualizerType}
-            onChange={(_, value: VisualizerType | null) => {
-              if (value) {
-                audioDynamicsSettingsActions.setVisualizerType(value)
-              }
+            onChange={event => {
+              audioDynamicsSettingsActions.setVisualizerType(
+                event.target.value as VisualizerType
+              )
+            }}
+            sx={{
+              minWidth: 160,
+              // MD3 outlined text field: extra-small (4px) corner
+              borderRadius: "4px",
+            }}
+            MenuProps={{
+              // MD3 menu container: extra-small corner, elevation level 2
+              // (paper color is already MD3 surface-container via the theme)
+              PaperProps: {
+                elevation: 2,
+                sx: { borderRadius: "4px" },
+              },
             }}
           >
-            <ToggleButton value="lissajous">Lissajous</ToggleButton>
-            <ToggleButton value="sparse-cortex">Sparse Cortex</ToggleButton>
-          </ToggleButtonGroup>
+            <MenuItem value="lissajous">Lissajous</MenuItem>
+            <MenuItem value="sparse-cortex">Sparse Cortex</MenuItem>
+          </Select>
         </ListItem>
       </List>
     </div>
