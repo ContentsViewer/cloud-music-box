@@ -2,10 +2,10 @@
 import { AlbumCover } from "@/src/components/album-cover"
 import AppTopBar from "@/src/components/app-top-bar"
 import { MarqueeText } from "@/src/components/marquee-text"
-import { useRouter } from "@/src/router"
-import { AlbumItem, useFileStore } from "@/src/stores/file-store"
+import { useRouter } from "@/src/stores/router"
+import { AlbumItem, useFileStore } from "@/src/features/files"
 import { useThemeStore } from "@/src/stores/theme-store"
-import { TrackList } from "@/src/components/track-list"
+import { TrackList } from "@/src/features/files"
 import { Theme } from "@emotion/react"
 import {
   MaterialDynamicColors,
@@ -36,8 +36,8 @@ import React, { useCallback, useMemo, useRef } from "react"
 import { useEffect, useState } from "react"
 import { SerializedStyles, css } from "@emotion/react"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
-import { usePlayerStore } from "@/src/stores/player-store"
-import { AudioTrackFileItem } from "@/src/drive-clients/base-drive-client"
+import { usePlayerStore } from "@/src/features/player"
+import { AudioTrackFileItem } from "@/src/features/files"
 
 const AlbumCard = React.memo(function AlbumCard({
   albumItem,
@@ -271,6 +271,7 @@ const AlbumPage = React.memo(function AlbumPage({
   const [fileStoreState, fileStoreActions] = useFileStore()
   const fileStoreActionsRef = useRef(fileStoreActions)
   fileStoreActionsRef.current = fileStoreActions
+  const [playerState, playerActions] = usePlayerStore()
   const [routerState, routerActions] = useRouter()
 
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
@@ -395,6 +396,8 @@ const AlbumPage = React.memo(function AlbumPage({
         })}
         tracks={tracks}
         albumId={albumItem?.name}
+        activeTrack={playerState.activeTrack?.file}
+        onPlayTracks={playerActions.playTrack}
       />
     </Box>
   )

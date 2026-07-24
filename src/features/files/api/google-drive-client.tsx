@@ -1,4 +1,4 @@
-// google-auth-libraryとgoogleapisのインポートを削除
+// google-auth-library and googleapis imports removed
 // import { GoogleAuth, OAuth2Client } from "google-auth-library"
 // import { drive_v3, google } from "googleapis"
 
@@ -13,7 +13,7 @@ import {
 import { closeSnackbar, enqueueSnackbar, SnackbarKey } from "notistack"
 import { Button } from "@mui/material"
 
-// Google Identity Services用の型定義
+// Type definitions for Google Identity Services
 declare global {
   interface Window {
     google: any
@@ -46,10 +46,10 @@ const DB_KEY_TOKEN_EXPIRES = "googleDrive.tokenExpires"
 const GOOGLE_CLIENT_ID =
   "636784171461-qe09gc3cupq8iagds8hk16cb6k6cvle4.apps.googleusercontent.com"
 
-// Google Picker API用のDeveloper Key（API Key）
+// Developer Key (API Key) for the Google Picker API
 const GOOGLE_DEVELOPER_KEY = "AIzaSyDnV3ERZBz85HEqzGKXWIoNw79YEC8MsYQ"
 
-// Google Cloud Projectのプロジェクト番号（App ID）
+// Google Cloud Project number (App ID)
 const GOOGLE_APP_ID = "636784171461"
 
 export function saveAccessToken(token: string) {
@@ -71,7 +71,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
   let accessToken: string | undefined = undefined
   let refreshToken: string | undefined = undefined
 
-  // Google API スクリプトを動的に読み込み
+  // Dynamically load the Google API script
   const loadGoogleAPI = () => {
     return new Promise<void>(resolve => {
       if (window.gapi) {
@@ -83,7 +83,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       script.src = "https://apis.google.com/js/api.js"
       script.onload = () => {
         window.gapi.load("client", async () => {
-          // GAPI クライアントを初期化
+          // Initialize the GAPI client
           await window.gapi.client.init({
             discoveryDocs: [
               "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
@@ -97,7 +97,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
     })
   }
 
-  // Google Identity Services スクリプトを読み込み
+  // Load the Google Identity Services script
   const loadGoogleIdentity = () => {
     return new Promise<void>(resolve => {
       if (window.google?.accounts) {
@@ -112,7 +112,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
     })
   }
 
-  // Google Picker API を読み込み
+  // Load the Google Picker API
   const loadGooglePicker = () => {
     return new Promise<void>(resolve => {
       if (window.google?.picker) {
@@ -132,18 +132,18 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       redirect_uri: redirectUri,
       response_type: "token id_token",
       scope: "https://www.googleapis.com/auth/drive.file",
-      include_granted_scopes: "true", // 既存許可の再利用
-      // prompt: "consent", // 毎回同意画面を出したいなら
-      // prompt: "select_account", // アカウント選択を促す
+      include_granted_scopes: "true", // reuse previously granted scopes
+      // prompt: "consent", // to force the consent screen every time
+      // prompt: "select_account", // to prompt for account selection
       // login_hint: "",
       nonce: Math.random().toString(36),
     })
 
     if (userInfo) {
-      // 既にユーザー情報がある場合はログインヒントを追加
+      // Add a login hint when user info already exists
       params.append("login_hint", userInfo)
     } else {
-      params.append("prompt", "select_account") // アカウント選択を促す
+      params.append("prompt", "select_account") // prompt for account selection
     }
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
     window.location.href = authUrl
@@ -226,7 +226,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
     }
   }
 
-  // // リフレッシュトークンを使ってアクセストークンを更新
+  // // Refresh the access token using the refresh token
   // const refreshAccessToken = async (): Promise<string> => {
   //   if (!refreshToken) {
   //     throw new Error("No refresh token available")
@@ -255,10 +255,10 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
   //   }
 
   //   accessToken = tokenData.access_token as string
-  //   const expiresIn = tokenData.expires_in || 3600 // デフォルト1時間
+  //   const expiresIn = tokenData.expires_in || 3600 // default 1 hour
   //   const expiresAt = Date.now() + expiresIn * 1000
 
-  //   // 新しいリフレッシュトークンがある場合は更新
+  //   // Update when a new refresh token is present
   //   if (tokenData.refresh_token) {
   //     refreshToken = tokenData.refresh_token as string
   //     localStorage.setItem(DB_KEY_REFRESH_TOKEN, refreshToken)
@@ -272,12 +272,12 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
   //   return accessToken
   // }
 
-  // トークンの有効性をチェック
+  // Check token validity
   const isTokenValid = (): boolean => {
     const expiresAt = localStorage.getItem(DB_KEY_TOKEN_EXPIRES)
     if (!expiresAt) return false
 
-    // 5分前にマージンを取る（余裕を持って再認証を促す）
+    // Keep a 5-minute margin (prompt re-auth with headroom)
     const marginMs = 5 * 60 * 1000
     return Date.now() < parseInt(expiresAt) - marginMs
   }
@@ -330,7 +330,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
         throw new Error("No access token available for Picker")
       }
 
-      // トークンの有効性をチェック
+      // Check token validity
       if (!isTokenValid()) {
         enqueueSnackbarWithAction()
         throw new Error("Access token expired, reauthorization required")
@@ -338,17 +338,17 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
 
       return new Promise((resolve, reject) => {
         try {
-          // DocsViewでフォルダも表示されるように設定
+          // Configure DocsView to show folders too
           const docsView = new window.google.picker.DocsView()
-            .setIncludeFolders(true)  // フォルダを表示
-            .setParent(parentId || 'root')  // 指定されたフォルダまたはDriveのルートから開始
+            .setIncludeFolders(true)  // show folders
+            .setParent(parentId || 'root')  // start from the given folder or the Drive root
 
           const picker = new window.google.picker.PickerBuilder()
-            .addView(docsView)  // カスタムビューを使用
-            .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)  // 複数選択を有効化
+            .addView(docsView)  // use the custom view
+            .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)  // enable multi-select
             .setOAuthToken(accessToken)
             .setDeveloperKey(GOOGLE_DEVELOPER_KEY)
-            .setAppId(GOOGLE_APP_ID)  // プロジェクト番号を設定（drive.fileスコープで必須）
+            .setAppId(GOOGLE_APP_ID)  // set the project number (required for the drive.file scope)
             .setCallback((data: any) => {
               if (data.action === window.google.picker.Action.PICKED) {
                 console.log("Picker data:", data)
@@ -380,7 +380,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
         throw new Error("No access token available for Picker")
       }
 
-      // トークンの有効性をチェック
+      // Check token validity
       if (!isTokenValid()) {
         enqueueSnackbarWithAction()
         throw new Error("Access token expired, reauthorization required")
@@ -388,29 +388,29 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
 
       return new Promise((resolve, reject) => {
         try {
-          // フォルダのみ選択可能なDocsView
+          // DocsView restricted to folder selection
           const docsView = new window.google.picker.DocsView()
             .setIncludeFolders(true)
             .setMimeTypes('application/vnd.google-apps.folder')
             .setSelectFolderEnabled(true)
 
-          // setFileIds() を文字列形式で指定
-          // 注意: setParent()と併用不可（setFileIdsが上書きする）
+          // Pass setFileIds() as a string
+          // Note: cannot be combined with setParent() (setFileIds overrides it)
           console.log("Setting fileIds (string format):", parentId)
-          docsView.setFileIds(parentId)  // 文字列として渡す
+          docsView.setFileIds(parentId)  // passed as a string
 
           const picker = new window.google.picker.PickerBuilder()
             .addView(docsView)
             .setOAuthToken(accessToken)
             .setDeveloperKey(GOOGLE_DEVELOPER_KEY)
             .setAppId(GOOGLE_APP_ID)
-            .setTitle(`フォルダを選択してアクセス許可を付与してください`)
+            .setTitle(`Select the folder to grant access`)
             .setCallback((data: any) => {
               if (data.action === window.google.picker.Action.PICKED) {
                 const folder = data.docs[0]
                 console.log("Folder selected:", folder)
 
-                // 選択されたフォルダが対象のフォルダかチェック
+                // Check whether the selected folder is the target folder
                 if (folder.id === parentId) {
                   console.log("✅ Correct folder selected!")
                 } else {
@@ -449,12 +449,12 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
           const data = await response.json()
           return { hasAccess: true, folderName: data.name }
         } else if (response.status === 401 || response.status === 403) {
-          // トークンが無効
+          // Token is invalid
           console.warn("Token invalid (401/403), requesting reauthorization")
           enqueueSnackbarWithAction()
           return { hasAccess: false }
         } else if (response.status === 404) {
-          // アクセス許可なし
+          // No access permission
           return { hasAccess: false }
         } else {
           throw new Error(`Failed to check folder access: ${response.statusText}`)
@@ -465,16 +465,16 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
       }
     },
     async getRootFolderId() {
-      // Pickerモードでは仮想ルートフォルダIDを返す
+      // Picker mode returns the virtual root folder id
       return "root"
     },
     async getFile(fileId: string) {
-      // Pickerモードでは実装不要（file-storeがIDBから取得）
+      // Not needed in Picker mode (file-store reads from IDB)
       throw new Error("getFile is not supported in Picker mode. Use file-store instead.")
     },
     async getChildren(folderId: string) {
-      // drive.fileスコープでは、既にPickerで選択されたファイルのみ返される
-      // 新しいファイルは権限がないため表示されない可能性が高い（実験的実装）
+      // With the drive.file scope, only files already picked via the Picker are returned
+      // New files likely will not appear due to missing permissions (experimental)
       return withAutoRefresh(async () => {
         console.log(`Attempting to list children of folder: ${folderId}`)
 
@@ -502,13 +502,13 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
         } catch (error: any) {
           console.error(`Error listing children of folder ${folderId}:`, error)
 
-          // 403エラーの場合、権限がないことを明示
+          // On 403, make the missing permission explicit
           if (error.status === 403) {
             console.warn(
               `403 Forbidden - drive.file scope does not grant access to list folder contents. ` +
               `Only files previously selected via Picker are accessible.`
             )
-            return [] // 空の配列を返す（エラーではなく、権限による制限）
+            return [] // return an empty array (a permission limitation, not an error)
           }
 
           throw error
@@ -527,7 +527,7 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
 
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
-          // トークンが無効
+          // Token is invalid
           console.warn("Token invalid (401/403) on fetchFileBlob, requesting reauthorization")
           enqueueSnackbarWithAction()
         }

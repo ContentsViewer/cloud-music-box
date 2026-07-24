@@ -1,15 +1,17 @@
 "use client"
 
+// Bundle-isolation exception: importing via the features/files index would drag in
+// the OneDrive side (MSAL etc., +220 kB), so import the needed api module directly
 import {
   createGoogleDriveClient,
   saveAccessToken,
   saveUserInfo,
-} from "@/src/drive-clients/google-drive-client"
-import { useRouter } from "@/src/router"
+} from "@/src/features/files/api/google-drive-client"
+import { useRouter } from "@/src/stores/router"
 import { Backdrop, Box, CircularProgress, Grow } from "@mui/material"
 import { useEffect, useRef, useState } from "react"
 
-// JWT（ID Token）をパースする簡単な関数
+// Small helper that parses a JWT (ID token)
 function parseJWT(token: string) {
   const base64Url = token.split(".")[1]
   const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/")
@@ -30,7 +32,7 @@ export default function Page() {
     const handleGoogleRedirect = async () => {
       if (refProcessed.current) return
       refProcessed.current = true
-      // URLパラメータからauthorization codeを取得
+      // Extract the authorization code from the URL parameters
       const hash = new URLSearchParams(location.hash.substring(1))
       const accessToken = hash.get("access_token")
       // const urlParams = new URLSearchParams(window.location.search)
@@ -43,7 +45,7 @@ export default function Page() {
       console.log(accessToken)
       saveAccessToken(accessToken)
 
-      // トークンの有効期限を保存
+      // Store the token expiry
       const expiresIn = hash.get("expires_in")
       if (expiresIn) {
         const expiresInSeconds = parseInt(expiresIn)
@@ -78,7 +80,7 @@ export default function Page() {
       // }
 
       // console.log("Google authorization code received:", code)
-      // // Google Drive クライアントを作成
+      // // Create the Google Drive client
       // const driveClient = await createGoogleDriveClient()
       // const accessToken = await driveClient.fetchAccessToken(code)
     }

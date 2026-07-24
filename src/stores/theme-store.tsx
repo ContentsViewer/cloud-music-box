@@ -3,20 +3,12 @@
 import { Roboto, Noto_Sans_JP } from "next/font/google"
 import { createTheme, responsiveFontSizes } from "@mui/material/styles"
 import { ThemeProvider } from "@mui/material/styles"
-import { useTheme } from "@mui/material/styles"
 import {
   hexFromArgb,
-  sourceColorFromImage,
   DynamicScheme,
   Hct,
   MaterialDynamicColors,
-  rgbaFromArgb,
   SchemeTonalSpot,
-  SchemeFidelity,
-  SchemeExpressive,
-  SchemeVibrant,
-  SchemeAndroid,
-  SchemeNeutral,
   TonalPalette,
   sanitizeDegreesDouble,
 } from "@material/material-color-utilities"
@@ -29,7 +21,7 @@ import {
   useRef,
 } from "react"
 import { GlobalStyles } from "@mui/material"
-import { extractColorFromImage } from "../theming/color-from-image"
+import { extractColorFromImage } from "../lib/theming/color-from-image"
 
 const roboto = Roboto({
   weight: ["300", "400", "500", "700"],

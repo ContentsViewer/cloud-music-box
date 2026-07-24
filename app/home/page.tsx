@@ -1,8 +1,8 @@
 "use client"
 
 import AppTopBar from "@/src/components/app-top-bar"
-import { useRouter } from "@/src/router"
-import { useFileStore } from "@/src/stores/file-store"
+import { useRouter } from "@/src/stores/router"
+import { useFileStore } from "@/src/features/files"
 import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
@@ -46,9 +46,9 @@ import DownloadingIndicator from "@/src/components/downloading-indicator"
 import {
   createOneDriveClient,
   OneDriveClient,
-} from "@/src/drive-clients/onedrive-client"
-import { setDriveConfig } from "@/src/drive-clients/base-drive-client"
-import { createGoogleDriveClient } from "@/src/drive-clients/google-drive-client"
+} from "@/src/features/files"
+import { setDriveConfig } from "@/src/features/files"
+import { createGoogleDriveClient } from "@/src/features/files"
 
 const LoginPage = () => {
   const [loading, setLoading] = useState(false)

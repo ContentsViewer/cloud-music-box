@@ -1,10 +1,10 @@
 "use client"
 
-import { AudioPlayer } from "@/src/audio/audio-player"
-import { PlayerCard } from "@/src/components/player-card"
-import { FileStoreProvider } from "@/src/stores/file-store"
-import { PlayerStoreProvider, usePlayerStore } from "@/src/stores/player-store"
-import { DynamicBackground } from "@/src/components/dynamic-background"
+import { AudioPlayer } from "@/src/features/player"
+import { PlayerCard } from "@/src/features/player"
+import { FileStoreProvider } from "@/src/features/files"
+import { PlayerStoreProvider, usePlayerStore } from "@/src/features/player"
+import { DynamicBackground } from "@/src/features/visualizers"
 import { Box, Fade, Button, styled } from "@mui/material"
 import {
   MaterialDesignContent,
@@ -14,11 +14,11 @@ import {
   enqueueSnackbar,
 } from "notistack"
 import { NetworkMonitorProvider } from "@/src/stores/network-monitor"
-import { RouterProvider } from "@/src/router"
+import { RouterProvider } from "@/src/stores/router"
 import { useEffect, useRef, useState } from "react"
 import { useThemeStore } from "@/src/stores/theme-store"
 import * as mm from "music-metadata-browser"
-import { AudioDynamicsProvider } from "@/src/stores/audio-dynamics-store"
+import { AudioBusProvider } from "@/src/stores/audio-bus-provider"
 import { css } from "@emotion/css"
 import { registerServiceWorker } from "./register-sw"
 import {
@@ -201,9 +201,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <FileStoreProvider>
           <PlayerStoreProvider>
             <AudioDynamicsSettingsProvider>
-              <AudioDynamicsProvider>
+              <AudioBusProvider>
                 <AppMain>{children}</AppMain>
-              </AudioDynamicsProvider>
+              </AudioBusProvider>
             </AudioDynamicsSettingsProvider>
           </PlayerStoreProvider>
         </FileStoreProvider>

@@ -1,11 +1,10 @@
 "use client"
 
-import { useRouter } from "../router"
+import { useRouter } from "@/src/stores/router"
 import { FileListItemAudioTrack, FileListItemBasic } from "./file-list-item"
-import { AudioTrack, usePlayerStore } from "../stores/player-store"
 import { InsertDriveFileOutlined, AudioFileOutlined } from "@mui/icons-material"
 import FolderIcon from "@mui/icons-material/Folder"
-import { useNetworkMonitor } from "../stores/network-monitor"
+import { useNetworkMonitor } from "@/src/stores/network-monitor"
 import { List, ListItemIcon, ListItemText, Menu, MenuItem } from "@mui/material"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -13,18 +12,18 @@ import {
   AudioTrackFileItem,
   BaseFileItem,
   FolderItem,
-} from "../drive-clients/base-drive-client"
+} from "../api/base-drive-client"
 import { SerializedStyles } from "@emotion/react"
 
 const FileListItem = memo(function FileListItem({
   file,
   playTrack,
-  activeTrack,
+  activeFileId,
   onClickMenu,
 }: {
   file: BaseFileItem
   playTrack: (file: AudioTrackFileItem) => void
-  activeTrack: AudioTrack | null
+  activeFileId?: string
   onClickMenu?: (
     event: React.MouseEvent<HTMLButtonElement>,
     file: BaseFileItem
@@ -76,7 +75,7 @@ const FileListItem = memo(function FileListItem({
       <FileListItemAudioTrack
         key={file.id}
         file={file as AudioTrackFileItem}
-        selected={activeTrack?.file.id === file.id}
+        selected={activeFileId === file.id}
         onClick={playTrackWrapped}
         onClickMenu={onClickMenuWrapped}
       />
@@ -101,11 +100,11 @@ const FileListItem = memo(function FileListItem({
 const FileListInner = memo(function FileListInner({
   files,
   playTrack,
-  activeTrack,
+  activeFileId,
 }: {
   files?: BaseFileItem[]
   playTrack: (file: AudioTrackFileItem) => void
-  activeTrack: AudioTrack | null
+  activeFileId?: string
 }) {
   const [, routerActions] = useRouter()
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null)
@@ -126,7 +125,7 @@ const FileListInner = memo(function FileListInner({
           key={file.id}
           file={file}
           playTrack={playTrack}
-          activeTrack={activeTrack}
+          activeFileId={activeFileId}
           onClickMenu={onClickMenu}
         />
       ))}
@@ -158,31 +157,37 @@ export interface FileListProps {
   folderId?: string
   files?: BaseFileItem[]
   cssStyle?: SerializedStyles
+  /** File id of the currently playing track (for row highlighting) */
+  activeFileId?: string
+  /** Play request. Pages wire this to playerActions.playTrack (avoids a reverse dependency between features) */
+  onPlayTracks: (
+    index: number,
+    tracks: AudioTrackFileItem[],
+    sourceUrl: string
+  ) => void
 }
 
 export function FileList(props: FileListProps) {
-  const [playerStoreState, playerActions] = usePlayerStore()
+  const { files, folderId, onPlayTracks } = props
 
   const playTrack = useCallback(
     (file: AudioTrackFileItem) => {
-      if (!props.files) return
-      const tracks = props.files.filter(
+      if (!files) return
+      const tracks = files.filter(
         f => f.type === "audio-track"
       ) as AudioTrackFileItem[]
       const index = tracks.findIndex(t => t.id === file.id)
-      playerActions.playTrack(index, tracks, `/files#${props.folderId}`)
+      onPlayTracks(index, tracks, `/files#${folderId}`)
     },
-    [props.files, props.folderId]
+    [files, folderId, onPlayTracks]
   )
-
-  const activeTrack = playerStoreState.activeTrack
 
   return (
     <div css={props.cssStyle}>
       <FileListInner
-        files={props.files}
+        files={files}
         playTrack={playTrack}
-        activeTrack={activeTrack}
+        activeFileId={props.activeFileId}
       />
     </div>
   )

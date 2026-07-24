@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter } from "@/src/router"
+import { useRouter } from "@/src/stores/router"
 import { useEffect, useRef } from "react"
 
 export default function Page() {

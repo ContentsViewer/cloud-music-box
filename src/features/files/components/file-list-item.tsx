@@ -19,20 +19,20 @@ import {
   Inventory,
   MoreVert,
 } from "@mui/icons-material"
-import { useNetworkMonitor } from "../stores/network-monitor"
+import { useNetworkMonitor } from "@/src/stores/network-monitor"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useFileStore } from "../stores/file-store"
 import { enqueueSnackbar } from "notistack"
 import * as mm from "music-metadata-browser"
 import React from "react"
-import { TrackCover } from "./track-cover"
-import { useThemeStore } from "../stores/theme-store"
+import { TrackCover } from "@/src/components/track-cover"
+import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
   hexFromArgb,
 } from "@material/material-color-utilities"
-import { useRouter } from "../router"
-import { AudioTrackFileItem } from "../drive-clients/base-drive-client"
+import { useRouter } from "@/src/stores/router"
+import { AudioTrackFileItem } from "../api/base-drive-client"
 
 
 interface FileListItemBasicProps {

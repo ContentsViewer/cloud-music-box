@@ -2,7 +2,8 @@
 
 import { Slider, Typography, alpha } from "@mui/material"
 import { usePlayerStore } from "../stores/player-store"
-import { useThemeStore } from "../stores/theme-store"
+import { useAudioBus } from "@/src/stores/audio-bus-provider"
+import { useThemeStore } from "@/src/stores/theme-store"
 import { useEffect, useState, memo, useMemo } from "react"
 import {
   MaterialDynamicColors,
@@ -106,20 +107,32 @@ interface TimelineSliderProps {}
 export const TimelineSlider = (props: TimelineSliderProps) => {
   const [playerState] = usePlayerStore()
   const [themeStoreState] = useThemeStore()
+  const audioBus = useAudioBus()
 
   const duration = playerState.duration
-  const actualTime = playerState.currentTime
 
-  const [inputValue, setInputValue] = useState<number>(0)
+  // The playback position comes straight from the bus, not the store (prevents the
+  // 4 Hz re-render of every store consumer and localizes updates to this leaf).
+  // The bar still moves on every frame arrival (~4 Hz) as before; the text is
+  // effectively 1 Hz via the memoized TimeDisplay + integer-seconds prop.
+  const [actualTime, setActualTime] = useState<number>(
+    () => audioBus.getLatest()?.timeSeconds ?? 0
+  )
+  useEffect(() => {
+    return audioBus.subscribe(frame => {
+      setActualTime(frame.timeSeconds)
+    })
+  }, [audioBus])
 
-  const colorOnSurfaceVariant = hexFromArgb(
-    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  const colorOnSurfaceVariant = useMemo(
+    () =>
+      hexFromArgb(
+        MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+      ),
+    [themeStoreState.scheme]
   )
 
-  useEffect(() => {
-    const time = actualTime
-    setInputValue(time ? (actualTime / duration) * 1000 : 0)
-  }, [actualTime, duration])
+  const inputValue = duration ? (actualTime / duration) * 1000 : 0
 
   return (
     <div css={containerStyle} {...props}>

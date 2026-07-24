@@ -5,144 +5,9 @@ import { usePlayerStore, AudioTrack } from "../stores/player-store"
 import { enqueueSnackbar } from "notistack"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
-import { useAudioDynamicsStore } from "../stores/audio-dynamics-store"
-import FFT from "fft.js"
+import { useAudioBus } from "@/src/stores/audio-bus-provider"
+import { createAudioAnalyser } from "@/src/lib/audio/audio-analyser"
 
-const makeAudioAnalyser = () => {
-  let audioContext: OfflineAudioContext
-  let sourceNode: AudioBufferSourceNode
-  let audioBuffer: AudioBuffer
-  let isAnalyzing = false
-  const bufferLength = 2048
-  const sampleRate = 44100
-  // const sampleRate = 22050
-  // const sampleRate = 8000
-  const fft = new FFT(bufferLength)
-  const spectrum = fft.createComplexArray()
-  const powerSpectrum = new Float32Array(bufferLength)
-  const corr = fft.createComplexArray()
-
-  const ensureAudioContext = (reload: boolean = false) => {
-    if (audioContext && !reload) return
-
-    audioContext = new OfflineAudioContext({
-      numberOfChannels: 2,
-      length: sampleRate * 0.5,
-      sampleRate: sampleRate,
-    })
-  }
-
-  // 37ms
-  const autoCorrelate = (buf: Float32Array, sampleRate: number) => {
-    let rms = 0
-    let nBuf = buf.length
-    for (let i = 0; i < nBuf; i++) {
-      const val = buf[i]
-      rms += val * val
-    }
-    rms = Math.sqrt(rms / nBuf)
-    if (rms < 0.01) return [-1, rms]
-
-    let r1 = 0
-    let r2 = nBuf - 1
-    const threshold = 0.2
-    for (let i = 0; i < nBuf / 2; i++) {
-      if (Math.abs(buf[i]) < threshold) {
-        r1 = i
-        break
-      }
-    }
-    for (let i = 1; i < nBuf / 2; i++) {
-      if (Math.abs(buf[nBuf - i]) < threshold) {
-        r2 = nBuf - i
-        break
-      }
-    }
-
-    for (let i = 0; i < r1; i++) buf[i] = 0
-    for (let i = r2 + 1; i < buf.length; i++) buf[i] = 0
-
-    fft.realTransform(spectrum, buf)
-    fft.completeSpectrum(spectrum)
-
-    for (let i = 0; i < bufferLength; i++) {
-      powerSpectrum[i] =
-        spectrum[2 * i] * spectrum[2 * i] +
-        spectrum[2 * i + 1] * spectrum[2 * i + 1]
-    }
-
-    fft.realTransform(corr, powerSpectrum)
-    fft.completeSpectrum(corr)
-
-    let d = 0
-    while (corr[2 * d] > corr[2 * (d + 1)]) d++
-    let maxVal = -1
-    let maxPos = -1
-    for (let i = d; i < nBuf / 2; i++) {
-      if (corr[2 * i] > maxVal) {
-        maxVal = corr[2 * i]
-        maxPos = i
-      }
-    }
-
-    let t0 = maxPos
-    let x1 = corr[2 * (t0 - 1)]
-    let x2 = corr[t0]
-    let x3 = corr[2 * (t0 + 1)]
-    let a = (x1 + x3 - 2 * x2) / 2
-    let b = (x3 - x1) / 2
-    if (a) t0 = t0 - b / (2 * a)
-
-    return [sampleRate / t0, rms]
-  }
-
-  return {
-    setBuffer: async (blob: Blob) => {
-      ensureAudioContext()
-      audioBuffer = await audioContext.decodeAudioData(await blob.arrayBuffer())
-    },
-
-    requestAnalyze: async (start: number) => {
-      if (!audioBuffer) throw new Error("Audio buffer not set")
-      if (isAnalyzing) throw new Error("Analyzing in progress")
-
-      if (sourceNode) {
-        sourceNode.stop()
-        sourceNode.disconnect()
-      }
-
-      ensureAudioContext(true)
-
-      sourceNode = audioContext.createBufferSource()
-      sourceNode.buffer = audioBuffer
-      sourceNode.connect(audioContext.destination)
-      sourceNode.start(0, start, 1)
-
-      return audioContext.startRendering().then(renderedBuffer => {
-        const samples0 = renderedBuffer.getChannelData(0)
-        const samples1 = renderedBuffer.getChannelData(1)
-        const [pitch0, rms0] = autoCorrelate(
-          samples0.slice(0, bufferLength),
-          sampleRate
-        )
-        const [pitch1, rms1] = autoCorrelate(
-          samples1.slice(0, bufferLength),
-          sampleRate
-        )
-        return {
-          timeSeconds: start,
-          pitch0,
-          pitch1,
-          rms0,
-          rms1,
-          sampleRate: renderedBuffer.sampleRate,
-          samples0,
-          samples1,
-        }
-      })
-    },
-  }
-}
 
 const msSetPlaybackState = (state: "playing" | "paused") => {
   console.log("msSetPlaybackState", state)
@@ -188,13 +53,12 @@ const msSetPlayingTrack = (track: AudioTrack) => {
 export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore()
 
-  const [, dynamicThemeActions] = useAudioDynamicsStore()
-  const dynamicThemeActionsRef = useRef(dynamicThemeActions)
+  const audioBus = useAudioBus()
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const sourceRef = useRef<HTMLSourceElement>(null)
 
-  const audioAnalyser = useMemo(() => makeAudioAnalyser(), [])
+  const audioAnalyser = useMemo(() => createAudioAnalyser(), [])
 
   const activeAudioTrackRef = useRef<AudioTrack | null>(null)
 
@@ -219,16 +83,11 @@ export const AudioPlayer = () => {
     }
 
     const onTimeUpdate = () => {
-      playerActions.setCurrentTime(audio.currentTime)
-
-      audioAnalyser
-        .requestAnalyze(audio.currentTime)
-        .then(frame => {
-          dynamicThemeActionsRef.current.setFrame(frame)
-        })
-        .catch(error => {
-          console.warn("Failed to analyze audio", error)
-        })
+      // The playback position is never dispatched (kills the 4 Hz store re-render); displays read it from the bus
+      playerActions.notePlaybackPosition(audio.currentTime)
+      // Analysis is synchronous and zero-copy; frames reach all consumers via the bus (bypassing React)
+      const frame = audioAnalyser.analyze(audio.currentTime)
+      if (frame) audioBus.emit(frame)
     }
     const onPlay = () => {
       console.log("Track started playing")
@@ -263,14 +122,14 @@ export const AudioPlayer = () => {
   }, [])
 
   useEffect(() => {
-    if (!playerState.currentTimeChanged) return
+    if (playerState.seekVersion === 0) return
 
     const audio = audioRef.current
     if (!audio) return
 
     audio.currentTime = playerState.currentTime
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerState.currentTimeChanged])
+  }, [playerState.seekVersion])
 
   useEffect(() => {
     const audio = audioRef.current

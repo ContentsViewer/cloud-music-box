@@ -12,15 +12,14 @@ import {
   MenuItem,
 } from "@mui/material"
 import React, { useCallback, useMemo, useRef, useState } from "react"
-import { usePlayerStore } from "../stores/player-store"
-import { useThemeStore } from "../stores/theme-store"
+import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
   hexFromArgb,
 } from "@material/material-color-utilities"
 import { MoreVert } from "@mui/icons-material"
-import { useRouter } from "../router"
-import { AudioTrackFileItem } from "../drive-clients/base-drive-client"
+import { useRouter } from "@/src/stores/router"
+import { AudioTrackFileItem } from "../api/base-drive-client"
 import { SerializedStyles } from "@emotion/react"
 
 interface TrackListItemProps {
@@ -165,14 +164,23 @@ interface TrackListProps {
   tracks: AudioTrackFileItem[] | undefined
   albumId?: string
   cssStyle?: SerializedStyles
+  /** File of the currently playing track (for row highlighting) */
+  activeTrack?: AudioTrackFileItem
+  /** Play request. Pages wire this to playerActions.playTrack (avoids a reverse dependency between features) */
+  onPlayTracks: (
+    index: number,
+    tracks: AudioTrackFileItem[],
+    sourceUrl: string
+  ) => void
 }
 
 export const TrackList = React.memo(function TrackList({
   tracks,
   albumId,
   cssStyle,
+  activeTrack,
+  onPlayTracks,
 }: TrackListProps) {
-  const [playerStoreState, playerActions] = usePlayerStore()
 
   const tracksSorted = useMemo(() => {
     return tracks?.sort((a, b) => {
@@ -195,20 +203,16 @@ export const TrackList = React.memo(function TrackList({
 
       const index = tracks.findIndex(t => t.id === file.id)
 
-      playerActions.playTrack(
-        index,
-        tracks,
-        `/albums#${encodeURIComponent(albumId)}`
-      )
+      onPlayTracks(index, tracks, `/albums#${encodeURIComponent(albumId)}`)
     },
-    [tracksSorted, albumId]
+    [tracksSorted, albumId, onPlayTracks]
   )
 
   return (
     <div css={cssStyle}>
       <TrackListInner
         tracks={tracksSorted}
-        activeTrack={playerStoreState.activeTrack?.file}
+        activeTrack={activeTrack}
         playTrack={playTrack}
       />
     </div>

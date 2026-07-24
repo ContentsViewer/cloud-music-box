@@ -9,9 +9,9 @@ import React, {
   useRef,
   useState,
 } from "react"
-import { useFileStore } from "./file-store"
+import { useFileStore } from "@/src/features/files"
 import { enqueueSnackbar } from "notistack"
-import { AudioTrackFileItem } from "../drive-clients/base-drive-client"
+import { AudioTrackFileItem } from "@/src/features/files"
 
 /**
  * Represents an audio track that can be played.
@@ -27,10 +27,24 @@ interface PlayerStateProps {
   tracks: AudioTrack[]
   activeTrackIndex: number
   isActiveTrackLoading: boolean
+  /** Seek request value (updated only by changeCurrentTime). Not for continuous position tracking */
   currentTime: number
-  currentTimeChanged: boolean
+  /**
+   * Monotonic seek counter (edge trigger). A boolean flag silently relied on the
+   * old 4 Hz dispatch resetting it to false; once that dispatch was removed it
+   * stuck at true and later seeks never fired. A counter always changes and
+   * needs no reset.
+   */
+  seekVersion: number
   duration: number
   playSourceUrl?: string
+  /**
+   * Low-cost playback position sharing: a mutable ref written without dispatch
+   * (its object identity survives reducer spreads). Prevents the ~4 Hz position
+   * updates from re-rendering every store consumer. For display purposes,
+   * subscribe to the audioBus instead.
+   */
+  playbackPositionRef: { current: number }
 }
 
 export const PlayerStateContext = createContext<PlayerStateProps>({
@@ -40,8 +54,9 @@ export const PlayerStateContext = createContext<PlayerStateProps>({
   activeTrackIndex: -1,
   isActiveTrackLoading: false,
   currentTime: 0,
-  currentTimeChanged: false,
+  seekVersion: 0,
   duration: 0,
+  playbackPositionRef: { current: 0 },
 })
 
 type Action =
@@ -64,7 +79,7 @@ type Action =
     }
   | {
       type: "setCurrentTime"
-      payload: { currentTime: number; changed: boolean }
+      payload: { currentTime: number }
     }
   | { type: "setDuration"; payload: { duration: number } }
 
@@ -94,6 +109,9 @@ export const usePlayerStore = () => {
       }
 
       cacheBlobs(index, currentTracks, fileStoreActions, dispatch)
+
+      // Reset the position note immediately on track change (same freshness as the old setCurrentTime dispatch)
+      refState.current.playbackPositionRef.current = 0
 
       const track = currentTracks[index]
       const isActiveTrackLoading = !track.blob
@@ -146,7 +164,7 @@ export const usePlayerStore = () => {
           newIndex = 0
         }
 
-        if (refState.current.currentTime < 4) {
+        if (refState.current.playbackPositionRef.current < 4) {
           const isTheFirstTrack = refState.current.activeTrackIndex === 0
           newIndex = isTheFirstTrack
             ? refState.current.tracks.length - 1
@@ -155,16 +173,20 @@ export const usePlayerStore = () => {
 
         return playTrack(newIndex)
       },
-      setCurrentTime: (currentTime: number) => {
-        dispatch({
-          type: "setCurrentTime",
-          payload: { currentTime, changed: false },
-        })
+      /**
+       * Playback position note (called by audio-player on every timeupdate).
+       * No dispatch = zero re-renders. For display purposes, subscribe to the audioBus.
+       */
+      notePlaybackPosition: (timeSeconds: number) => {
+        refState.current.playbackPositionRef.current = timeSeconds
       },
+      /** Synchronous read for event handlers etc. (value as of the latest timeupdate) */
+      getPlaybackPosition: () => refState.current.playbackPositionRef.current,
       changeCurrentTime: (currentTime: number) => {
+        refState.current.playbackPositionRef.current = currentTime
         dispatch({
           type: "setCurrentTime",
-          payload: { currentTime, changed: true },
+          payload: { currentTime },
         })
       },
       setDuration: (duration: number) => {
@@ -234,7 +256,7 @@ const reducer = (state: PlayerStateProps, action: Action) => {
         isActiveTrackLoading,
         tracks,
         currentTime: 0,
-        currentTimeChanged: true,
+        seekVersion: state.seekVersion + 1,
         playSourceUrl,
       }
     }
@@ -251,7 +273,7 @@ const reducer = (state: PlayerStateProps, action: Action) => {
       return {
         ...state,
         currentTime: action.payload.currentTime,
-        currentTimeChanged: action.payload.changed,
+        seekVersion: state.seekVersion + 1,
       }
     }
     case "setDuration": {
@@ -275,8 +297,9 @@ export const PlayerStoreProvider = ({
     activeTrackIndex: -1,
     isActiveTrackLoading: false,
     currentTime: 0,
-    currentTimeChanged: false,
+    seekVersion: 0,
     duration: 0,
+    playbackPositionRef: { current: 0 },
   })
 
   return (

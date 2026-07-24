@@ -22,7 +22,7 @@ import {
   AppBar,
 } from "@mui/material"
 import { AudioTrack, usePlayerStore } from "../stores/player-store"
-import { useThemeStore } from "../stores/theme-store"
+import { useThemeStore } from "@/src/stores/theme-store"
 import { TimelineSlider } from "./timeline-slider"
 import {
   MaterialDynamicColors,
@@ -38,12 +38,12 @@ import {
   useCallback,
 } from "react"
 import * as mm from "music-metadata-browser"
-import { MarqueeText } from "./marquee-text"
-import { useRouter } from "../router"
-import { TrackCover } from "./track-cover"
-import { useAudioDynamicsSettingsStore } from "../stores/audio-dynamics-settings"
+import { MarqueeText } from "@/src/components/marquee-text"
+import { useRouter } from "@/src/stores/router"
+import { TrackCover } from "@/src/components/track-cover"
+import { useAudioDynamicsSettingsStore } from "@/src/stores/audio-dynamics-settings"
 import { css } from "@emotion/react"
-import { useAutoHideCursor } from "../hooks/useAutoHideCursor"
+import { useAutoHideCursor } from "@/src/hooks/useAutoHideCursor"
 
 const SkipPreviousButton = ({
   onClick,

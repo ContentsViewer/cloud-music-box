@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { useNetworkMonitor } from "./network-monitor"
+import { useNetworkMonitor } from "@/src/stores/network-monitor"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
 import {
@@ -19,10 +19,10 @@ import {
   AudioTrackFileItem,
   getDriveConfig,
   AUDIO_FORMAT_MAPPING,
-} from "../drive-clients/base-drive-client"
-import { BaseDriveClient } from "../drive-clients/base-drive-client"
-import { createOneDriveClient } from "../drive-clients/onedrive-client"
-import { createGoogleDriveClient } from "../drive-clients/google-drive-client"
+} from "../api/base-drive-client"
+import { BaseDriveClient } from "../api/base-drive-client"
+import { createOneDriveClient } from "../api/onedrive-client"
+import { createGoogleDriveClient } from "../api/google-drive-client"
 
 interface SyncTask {
   fileId: string
@@ -377,7 +377,7 @@ export const useFileStore = () => {
           throw new Error("File database not initialized")
         }
 
-        // parentIdごとにファイルをグループ化
+        // Group files by parentId
         const filesByParent = new Map<string, Array<{id: string, name: string, mimeType: string, parentId?: string}>>()
 
         for (const file of files) {
@@ -392,12 +392,12 @@ export const useFileStore = () => {
         const store = transaction.objectStore("files")
         const createdFolderIds: string[] = []
 
-        // 各parentIdごとにフォルダを作成/更新
+        // Create/update a folder for each parentId
         for (const [driveParentId, groupFiles] of Array.from(filesByParent.entries())) {
-          // Drive上のフォルダIDを仮想フォルダIDとして使用
+          // Use the Drive folder id as the virtual folder id
           const folderId = driveParentId
 
-          // 既存のフォルダを取得
+          // Fetch the existing folder
           const existingFolderRequest = store.get(folderId)
           const existingFolder = await new Promise<FolderItem | undefined>((resolve) => {
             existingFolderRequest.onsuccess = () => {
@@ -408,10 +408,10 @@ export const useFileStore = () => {
             }
           })
 
-          // フォルダ名: folderNamesから取得、既存のフォルダ名を優先、なければデフォルト名
+          // Folder name: from folderNames, preferring the existing name, else a default
           const folderName = existingFolder?.name || folderNames?.get(driveParentId) || `Folder ${driveParentId.substring(0, 8)}`
 
-          // 既存のchildrenIdsに新しいファイルIDsを追加（重複を避ける）
+          // Append the new file ids to the existing childrenIds (avoiding duplicates)
           const existingChildrenIds = new Set(existingFolder?.childrenIds || [])
           groupFiles.forEach((f: {id: string}) => existingChildrenIds.add(f.id))
 
@@ -427,7 +427,7 @@ export const useFileStore = () => {
           store.put(groupFolder)
           createdFolderIds.push(folderId)
 
-          // 各ファイルをIDBに保存
+          // Save each file into IDB
           for (const file of groupFiles) {
             const ext = file.name.split(".").pop()?.toLowerCase() || ""
             const audioFormatInfo = AUDIO_FORMAT_MAPPING[ext]
@@ -444,12 +444,12 @@ export const useFileStore = () => {
           }
         }
 
-        // rootフォルダのchildrenIdsを更新
+        // Update the root folder childrenIds
         const getRootRequest = store.get("root")
         getRootRequest.onsuccess = () => {
           const rootFolder = getRootRequest.result as FolderItem | undefined
           if (rootFolder) {
-            // 既存のchildrenIdsに新しいフォルダIDsを追加（重複を避ける）
+            // Append the new folder ids to the existing childrenIds (avoiding duplicates)
             const existingIds = new Set(rootFolder.childrenIds || [])
             createdFolderIds.forEach(id => existingIds.add(id))
             rootFolder.childrenIds = Array.from(existingIds)
@@ -471,7 +471,7 @@ export const useFileStore = () => {
 
         console.log("Created folder IDs:", createdFolderIds)
 
-        // 最初に作成したフォルダIDを返す（互換性のため）
+        // Return the first created folder id (for compatibility)
         return createdFolderIds[0] || "root"
       },
     }
@@ -798,7 +798,7 @@ export const FileStoreProvider = ({
             dispatch({ type: "setDriveStatus", payload: "no-account" })
           }
 
-          // Google Drive Pickerモード用の仮想rootフォルダを作成
+          // Create the virtual root folder for Google Drive Picker mode
           if (fileDb) {
             const rootFolder: FolderItem = {
               id: "root",
@@ -806,7 +806,7 @@ export const FileStoreProvider = ({
               type: "folder",
               childrenIds: [],
             }
-            // rootフォルダが存在しない場合のみ作成
+            // Create the root folder only if it does not exist
             const existingRoot = await getIdbRequest(
               fileDb.transaction("files").objectStore("files").get("root")
             )
@@ -818,7 +818,7 @@ export const FileStoreProvider = ({
                   .put(rootFolder)
               )
             }
-            // rootFolderIdを設定
+            // Set the rootFolderId
             localStorage.setItem("rootFolderId", "root")
             dispatch({ type: "setRootFolderId", payload: "root" })
           }
