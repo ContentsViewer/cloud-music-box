@@ -27,7 +27,8 @@ export async function createOneDriveClient(): Promise<OneDriveClient> {
   console.log("createOneDriveClient")
   const pca = new PublicClientApplication({
     auth: {
-      clientId: "28af6fb9-c605-4ad3-8039-3e90df0933cb",
+      // clientId: "28af6fb9-c605-4ad3-8039-3e90df0933cb", // old (directory-less MSA app)
+      clientId: "732792cc-3eb1-41fc-a040-9e0820fc7f71",
       redirectUri: `${window.location.origin}${
         process.env.NEXT_PUBLIC_BASE_PATH || ""
       }/redirect/onedrive`,
