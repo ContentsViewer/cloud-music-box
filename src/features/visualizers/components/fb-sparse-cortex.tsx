@@ -99,13 +99,18 @@ const SPLAT_LAYOUT = 0.92 // clip-space extent of the lattice layout (+/-)
 const SPLAT_POS_OFFSET = 0.07 // keeps the position=timbre map stable (dynamic warping kept subtle)
 const SAT_TONE = 2.0 // spectral concentration (tonality) -> scales saturation and flow speed
 const ACT_DECAY = 0.985 // activity-memory decay (gas lingering)
+// Reference design scale: all pixel design values (gas sigma, star size) are
+// defined for a Full-HD-height screen and scale with the actual short dimension.
+// This makes the whole rendering a pure miniature/enlargement of one design:
+// overlap counts, densities and motion-per-sprite-diameter are size-invariant.
+const REF_HEIGHT = 1080
 // [gas] the field's color cloud = motionless ground (nebula). Soft, large, continuous -> the discrete lattice never shows
-// Sprite diameter as a fraction of the short screen dimension (66px at the 907px
-// reference window). Scaling with the window keeps the overlap count
+// Sprite diameter as a fraction of the short screen dimension (66px at the
+// REF_HEIGHT screen). Scaling with the window keeps the overlap count
 // (diameter / lattice spacing)^2 constant, so the accumulated additive brightness
 // is window-size independent (no white-out on narrow windows) and the
 // "sigma > lattice spacing" no-ring-stripes constraint holds at every size.
-const GAS_SIZE_REL = 66.0 / 907.0
+const GAS_SIZE_REL = 66.0 / REF_HEIGHT
 const GAS_AMBIENT = 0.06
 const GAS_ACT_GAIN = 0.27
 // [particles] tracer stars flowing over the field (= star streams)
@@ -381,6 +386,7 @@ const STAR_VERT = `
   attribute float aBright;
   attribute float aSize;
   uniform float uAspect;
+  uniform float uSizeScale;
   varying vec3 vColor;
   varying float vBright;
   ${DISK_GLSL}
@@ -390,7 +396,10 @@ const STAR_VERT = `
     float sx = 1.0, sy = 1.0;
     if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
     vec4 wp = diskWarp(position.xy);
-    gl_PointSize = aSize * min(wp.z, 2.0);
+    // star size follows the total local magnification (local stretch x lens x
+    // window scale), so motion per sprite diameter is window-size invariant;
+    // floored at 3px where sprites would degenerate into aliasing
+    gl_PointSize = max(aSize * min(wp.z, 2.0) * uHemi * uSizeScale, 3.0);
     gl_Position = vec4(wp.x * sx, wp.y * sy, 0.0, 1.0);
   }
 `
@@ -675,7 +684,8 @@ export const FbSparseCortex = () => {
   )
   const compUniforms = useMemo(() => ({ uTex: { value: gasRT.texture } }), [gasRT])
   const headUniforms = useMemo(
-    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA } }),
+    // uSizeScale is set by the resize effect
+    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uSizeScale: { value: 1 } }),
     []
   )
   const trailUniforms = useMemo(
@@ -696,7 +706,10 @@ export const FbSparseCortex = () => {
     // gl_PointSize is in RT pixels; tying it to the short RT dimension keeps the
     // sprite / lattice-spacing ratio (= additive overlap) window-size independent
     gasUniforms.uSize.value = Math.min(gasRT.width, gasRT.height) * GAS_SIZE_REL
-  }, [gasRT, gasUniforms, gl, size])
+    // stars render to the full-res canvas: scale their design-pixel sizes by the
+    // short canvas dimension relative to the reference screen
+    headUniforms.uSizeScale.value = (Math.min(size.width, size.height) * dpr) / REF_HEIGHT
+  }, [gasRT, gasUniforms, headUniforms, gl, size])
   useEffect(() => () => gasRT.dispose(), [gasRT])
   const clearColorScratch = useMemo(() => new THREE.Color(), [])
   useEffect(() => {
