@@ -7,6 +7,10 @@ import {
   saveAccessToken,
   saveUserInfo,
 } from "@/src/features/files/api/google-drive-client"
+import {
+  loadPickSession,
+  savePickSession,
+} from "@/src/features/files/api/google-drive-pick-session"
 import { useRouter } from "@/src/stores/router"
 import { Backdrop, Box, CircularProgress, Grow } from "@mui/material"
 import { useEffect, useRef, useState } from "react"
@@ -32,6 +36,37 @@ export default function Page() {
     const handleGoogleRedirect = async () => {
       if (refProcessed.current) return
       refProcessed.current = true
+
+      // Two different flows land here, and they never collide because they use
+      // different parts of the URL:
+      //   - the implicit login returns its token in the fragment
+      //   - the Google Picker (trigger_onepick) returns its result in the query
+      // The picker result is only recorded here; the file list page owns the
+      // rest of the flow, so it can show progress and dialogs where the user is.
+      const query = new URLSearchParams(location.search)
+      const pickedFileIds = query.get("picked_file_ids")
+      const pickerError = query.get("error")
+      if (pickedFileIds !== null || pickerError !== null) {
+        const session = loadPickSession()
+        if (session) {
+          savePickSession({
+            ...session,
+            outcome: pickedFileIds
+              ? { ids: pickedFileIds.split(",").filter(Boolean) }
+              : { cancelled: true },
+          })
+          routerActions.go(session.returnHref)
+        } else {
+          // The session expired or was cleared while the user was away; there is
+          // nothing to resume, so just put them back somewhere sensible.
+          console.warn("Picker returned but no pick session was found")
+          if (!routerActions.goLastHref()) {
+            routerActions.goHome()
+          }
+        }
+        return
+      }
+
       // Extract the authorization code from the URL parameters
       const hash = new URLSearchParams(location.hash.substring(1))
       const accessToken = hash.get("access_token")

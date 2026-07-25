@@ -474,6 +474,39 @@ export const useFileStore = () => {
         // Return the first created folder id (for compatibility)
         return createdFolderIds[0] || "root"
       },
+      // Renames already-stored picker folders once their real names become
+      // available. addPickerGroup keeps whatever name a folder already has, so
+      // folders first saved under a placeholder need this to be corrected.
+      updateFolderNames: async (folderNames: Map<string, string>) => {
+        if (folderNames.size === 0) return
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        const transaction = refState.current.fileDb.transaction(
+          "files",
+          "readwrite"
+        )
+        const store = transaction.objectStore("files")
+
+        // Each put has to be issued from inside its get's onsuccess. Awaiting
+        // between the two would hand control back to the event loop, which ends
+        // the transaction and makes the write silently fail.
+        for (const [folderId, name] of Array.from(folderNames.entries())) {
+          const request = store.get(folderId)
+          request.onsuccess = () => {
+            const existing = request.result as FolderItem | undefined
+            if (!existing || existing.name === name) return
+            store.put({ ...existing, name })
+          }
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          transaction.oncomplete = () => resolve()
+          transaction.onerror = () => reject(transaction.error)
+          transaction.onabort = () => reject(transaction.error)
+        })
+      },
     }
   }, [])
 
