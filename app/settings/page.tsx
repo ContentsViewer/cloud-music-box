@@ -301,6 +301,12 @@ function VisualizerSettingsArea() {
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
+  // The settings store reads localStorage in its initializer, so the client's
+  // first render can differ from the statically exported HTML (default
+  // "lissajous"); showing the SSR default until mounted avoids the hydration
+  // text mismatch in the Select
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
 
   return (
     <div
@@ -324,7 +330,7 @@ function VisualizerSettingsArea() {
           />
           <Select
             size="small"
-            value={audioDynamicsSettings.visualizerType}
+            value={mounted ? audioDynamicsSettings.visualizerType : "lissajous"}
             onChange={event => {
               audioDynamicsSettingsActions.setVisualizerType(
                 event.target.value as VisualizerType

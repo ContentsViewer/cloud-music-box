@@ -99,8 +99,18 @@ const SPLAT_LAYOUT = 0.92 // clip-space extent of the lattice layout (+/-)
 const SPLAT_POS_OFFSET = 0.07 // keeps the position=timbre map stable (dynamic warping kept subtle)
 const SAT_TONE = 2.0 // spectral concentration (tonality) -> scales saturation and flow speed
 const ACT_DECAY = 0.985 // activity-memory decay (gas lingering)
+// Reference design scale: all pixel design values (gas sigma, star size) are
+// defined for a Full-HD-height screen and scale with the actual short dimension.
+// This makes the whole rendering a pure miniature/enlargement of one design:
+// overlap counts, densities and motion-per-sprite-diameter are size-invariant.
+const REF_HEIGHT = 1080
 // [gas] the field's color cloud = motionless ground (nebula). Soft, large, continuous -> the discrete lattice never shows
-const GAS_SIZE = 66.0 // keep sigma > lattice spacing so the disk mapping produces no ring stripes (overlap ripple)
+// Sprite diameter as a fraction of the short screen dimension (66px at the
+// REF_HEIGHT screen). Scaling with the window keeps the overlap count
+// (diameter / lattice spacing)^2 constant, so the accumulated additive brightness
+// is window-size independent (no white-out on narrow windows) and the
+// "sigma > lattice spacing" no-ring-stripes constraint holds at every size.
+const GAS_SIZE_REL = 66.0 / REF_HEIGHT
 const GAS_AMBIENT = 0.06
 const GAS_ACT_GAIN = 0.27
 // [particles] tracer stars flowing over the field (= star streams)
@@ -121,18 +131,34 @@ const P_LIFE = 3.2
 const SEED_JITTER = 0.04
 const SEED_MIX = 0.7
 const MATURE_RATE = 0.05
-// [Disk mapping + outer divergence] The disk mapping removes the lattice's
-// straight edges and corners; on top of that, the rim is stretched by a radial
-// divergence (r->1 goes to infinity) that scatters the coordinates themselves.
-// Cell spacing widens toward the outside, so density thins continuously until it
-// runs out = the place called "the edge" ceases to exist. No dimming and no noise
-// (only a deterministic radial map). Per-cell pitch/tone displacements are
-// magnified in the steep-gradient zone, so the rim becomes scattered stars rather
-// than concentric circles.
-const HALO_K = 0.25 // rim divergence strength (larger = scattering starts further inside)
+// [Hemisphere mapping] The disk mapping removes the lattice's straight edges and
+// corners; the lattice is then treated as an orthographic view of a unit
+// hemisphere (disk radius r = sin(theta)) and projected gnomonically from the
+// sphere center onto the screen plane: R = tan(theta) = r/sqrt(1-r^2).
+// The center is near-identity (R'(0)=1, s(0.5)=1.15) while the rim diverges to
+// infinity, so cell spacing widens smoothly outward and density thins until it
+// runs out = the place called "the edge" ceases to exist. Parameter-free (fixed
+// by the hemisphere geometry), no dimming and no noise. The smooth divergence
+// onset (s: 1.15 @r=0.5, 1.67 @r=0.8, 2.29 @r=0.9) replaces the old
+// flat-then-explosive r^6/(1-r^2) profile, whose last few cell rows read as
+// high-curvature concentric bands at the rim.
 const HALO_EPS = 0.02 // divergence clamp (keeps the outermost shell's travel finite)
+// Field-of-view scale (the "lens"): projected coordinates (and the gas sprite
+// size, so overlap and thus brightness stay invariant) are multiplied by this.
+// Smaller = wider-angle lens: more of the dome fits in the frame, the center
+// shrinks proportionally. 1.0 = 90 deg vertical FOV (~64% of cells visible),
+// 0.84 = 100 deg (~71%), 0.70 = 110 deg (~78%). The lattice rim (horizon)
+// stays at infinity at every value. Runtime hook: __fbcx.setHemiScale()
+const HEMI_SCALE = 0.84
+// Divergence exponent beta: R = r / (1-r^2)^beta.
+//   0.5     = true hemisphere gnomonic
+//   0       = plain disk (no divergence; the lattice ends at a visible circle)
+//   0.2-0.3 = softened divergence: the rim still goes to infinity (frameless)
+//   but mid-field magnification/anisotropy shrink toward the flat-lattice look,
+//   preserving cluster shapes. Runtime hook: __fbcx.setHemiBeta()
+const HEMI_BETA = 0.25
 // [Anisotropic rim splats] The divergence stretches strongly only in the radial
-// direction (anisotropic: at r=0.9, ~12x radial vs 1.7x tangential), so with
+// direction (anisotropic: at r=0.9, ~12x radial vs ~2.3x tangential), so with
 // isotropic points radial gaps open up and read as "concentric stripes on firing".
 // Fix: stretch each gas sprite radially in the fragment shader into an elliptical
 // gaussian that covers the gaps (EWA-splatting style). No extra points, no CPU
@@ -247,10 +273,13 @@ const BG_FRAG = `
     gl_FragColor = vec4(col, uOpacity);
   }
 `
-// [Disk mapping + outer divergence] shared by the three vertex shaders:
-// square lattice -> disk (Shirley-Chow concentric mapping) + rim divergence
-// (radially toward infinity as r->1; the interior r<0.7 is nearly unchanged)
+// [Hemisphere mapping] shared by the three vertex shaders: square lattice -> disk
+// (Shirley-Chow concentric mapping) -> gnomonic projection of the hemisphere the
+// disk orthographically depicts (R = r/sqrt(1-r^2); rim radially toward infinity,
+// center near-identity)
 const DISK_GLSL = `
+  uniform float uHemi;
+  uniform float uBeta;
   vec2 squareToDisk(vec2 p){
     if (p.x*p.x > p.y*p.y) {
       float phi = 0.78539816 * (p.y / p.x);
@@ -261,21 +290,18 @@ const DISK_GLSL = `
     }
     return vec2(0.0);
   }
-  // returns: xy = post-divergence coords, z = tangential stretch s, w = radial stretch rs (>s)
+  // returns: xy = projected coords, z = tangential stretch s, w = radial stretch rs (>s)
   vec4 diskWarp(vec2 pos){
     float L = ${(SPLAT_LAYOUT + SPLAT_POS_OFFSET).toFixed(4)};
     vec2 dp = squareToDisk(pos / L);
     float r2 = dot(dp, dp);
     float D = max(1.0 - r2, ${HALO_EPS.toFixed(3)});
-    float r6 = r2 * r2 * r2;
-    float s = 1.0 + ${HALO_K.toFixed(3)} * r6 / D;
-    float r = sqrt(max(r2, 1e-8));
-    float r5 = r6 / r;
-    float ds = (1.0 - r2 > ${HALO_EPS.toFixed(3)})
-      ? ${HALO_K.toFixed(3)} * (6.0 * r5 / D + 2.0 * r5 * r2 / (D * D))
-      : ${HALO_K.toFixed(3)} * 6.0 * r5 / ${HALO_EPS.toFixed(3)};
-    float rs = s + r * ds;
-    return vec4(dp * s * L, s, rs);
+    float s = pow(D, -uBeta);              // R = r/(1-r^2)^beta; beta 0.5 = hemisphere
+    float rs = s * (1.0 + 2.0 * uBeta * r2 / D); // dR/dr
+    // uHemi scales only the coordinates (the lens); s/rs stay the pure
+    // divergence stretch so the rim brightness compensation is not affected by
+    // zoom (uniform zoom conserves per-area light by itself)
+    return vec4(dp * s * L * uHemi, s, rs);
   }
 `
 
@@ -302,7 +328,9 @@ const GAS_VERT = `
     vec4 wp = diskWarp(position.xy);
     float tScale = min(wp.z, 3.0);  // tangential coverage
     float rScale = min(wp.w, 6.0);  // radial coverage (ellipse major axis)
-    gl_PointSize = uSize * rScale;
+    // sprite size follows the lens scale -> sprite/lattice-spacing ratio (and
+    // therefore accumulated brightness) is invariant under uHemi
+    gl_PointSize = uSize * rScale * uHemi;
     vec2 sd = vec2(wp.x * sx, wp.y * sy);
     // Radial direction in the same pixel space as gl_PointCoord (kept in clip
     // space, the ellipse tilts by the window aspect ratio and rim sprites thin
@@ -358,6 +386,7 @@ const STAR_VERT = `
   attribute float aBright;
   attribute float aSize;
   uniform float uAspect;
+  uniform float uSizeScale;
   varying vec3 vColor;
   varying float vBright;
   ${DISK_GLSL}
@@ -367,7 +396,10 @@ const STAR_VERT = `
     float sx = 1.0, sy = 1.0;
     if (uAspect > 1.0) sx = 1.0 / uAspect; else sy = uAspect;
     vec4 wp = diskWarp(position.xy);
-    gl_PointSize = aSize * min(wp.z, 2.0);
+    // star size follows the total local magnification (local stretch x lens x
+    // window scale), so motion per sprite diameter is window-size invariant;
+    // floored at 3px where sprites would degenerate into aliasing
+    gl_PointSize = max(aSize * min(wp.z, 2.0) * uHemi * uSizeScale, 3.0);
     gl_Position = vec4(wp.x * sx, wp.y * sy, 0.0, 1.0);
   }
 `
@@ -642,6 +674,28 @@ export const FbSparseCortex = () => {
       stencilBuffer: false,
     })
   }, [gl])
+  // Uniform objects must be identity-stable: an inline uniforms={{...}} prop is
+  // re-applied on every React render, silently resetting values written at runtime
+  // (uSize / uTint would snap back to their initial values)
+  const gasUniforms = useMemo(
+    // uSize is set by the resize effect
+    () => ({ uAspect: { value: 1 }, uSize: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA } }),
+    []
+  )
+  const compUniforms = useMemo(() => ({ uTex: { value: gasRT.texture } }), [gasRT])
+  const headUniforms = useMemo(
+    // uSizeScale is set by the resize effect
+    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uSizeScale: { value: 1 } }),
+    []
+  )
+  const trailUniforms = useMemo(
+    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA } }),
+    []
+  )
+  const bgUniforms = useMemo(
+    () => ({ uTint: { value: new THREE.Vector3(0.05, 0.07, 0.1) }, uOpacity: { value: 0.9 } }),
+    []
+  )
   useEffect(() => {
     // setSize keeps the texture object identity, so the composite uniform stays valid
     const dpr = gl.getPixelRatio()
@@ -649,31 +703,34 @@ export const FbSparseCortex = () => {
       Math.max(1, Math.round(size.width * dpr * GAS_RT_SCALE)),
       Math.max(1, Math.round(size.height * dpr * GAS_RT_SCALE))
     )
-  }, [gasRT, gl, size])
+    // gl_PointSize is in RT pixels; tying it to the short RT dimension keeps the
+    // sprite / lattice-spacing ratio (= additive overlap) window-size independent
+    gasUniforms.uSize.value = Math.min(gasRT.width, gasRT.height) * GAS_SIZE_REL
+    // stars render to the full-res canvas: scale their design-pixel sizes by the
+    // short canvas dimension relative to the reference screen
+    headUniforms.uSizeScale.value = (Math.min(size.width, size.height) * dpr) / REF_HEIGHT
+  }, [gasRT, gasUniforms, headUniforms, gl, size])
   useEffect(() => () => gasRT.dispose(), [gasRT])
   const clearColorScratch = useMemo(() => new THREE.Color(), [])
-
-  // Uniform objects must be identity-stable: an inline uniforms={{...}} prop is
-  // re-applied on every React render, silently resetting values written at runtime
-  // (uSize / uTint would snap back to their initial values)
-  const gasUniforms = useMemo(
-    () => ({ uAspect: { value: 1 }, uSize: { value: GAS_SIZE * GAS_RT_SCALE } }),
-    []
-  )
-  const compUniforms = useMemo(() => ({ uTex: { value: gasRT.texture } }), [gasRT])
-  const headUniforms = useMemo(() => ({ uAspect: { value: 1 } }), [])
-  const trailUniforms = useMemo(() => ({ uAspect: { value: 1 } }), [])
-  const bgUniforms = useMemo(
-    () => ({ uTint: { value: new THREE.Vector3(0.05, 0.07, 0.1) }, uOpacity: { value: 0.9 } }),
-    []
-  )
   useEffect(() => {
     ;(window as any).__fbcx = {
       G, M, DIM, seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats,
       audioBus, // record/replay verification: console can capture and re-emit frames
       setSeedRng: (fn: (() => number) | null) => { seedRngRef.current = fn ?? Math.random },
+      // lens (field-of-view) tuning: 1.0 = 90deg vertical FOV, 0.84 = 100deg, 0.70 = 110deg
+      setHemiScale: (a: number) => {
+        gasUniforms.uHemi.value = a
+        headUniforms.uHemi.value = a
+        trailUniforms.uHemi.value = a
+      },
+      // divergence-exponent tuning: 0.5 = hemisphere, 0 = plain disk, 0.2-0.3 = softened
+      setHemiBeta: (b: number) => {
+        gasUniforms.uBeta.value = b
+        headUniforms.uBeta.value = b
+        trailUniforms.uBeta.value = b
+      },
     }
-  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, audioBus])
+  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, audioBus, gasUniforms, headUniforms, trailUniforms])
 
   // [Logic input] Subscribe to the audio bus and stitch 0.5 s window snapshots by
   // file position. Push reception without React state (no re-renders, no interim
