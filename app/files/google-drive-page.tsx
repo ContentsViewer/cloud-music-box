@@ -50,17 +50,10 @@ import { MarqueeText } from "@/src/components/marquee-text"
 import AppTopBar from "@/src/components/app-top-bar"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
 import {
-  addPendingFolderNameIds,
   AudioTrackFileItem,
   BaseFileItem,
-  clearPickSession,
-  GoogleDriveClient,
-  GooglePickerResult,
   loadPendingFolderNameIds,
-  loadPickSession,
-  PickSession,
-  removePendingFolderNameIds,
-  savePickSession,
+  useGoogleDrivePickFlow,
 } from "@/src/features/files"
 import { AddRounded } from "@mui/icons-material"
 import { css } from "@emotion/react"
@@ -77,17 +70,31 @@ export default function GoogleDrivePage() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const [remoteFetching, setRemoteFetching] = useState(false)
 
-  // Google Picker round-trip UI state
+  // Google Picker round-trip UI state. The round trip itself (leaving,
+  // resuming, committing) lives in the pick-flow engine; this page only
+  // renders its states and confirms the hand-offs.
   const [introOpen, setIntroOpen] = useState(false)
-  const [pickBusy, setPickBusy] = useState<string | null>(null)
-  const [folderGrantPrompt, setFolderGrantPrompt] =
-    useState<PickSession | null>(null)
   const [retryPromptIds, setRetryPromptIds] = useState<string[] | null>(null)
-  const [pendingFolderNameCount, setPendingFolderNameCount] = useState(0)
   // Bumped to re-read the folder from IndexedDB. The picker flow resumes before
   // `folderId` is necessarily known, so it cannot refresh the list by closing
   // over it.
   const [localRefreshNonce, setLocalRefreshNonce] = useState(0)
+
+  const {
+    handoff,
+    folderGrantPrompt,
+    pendingFolderNameCount,
+    beginFilesPick,
+    beginFolderGrant,
+    skipFolderGrant,
+    beginFolderNamesRetry,
+    dismissStuck,
+    retryStuck,
+  } = useGoogleDrivePickFlow({
+    getReturnHref: () =>
+      folderId ? `/files#${encodeURIComponent(folderId)}` : "/files",
+    onCommitted: () => setLocalRefreshNonce(n => n + 1),
+  })
 
   const [themeStoreState] = useThemeStore()
 
@@ -178,25 +185,6 @@ export default function GoogleDrivePage() {
     }
   }, [fileStoreState.driveStatus, folderId])
 
-  useEffect(() => {
-    setPendingFolderNameCount(loadPendingFolderNameIds().length)
-  }, [])
-
-  // Picks up where we left off after coming back from Google. The redirect page
-  // only records the outcome; the work happens here so progress and prompts show
-  // up on the page the user started from.
-  const resumeHandledRef = useRef(false)
-  useEffect(() => {
-    if (!fileStoreState.configured) return
-    if (resumeHandledRef.current) return
-
-    const session = loadPickSession()
-    if (!session?.outcome) return
-
-    resumeHandledRef.current = true
-    resumePick(session)
-  }, [fileStoreState.configured])
-
   const handleMoreClose = () => {
     setAnchorEl(null)
   }
@@ -222,56 +210,9 @@ export default function GoogleDrivePage() {
 
   // --- Adding files via the Google Picker -----------------------------------
   //
-  // The picker is a top-level navigation to Google, not a modal, so this is a
-  // resumable flow rather than a single async function:
-  //   handleAddFiles -> (intro dialog) -> leave for Google -> come back
-  //     -> resumePick -> (folder grant dialog) -> leave again -> come back
-  //     -> resumePick -> finishPick
-  // State that has to survive each hop lives in the pick session.
-
-  const getGoogleDriveClient = (): GoogleDriveClient | undefined => {
-    const driveClient = fileStoreState.driveClient
-    if (!driveClient || !(driveClient as GoogleDriveClient).startFilesPick) {
-      enqueueSnackbar("Drive client not connected", { variant: "error" })
-      return undefined
-    }
-    return driveClient as GoogleDriveClient
-  }
-
-  const currentHref = () =>
-    folderId ? `/files#${encodeURIComponent(folderId)}` : "/files"
-
-  const leaveForFilesPick = () => {
-    const client = getGoogleDriveClient()
-    if (!client) return
-    try {
-      savePickSession({
-        step: "files",
-        startedAt: Date.now(),
-        returnHref: currentHref(),
-        files: [],
-        folderNames: [],
-        pendingFolderIds: [],
-      })
-      client.startFilesPick()
-    } catch (error) {
-      clearPickSession()
-      console.error(error)
-      enqueueSnackbar(`${error}`, { variant: "error" })
-    }
-  }
-
-  const leaveForFolderGrant = (folderIds: string[], session: PickSession) => {
-    const client = getGoogleDriveClient()
-    if (!client) return
-    try {
-      savePickSession({ ...session, startedAt: Date.now(), outcome: undefined })
-      client.startFolderGrant(folderIds)
-    } catch (error) {
-      console.error(error)
-      enqueueSnackbar(`${error}`, { variant: "error" })
-    }
-  }
+  // The picker is a top-level navigation to Google, not a modal. The resumable
+  // flow (ownership lock, watchdog, continuation) lives in
+  // useGoogleDrivePickFlow; this page renders its dialogs and overlays.
 
   const handleAddFiles = () => {
     // Shown every time, not just once: the pick navigates away from the app, and
@@ -279,137 +220,6 @@ export default function GoogleDrivePage() {
     // it happens. Because it repeats, the dialog has to stay short enough to
     // skim rather than read.
     setIntroOpen(true)
-  }
-
-  const finishPick = async (
-    picked: GooglePickerResult[],
-    folderNames: Map<string, string>,
-    unresolvedFolderIds: string[]
-  ) => {
-    if (picked.length > 0) {
-      setPickBusy(`Adding ${picked.length} file${picked.length > 1 ? "s" : ""}…`)
-      await fileStoreActions.addPickerGroup(picked, folderNames)
-    }
-    // Folders saved earlier under a placeholder keep that name, so apply the
-    // real names explicitly.
-    await fileStoreActions.updateFolderNames(folderNames)
-
-    clearPickSession()
-    removePendingFolderNameIds(Array.from(folderNames.keys()))
-    addPendingFolderNameIds(unresolvedFolderIds)
-    setPendingFolderNameCount(loadPendingFolderNameIds().length)
-
-    if (picked.length > 0) {
-      enqueueSnackbar(`Added ${picked.length} file${picked.length > 1 ? "s" : ""}`)
-    } else if (folderNames.size > 0) {
-      enqueueSnackbar(`Updated ${folderNames.size} folder name${folderNames.size > 1 ? "s" : ""}`)
-    }
-
-    setLocalRefreshNonce(n => n + 1)
-  }
-
-  const resumePick = async (session: PickSession) => {
-    const outcome = session.outcome
-    if (!outcome) return
-
-    const client = getGoogleDriveClient()
-    if (!client) {
-      clearPickSession()
-      return
-    }
-
-    try {
-      if (session.step === "files") {
-        if ("cancelled" in outcome) {
-          clearPickSession()
-          enqueueSnackbar("Cancelled adding files")
-          return
-        }
-
-        setPickBusy(
-          `Reading ${outcome.ids.length} selected item${outcome.ids.length > 1 ? "s" : ""}…`
-        )
-        // The picker only returns ids, so rebuild what the old in-page picker
-        // used to hand back directly.
-        const picked = await client.getFilesMetadata(outcome.ids)
-        if (picked.length === 0) {
-          clearPickSession()
-          enqueueSnackbar("Could not read the selected files", {
-            variant: "error",
-          })
-          return
-        }
-
-        const parentIds = Array.from(
-          new Set(
-            picked
-              .map(f => f.parentId)
-              .filter((id): id is string => id !== undefined)
-          )
-        )
-
-        setPickBusy("Checking folders…")
-        const folderNames = new Map<string, string>()
-        const needAccess: string[] = []
-        for (const parentId of parentIds) {
-          const { hasAccess, folderName } = await client.checkFolderAccess(
-            parentId
-          )
-          if (hasAccess && folderName) {
-            folderNames.set(parentId, folderName)
-          } else {
-            needAccess.push(parentId)
-          }
-        }
-
-        if (needAccess.length > 0) {
-          // drive.file grants never cascade from a folder to its contents, so a
-          // folder the user did not pick is unreadable - including its name.
-          // Ask for those in one batch instead of stranding them on placeholders.
-          const nextSession: PickSession = {
-            ...session,
-            step: "folders",
-            files: picked,
-            folderNames: Array.from(folderNames.entries()),
-            pendingFolderIds: needAccess,
-            outcome: undefined,
-          }
-          savePickSession(nextSession)
-          setPickBusy(null)
-          setFolderGrantPrompt(nextSession)
-          return
-        }
-
-        await finishPick(picked, folderNames, [])
-        return
-      }
-
-      // step === "folders"
-      const folderNames = new Map(session.folderNames)
-      if ("cancelled" in outcome) {
-        // Nothing here is worth losing the user's tracks over: save them with
-        // placeholder names and leave the retry available.
-        await finishPick(session.files, folderNames, session.pendingFolderIds)
-        if (session.pendingFolderIds.length > 0) {
-          enqueueSnackbar("Saved with temporary folder names")
-        }
-        return
-      }
-
-      setPickBusy("Reading folder names…")
-      const granted = await client.getFilesMetadata(outcome.ids)
-      granted.forEach(g => folderNames.set(g.id, g.name))
-      const stillMissing = session.pendingFolderIds.filter(
-        id => !folderNames.has(id)
-      )
-      await finishPick(session.files, folderNames, stillMissing)
-    } catch (error) {
-      console.error(error)
-      enqueueSnackbar(`${error}`, { variant: "error" })
-      clearPickSession()
-    } finally {
-      setPickBusy(null)
-    }
   }
 
   const handleRetryFolderNames = () => {
@@ -424,14 +234,7 @@ export default function GoogleDrivePage() {
     const ids = retryPromptIds
     setRetryPromptIds(null)
     if (!ids || ids.length === 0) return
-    leaveForFolderGrant(ids, {
-      step: "folders",
-      startedAt: Date.now(),
-      returnHref: currentHref(),
-      files: [],
-      folderNames: [],
-      pendingFolderIds: ids,
-    })
+    beginFolderNamesRetry(ids)
   }
 
   const colorOnSurfaceVariant = hexFromArgb(
@@ -660,7 +463,7 @@ export default function GoogleDrivePage() {
             endIcon={<OpenInNewRounded />}
             onClick={() => {
               setIntroOpen(false)
-              leaveForFilesPick()
+              beginFilesPick()
             }}
           >
             Continue
@@ -705,25 +508,9 @@ export default function GoogleDrivePage() {
           }}
         >
           <Button
-            onClick={async () => {
-              const session = folderGrantPrompt
-              setFolderGrantPrompt(null)
-              if (!session) return
-              setPickBusy("Saving…")
-              try {
-                await finishPick(
-                  session.files,
-                  new Map(session.folderNames),
-                  session.pendingFolderIds
-                )
-                enqueueSnackbar("Saved with temporary folder names")
-              } catch (error) {
-                console.error(error)
-                enqueueSnackbar(`${error}`, { variant: "error" })
-                clearPickSession()
-              } finally {
-                setPickBusy(null)
-              }
+            onClick={() => {
+              if (!folderGrantPrompt) return
+              void skipFolderGrant(folderGrantPrompt)
             }}
           >
             Skip
@@ -733,10 +520,8 @@ export default function GoogleDrivePage() {
             variant="contained"
             endIcon={<OpenInNewRounded />}
             onClick={() => {
-              const session = folderGrantPrompt
-              setFolderGrantPrompt(null)
-              if (!session) return
-              leaveForFolderGrant(session.pendingFolderIds, session)
+              if (!folderGrantPrompt) return
+              beginFolderGrant(folderGrantPrompt)
             }}
           >
             Allow folders
@@ -785,7 +570,54 @@ export default function GoogleDrivePage() {
         </DialogActions>
       </Dialog>
 
-      {pickBusy !== null &&
+      {/* Appears when tapping Continue produced no navigation at all - seen on
+          Android when the Google Drive app is installed but never set up. */}
+      <Dialog
+        open={handoff.phase === "stuck"}
+        onClose={dismissStuck}
+        sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
+      >
+        <DialogTitle
+          sx={{
+            paddingTop: "24px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
+            paddingBottom: "16px",
+          }}
+        >
+          Couldn&apos;t open Google
+        </DialogTitle>
+        <DialogContent sx={{ paddingBottom: "24px" }}>
+          <Typography>
+            Nothing happened when this app tried to open Google.
+          </Typography>
+          <Typography sx={{ mt: 2, color: colorOnSurfaceVariant }}>
+            If the Google Drive app is installed but has never been set up, it
+            can block this. Open the Drive app once and sign in, then try
+            again.
+          </Typography>
+        </DialogContent>
+        <DialogActions
+          sx={{
+            paddingTop: "0px",
+            paddingBottom: "24px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
+          }}
+        >
+          <Button onClick={dismissStuck}>Close</Button>
+          <Button
+            autoFocus
+            variant="contained"
+            endIcon={<OpenInNewRounded />}
+            onClick={retryStuck}
+          >
+            Try again
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {(handoff.phase === "busy" || handoff.phase === "leaving") &&
         createPortal(
           <Backdrop
             sx={theme => ({
@@ -797,7 +629,9 @@ export default function GoogleDrivePage() {
             open
           >
             <CircularProgress />
-            <Typography>{pickBusy}</Typography>
+            <Typography>
+              {handoff.phase === "busy" ? handoff.message : "Opening Google…"}
+            </Typography>
           </Backdrop>,
           document.body
         )}
