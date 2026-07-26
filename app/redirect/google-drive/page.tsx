@@ -8,7 +8,11 @@ import {
 } from "@/src/features/files/api/google-drive-client"
 import {
   announcePickOutcome,
+  hasPickFlowRecord,
   loadPickFlow,
+  PICK_CHANNEL,
+  PICK_FLOW_STORAGE_KEY,
+  PickChannelMessage,
   probePickOwnerAlive,
   recordPickOutcome,
 } from "@/src/features/files/api/google-drive-pick-session"
@@ -48,6 +52,41 @@ export default function Page() {
   // somewhere else, so this page parks instead of booting a second app.
   const [terminal, setTerminal] = useState<TerminalState | null>(null)
   const [whyOpen, setWhyOpen] = useState(false)
+  // Flipped when the living app has finished the work, so the user knows this
+  // tab is safe to close. Two signals, because the broadcast alone races a
+  // fast continuation (a cancel can complete before this subscription exists):
+  //   - the pick-resumed broadcast (instant when it lands), and
+  //   - the flow record disappearing from localStorage - the executor clears
+  //     it on completion, and the storage event plus one initial check make
+  //     that impossible to miss.
+  const [resumed, setResumed] = useState(false)
+
+  useEffect(() => {
+    if (terminal === null) return
+
+    const checkRecordGone = () => {
+      if (!hasPickFlowRecord()) setResumed(true)
+    }
+    checkRecordGone()
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PICK_FLOW_STORAGE_KEY || event.key === null) {
+        checkRecordGone()
+      }
+    }
+    window.addEventListener("storage", onStorage)
+
+    let channel: BroadcastChannel | undefined
+    if ("BroadcastChannel" in window) {
+      channel = new BroadcastChannel(PICK_CHANNEL)
+      channel.onmessage = (event: MessageEvent<PickChannelMessage>) => {
+        if (event.data?.type === "pick-resumed") setResumed(true)
+      }
+    }
+    return () => {
+      window.removeEventListener("storage", onStorage)
+      channel?.close()
+    }
+  }, [terminal])
 
   const refProcessed = useRef(false)
   useEffect(() => {
@@ -149,6 +188,14 @@ export default function Page() {
       >
         {terminal === null ? (
           <CircularProgress />
+        ) : resumed ? (
+          <>
+            <CheckCircleRounded fontSize="large" />
+            <Typography variant="h6">Done</Typography>
+            <Typography sx={{ maxWidth: "36em" }}>
+              Cloud Music Box has finished processing. You can close this tab.
+            </Typography>
+          </>
         ) : (
           <>
             {terminal.kind === "received" ? (

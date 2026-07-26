@@ -107,6 +107,14 @@ export function clearPickFlow() {
   localStorage.removeItem(DB_KEY_PICK_FLOW)
 }
 
+/** Raw existence check with no parse/TTL side effects (safe for observers). */
+export function hasPickFlowRecord(): boolean {
+  return localStorage.getItem(DB_KEY_PICK_FLOW) !== null
+}
+
+/** The storage-event key observers should watch for record changes. */
+export const PICK_FLOW_STORAGE_KEY = DB_KEY_PICK_FLOW
+
 /**
  * The courier's one write. Guarded: an outcome may only land on a flow that
  * actually left for Google. `startedAt` is refreshed so a user stranded in a
