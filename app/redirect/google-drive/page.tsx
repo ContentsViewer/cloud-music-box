@@ -13,18 +13,24 @@ import {
   PICK_CHANNEL,
   PICK_FLOW_STORAGE_KEY,
   PickChannelMessage,
+  PickStep,
   probePickOwnerAlive,
   recordPickOutcome,
 } from "@/src/features/files/api/google-drive-pick-session"
 import { useRouter } from "@/src/stores/router"
 import {
   Backdrop,
+  Box,
   Button,
   CircularProgress,
   Collapse,
   Typography,
 } from "@mui/material"
-import { CheckCircleRounded, UndoRounded } from "@mui/icons-material"
+import {
+  CheckCircleRounded,
+  CheckRounded,
+  UndoRounded,
+} from "@mui/icons-material"
 import { useEffect, useRef, useState } from "react"
 
 // Small helper that parses a JWT (ID token)
@@ -43,6 +49,10 @@ function parseJWT(token: string) {
 interface TerminalState {
   kind: "received" | "cancelled"
   returnHref: string
+  /** Which hop came back - track pick or folder grant. Fixes the wording. */
+  step: PickStep
+  /** Number of picked items (0 for a cancel). */
+  pickedCount: number
 }
 
 export default function Page() {
@@ -52,6 +62,14 @@ export default function Page() {
   // somewhere else, so this page parks instead of booting a second app.
   const [terminal, setTerminal] = useState<TerminalState | null>(null)
   const [whyOpen, setWhyOpen] = useState(false)
+  // window.close() is only permitted for script-opened tabs or tabs whose
+  // session history holds a single entry. The latter is knowable up front, so
+  // the close button is rendered only when pressing it is guaranteed to work -
+  // a button that cannot close the tab is noise, not affordance.
+  const [selfClosable, setSelfClosable] = useState(false)
+  useEffect(() => {
+    setSelfClosable(window.history.length === 1)
+  }, [])
   // Flipped when the living app has finished the work, so the user knows this
   // tab is safe to close. Two signals, because the broadcast alone races a
   // fast continuation (a cancel can complete before this subscription exists):
@@ -127,11 +145,19 @@ export default function Page() {
           return
         }
 
-        announcePickOutcome()
+        // Probe BEFORE announcing. The announcement wakes the owner, and a
+        // no-network continuation (a cancel) can finish and release the owner
+        // lock within milliseconds - probing afterwards would read "owner
+        // gone" and wrongly boot a second app here. Observing liveness first
+        // makes the decision race-free; the navigate branch needs no
+        // announcement at all because the app booting there resumes on mount.
         if (await probePickOwnerAlive()) {
+          announcePickOutcome()
           setTerminal({
             kind: "cancelled" in outcome ? "cancelled" : "received",
             returnHref: recorded.returnHref,
+            step: recorded.step,
+            pickedCount: outcome.ids?.length ?? 0,
           })
           return
         }
@@ -188,15 +214,11 @@ export default function Page() {
       >
         {terminal === null ? (
           <CircularProgress />
-        ) : resumed ? (
-          <>
-            <CheckCircleRounded fontSize="large" />
-            <Typography variant="h6">Done</Typography>
-            <Typography sx={{ maxWidth: "36em" }}>
-              Cloud Music Box has finished processing. You can close this tab.
-            </Typography>
-          </>
         ) : (
+          // One stable frame; nothing here is ever replaced wholesale. For a
+          // pick, only the status row advances when the app finishes, so the
+          // explanation below stays readable the whole time. A cancel is a
+          // complete story by itself and ignores `resumed` entirely.
           <>
             {terminal.kind === "received" ? (
               <CheckCircleRounded fontSize="large" />
@@ -209,31 +231,84 @@ export default function Page() {
                 : "Pick cancelled"}
             </Typography>
             <Typography sx={{ maxWidth: "36em" }}>
-              {terminal.kind === "received"
-                ? "Return to Cloud Music Box to finish — open it from your recent apps or your home screen. Your selection is saved and will be added there."
-                : "Return to Cloud Music Box — nothing was changed."}
+              {terminal.kind === "cancelled"
+                ? "Nothing was changed in Cloud Music Box."
+                : terminal.step === "folders"
+                  ? "Folder access granted."
+                  : `Your ${terminal.pickedCount} track${terminal.pickedCount === 1 ? " is" : "s are"} saved.`}
+            </Typography>
+
+            {/* Status row - the only part that progresses. */}
+            {terminal.kind === "cancelled" ? (
+              <Typography sx={{ maxWidth: "36em", opacity: 0.8 }}>
+                {selfClosable
+                  ? "Return to the app from your recent apps."
+                  : "You can close this tab, or return to the app from your recent apps."}
+              </Typography>
+            ) : resumed ? (
+              <Box
+                component="div"
+                sx={{ display: "flex", alignItems: "center", gap: 1 }}
+              >
+                <CheckRounded fontSize="small" />
+                <Typography sx={{ maxWidth: "34em" }}>
+                  {terminal.step === "folders"
+                    ? "Folder names updated — you can close this tab."
+                    : "Added in Cloud Music Box — you can close this tab."}
+                </Typography>
+              </Box>
+            ) : (
+              <Box
+                component="div"
+                sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
+              >
+                <CircularProgress size={18} />
+                <Typography sx={{ maxWidth: "34em" }}>
+                  Return to Cloud Music Box to finish — open it from your
+                  recent apps or your home screen.
+                </Typography>
+              </Box>
+            )}
+
+            {selfClosable && (terminal.kind === "cancelled" || resumed) ? (
+              <Button variant="contained" onClick={() => window.close()}>
+                Close this tab
+              </Button>
+            ) : null}
+
+            {/* The escape hatch for a mistaken "owner alive" probe. Only while
+                waiting: once the app has finished, continuing here would boot
+                a second copy of it next to a living one. */}
+            {terminal.kind === "received" && !resumed ? (
+              <Button
+                size="small"
+                onClick={() => routerActions.go(terminal.returnHref)}
+              >
+                Continue here instead
+              </Button>
+            ) : null}
+
+            {/* Always present: the one thing worth learning from this detour. */}
+            <Typography
+              variant="body2"
+              sx={{ maxWidth: "36em", opacity: 0.7, mt: 3 }}
+            >
+              The Google Drive app takes over these links, which is why this
+              opened in the browser.
             </Typography>
             <Button size="small" onClick={() => setWhyOpen(open => !open)}>
-              Why did this open in the browser?
+              How to prevent this
             </Button>
             <Collapse in={whyOpen}>
               <Typography
                 variant="body2"
                 sx={{ maxWidth: "36em", opacity: 0.8 }}
               >
-                The Google Drive app takes over these links. To come straight
-                back to Cloud Music Box next time, turn off &ldquo;Open
-                supported links&rdquo; for the Drive app in Android settings
-                (Settings → Apps → Drive → Open by default).
+                Turn off &ldquo;Open supported links&rdquo; for the Drive app
+                in Android settings (Settings → Apps → Drive → Open by
+                default). The Drive app itself keeps working normally.
               </Typography>
             </Collapse>
-            <Button
-              size="small"
-              sx={{ mt: 2 }}
-              onClick={() => routerActions.go(terminal.returnHref)}
-            >
-              Continue here instead
-            </Button>
           </>
         )}
       </Backdrop>
