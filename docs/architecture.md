@@ -278,7 +278,7 @@ Notes / hazards (all verified in code):
   processing happens in FileStore init on that document. This is why the
   OneDrive redirect page needs the full provider tree, while the Google Drive
   redirect page only reads the URL and writes localStorage.
-- The picker resume effect (`google-drive-page.tsx:189-198`) is gated on
+- The picker resume triggers (`use-google-drive-pick-flow.tsx`) are gated on
   `fileStoreState.configured` — if init hangs, a returned pick outcome is
   never processed.
 
@@ -296,40 +296,70 @@ Notes / hazards (all verified in code):
 
 ## Google Drive picker round trip (trigger_onepick)
 
-The picker is a top-level navigation, not a modal. State that must survive
-leaving the document lives in `google-drive-pick-session.ts`
-(localStorage + 10 min TTL; localStorage because iOS may hand the redirect
-back to a different browsing context).
-
-```mermaid
-flowchart TD
-  Add["Add button → intro dialog<br/>(shown every time)"] --> Leave["leaveForFilesPick:<br/>save PickSession →<br/>location.href = consent+picker URL"]
-  Leave --> Google["Google: consent screen<br/>+ picker (trigger_onepick)"]
-  Google -- "?picked_file_ids= / ?error=" --> Redirect["/redirect/google-drive:<br/>write outcome into PickSession"]
-  Redirect --> Return["navigate to returnHref"]
-  Return --> Resume["google-drive-page resume effect<br/>(gate: fileStoreState.configured)"]
-  Resume --> Meta["getFilesMetadata(ids)<br/>rebuild picker results"]
-  Meta --> Check["checkFolderAccess<br/>per parent folder"]
-  Check -- "some folders<br/>not granted" --> Grant["folder-grant dialog →<br/>leaveForFolderGrant (file_ids=…)"]
-  Grant -.-> Google
-  Check -- "all granted" --> Finish["finishPick: addPickerGroup +<br/>updateFolderNames + refresh list"]
-```
-
-Platform behavior at the `location.href` hand-off differs, and it matters:
+The picker is a top-level navigation, not a modal. Platform behavior at the
+`location.href` hand-off differs, and it is the crux of the design:
 
 - **Desktop / iOS PWA**: the document actually unloads; the redirect lands in
-  the same (or a fresh) context, `returnHref` navigation boots the app, the
-  resume effect picks up the outcome. Clean.
+  the same (or a fresh) context and must boot the app there.
 - **Android WebAPK**: Chrome diverts the out-of-scope navigation to a browser
   context and the **PWA document survives in the background**. If the Google
   Drive app is installed and set up, its App Links interception of
-  `drive.google.com` breaks the return path, and the redirect lands in a plain
-  browser tab — which then boots a second copy of the app via `returnHref`
-  while the original PWA is still alive. (Storage is shared between WebAPK and
-  Chrome on Android, so the data still lands; the UX is the problem.)
-  This asymmetry — document survives on Android, dies elsewhere — is the root
-  of the duplicate-execution issue and of the visualizer's `beforeunload`
-  latch never being reset (`dynamic-background.tsx:117-153`).
+  `drive.google.com` breaks the return path and the redirect lands in a plain
+  browser tab — next to a living app. (Storage is shared between WebAPK and
+  Chrome on Android, so persisted state is visible to both.) The same divert
+  is why the visualizer pairs its `beforeunload` hide with restore paths
+  (`dynamic-background.tsx`).
+
+The flow therefore runs on an **ownership contract** with three roles, keyed
+to observable document liveness — never to platform sniffing:
+
+- **Owner** — the document that started the pick. It holds the exclusive Web
+  Lock `cmb.gdrive-pick.owner` for the whole round trip. Lock liveness *is*
+  the ownership signal: it survives backgrounding/freezing and auto-releases
+  the moment the document dies. A `pagehide` listener releases it explicitly —
+  pagehide fires on a real departure (unload or bfcache entry) but **not** on
+  the Android divert, which is exactly the discriminator needed.
+- **Courier** — `/redirect/google-drive`. Records the outcome into the flow
+  record, broadcasts a wake-up, then probes the owner lock once
+  (`ifAvailable`, never waits). Owner alive → park on a terminal
+  "return to the app" screen and do no pick work (the screen upgrades to
+  "Done" when the executor announces completion or the record disappears).
+  Owner gone → navigate to `returnHref` as before; iOS/desktop always take
+  this branch because their owner died at the hand-off.
+- **Executor** — whichever app document runs the continuation
+  (metadata fetch → folder access check → commit). All triggers (mount,
+  `visibilitychange`, `pageshow`, BroadcastChannel) funnel into one entry
+  serialized under `cmb.gdrive-pick.resume`; the record's phase only advances
+  when work commits, so a crash mid-resume retries on the next trigger
+  against idempotent IndexedDB writes.
+
+State that survives leaving the document lives in
+`google-drive-pick-session.ts` as a phase state machine (localStorage +
+10 min TTL; localStorage because iOS may hand the redirect back to a
+different browsing context). The engine lives in
+`features/files/hooks/use-google-drive-pick-flow.tsx`; the files page only
+renders its dialogs/overlays. Everything degrades to the pre-lock behavior
+when Web Locks / BroadcastChannel are unavailable.
+
+```mermaid
+flowchart TD
+  Add["Add button → intro dialog<br/>(shown every time)"] --> Leave["owner: acquire cmb.gdrive-pick.owner,<br/>save record (phase: leaving),<br/>arm watchdog → location.href"]
+  Leave -- "watchdog: still visible<br/>after ~4 s" --> Stuck["stuck dialog (silent nav<br/>failure: Drive app not set up);<br/>late-departure repair for slow commits"]
+  Leave -- "pagehide /<br/>visibility hidden" --> Google["Google: consent screen<br/>+ picker (trigger_onepick)<br/>(record: at-google)"]
+  Google -- "?picked_file_ids= / ?error=" --> Courier["courier: record outcome<br/>(phase: returned), broadcast,<br/>probe owner lock once"]
+  Courier -- "owner alive<br/>(Android stranded tab)" --> Park["terminal screen, no work;<br/>upgrades to Done when the<br/>record clears"]
+  Courier -- "owner gone<br/>(iOS / desktop / killed)" --> Return["navigate to returnHref"]
+  Park -. "user returns via recents;<br/>visibility trigger" .-> Exec
+  Return --> Exec["executor (under cmb.gdrive-pick.resume):<br/>getFilesMetadata → checkFolderAccess"]
+  Exec -- "some folders<br/>not granted" --> GrantDlg["folder-grant dialog<br/>(record: awaiting-user —<br/>survives an app death)"]
+  GrantDlg -- "Allow folders" --> Leave
+  GrantDlg -- "Skip" --> Finish
+  Exec -- "all granted" --> Finish["commit: addPickerGroup +<br/>updateFolderNames + refresh list<br/>+ clear record + announce"]
+```
+
+A cold relaunch lands on home (`start_url`), so `app/home/page.tsx` checks
+`pendingPickWorkHref()` once on mount and routes back to `returnHref` when a
+`returned`/`awaiting-user` record is waiting.
 
 ## Visualizers feature
 
