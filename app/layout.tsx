@@ -14,10 +14,10 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: "Cloud Music Box",
-  description: "A pwa music player that plays music from your cloud storage.",
+  description: "A PWA music player that plays music from cloud storage (`OneDrive`, `Google Drive`), designed to let you feel and enjoy music more deeply.",
   openGraph: {
     title: "Cloud Music Box",
-    description: "A pwa music player that plays music from your cloud storage.",
+    description: "A PWA music player that plays music from cloud storage (`OneDrive`, `Google Drive`), designed to let you feel and enjoy music more deeply.",
   },
 }
 

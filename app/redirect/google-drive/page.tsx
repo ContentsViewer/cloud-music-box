@@ -1,18 +1,30 @@
 "use client"
 
 // Bundle-isolation exception: importing via the features/files index would drag in
-// the OneDrive side (MSAL etc., +220 kB), so import the needed api module directly
+// the OneDrive side (MSAL etc., +220 kB), so import the needed api modules directly
 import {
-  createGoogleDriveClient,
   saveAccessToken,
   saveUserInfo,
 } from "@/src/features/files/api/google-drive-client"
 import {
-  loadPickSession,
-  savePickSession,
+  announcePickOutcome,
+  hasPickFlowRecord,
+  loadPickFlow,
+  PICK_CHANNEL,
+  PICK_FLOW_STORAGE_KEY,
+  PickChannelMessage,
+  probePickOwnerAlive,
+  recordPickOutcome,
 } from "@/src/features/files/api/google-drive-pick-session"
 import { useRouter } from "@/src/stores/router"
-import { Backdrop, Box, CircularProgress, Grow } from "@mui/material"
+import {
+  Backdrop,
+  Button,
+  CircularProgress,
+  Collapse,
+  Typography,
+} from "@mui/material"
+import { CheckCircleRounded, UndoRounded } from "@mui/icons-material"
 import { useEffect, useRef, useState } from "react"
 
 // Small helper that parses a JWT (ID token)
@@ -28,8 +40,53 @@ function parseJWT(token: string) {
   return JSON.parse(jsonPayload)
 }
 
+interface TerminalState {
+  kind: "received" | "cancelled"
+  returnHref: string
+}
+
 export default function Page() {
   const [routerState, routerActions] = useRouter()
+
+  // The stranded-tab ending: the pick-starting document is still alive
+  // somewhere else, so this page parks instead of booting a second app.
+  const [terminal, setTerminal] = useState<TerminalState | null>(null)
+  const [whyOpen, setWhyOpen] = useState(false)
+  // Flipped when the living app has finished the work, so the user knows this
+  // tab is safe to close. Two signals, because the broadcast alone races a
+  // fast continuation (a cancel can complete before this subscription exists):
+  //   - the pick-resumed broadcast (instant when it lands), and
+  //   - the flow record disappearing from localStorage - the executor clears
+  //     it on completion, and the storage event plus one initial check make
+  //     that impossible to miss.
+  const [resumed, setResumed] = useState(false)
+
+  useEffect(() => {
+    if (terminal === null) return
+
+    const checkRecordGone = () => {
+      if (!hasPickFlowRecord()) setResumed(true)
+    }
+    checkRecordGone()
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PICK_FLOW_STORAGE_KEY || event.key === null) {
+        checkRecordGone()
+      }
+    }
+    window.addEventListener("storage", onStorage)
+
+    let channel: BroadcastChannel | undefined
+    if ("BroadcastChannel" in window) {
+      channel = new BroadcastChannel(PICK_CHANNEL)
+      channel.onmessage = (event: MessageEvent<PickChannelMessage>) => {
+        if (event.data?.type === "pick-resumed") setResumed(true)
+      }
+    }
+    return () => {
+      window.removeEventListener("storage", onStorage)
+      channel?.close()
+    }
+  }, [terminal])
 
   const refProcessed = useRef(false)
   useEffect(() => {
@@ -41,38 +98,50 @@ export default function Page() {
       // different parts of the URL:
       //   - the implicit login returns its token in the fragment
       //   - the Google Picker (trigger_onepick) returns its result in the query
-      // The picker result is only recorded here; the file list page owns the
-      // rest of the flow, so it can show progress and dialogs where the user is.
+      //
+      // For the picker this page is the COURIER of the round trip: it records
+      // the outcome and asks exactly one question - is the document that
+      // started the pick still alive (= still holding PICK_OWNER_LOCK)?
+      //   - alive: stay out of its way. Navigating would boot a second copy of
+      //     the app next to a living one (the Android stranded-tab case); the
+      //     owner resumes the work itself when it comes back to the front.
+      //   - gone (iOS / desktop / killed app): navigate as before and let this
+      //     document become the app.
       const query = new URLSearchParams(location.search)
       const pickedFileIds = query.get("picked_file_ids")
       const pickerError = query.get("error")
       if (pickedFileIds !== null || pickerError !== null) {
-        const session = loadPickSession()
-        if (session) {
-          savePickSession({
-            ...session,
-            outcome: pickedFileIds
-              ? { ids: pickedFileIds.split(",").filter(Boolean) }
-              : { cancelled: true },
-          })
-          routerActions.go(session.returnHref)
-        } else {
-          // The session expired or was cleared while the user was away; there is
-          // nothing to resume, so just put them back somewhere sensible.
-          console.warn("Picker returned but no pick session was found")
+        const flow = loadPickFlow()
+        const outcome = pickedFileIds
+          ? { ids: pickedFileIds.split(",").filter(Boolean) }
+          : { cancelled: true as const }
+        const recorded = flow ? recordPickOutcome(flow, outcome) : undefined
+        if (!recorded) {
+          // The flow expired, was cleared, or was superseded while the user
+          // was away; there is nothing to resume, so just put them back
+          // somewhere sensible.
+          console.warn("Picker returned but no matching pick flow was found")
           if (!routerActions.goLastHref()) {
             routerActions.goHome()
           }
+          return
         }
+
+        announcePickOutcome()
+        if (await probePickOwnerAlive()) {
+          setTerminal({
+            kind: "cancelled" in outcome ? "cancelled" : "received",
+            returnHref: recorded.returnHref,
+          })
+          return
+        }
+        routerActions.go(recorded.returnHref)
         return
       }
 
       // Extract the authorization code from the URL parameters
       const hash = new URLSearchParams(location.hash.substring(1))
       const accessToken = hash.get("access_token")
-      // const urlParams = new URLSearchParams(window.location.search)
-      // console.log(urlParams)
-      // const accessToken = urlParams.get("access_token")
       if (accessToken === null) {
         console.error("Access token not found in URL")
         return
@@ -100,24 +169,6 @@ export default function Page() {
       if (!lastHref) {
         routerActions.goHome()
       }
-
-      // const code = urlParams.get("code")
-      // const error = urlParams.get("error")
-
-      // console.log(error, code)
-      // if (error) {
-      //   console.error(error)
-      //   return
-      // }
-      // if (!code) {
-      //   console.error("Authorization code not found in URL")
-      //   return
-      // }
-
-      // console.log("Google authorization code received:", code)
-      // // Create the Google Drive client
-      // const driveClient = await createGoogleDriveClient()
-      // const accessToken = await driveClient.fetchAccessToken(code)
     }
     handleGoogleRedirect()
   }, [])
@@ -130,9 +181,61 @@ export default function Page() {
           zIndex: theme => theme.zIndex.drawer + 1,
           display: "flex",
           flexDirection: "column",
+          gap: 2,
+          px: 4,
+          textAlign: "center",
         }}
       >
-        <CircularProgress />
+        {terminal === null ? (
+          <CircularProgress />
+        ) : resumed ? (
+          <>
+            <CheckCircleRounded fontSize="large" />
+            <Typography variant="h6">Done</Typography>
+            <Typography sx={{ maxWidth: "36em" }}>
+              Cloud Music Box has finished processing. You can close this tab.
+            </Typography>
+          </>
+        ) : (
+          <>
+            {terminal.kind === "received" ? (
+              <CheckCircleRounded fontSize="large" />
+            ) : (
+              <UndoRounded fontSize="large" />
+            )}
+            <Typography variant="h6">
+              {terminal.kind === "received"
+                ? "Selection received"
+                : "Pick cancelled"}
+            </Typography>
+            <Typography sx={{ maxWidth: "36em" }}>
+              {terminal.kind === "received"
+                ? "Return to Cloud Music Box to finish — open it from your recent apps or your home screen. Your selection is saved and will be added there."
+                : "Return to Cloud Music Box — nothing was changed."}
+            </Typography>
+            <Button size="small" onClick={() => setWhyOpen(open => !open)}>
+              Why did this open in the browser?
+            </Button>
+            <Collapse in={whyOpen}>
+              <Typography
+                variant="body2"
+                sx={{ maxWidth: "36em", opacity: 0.8 }}
+              >
+                The Google Drive app takes over these links. To come straight
+                back to Cloud Music Box next time, turn off &ldquo;Open
+                supported links&rdquo; for the Drive app in Android settings
+                (Settings → Apps → Drive → Open by default).
+              </Typography>
+            </Collapse>
+            <Button
+              size="small"
+              sx={{ mt: 2 }}
+              onClick={() => routerActions.go(terminal.returnHref)}
+            >
+              Continue here instead
+            </Button>
+          </>
+        )}
       </Backdrop>
     </div>
   )

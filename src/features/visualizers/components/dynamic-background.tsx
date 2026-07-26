@@ -112,14 +112,26 @@ export const DynamicBackground = () => {
   const [audioDynamicsSettings, audioDynamicsSettingsActions] =
     useAudioDynamicsSettingsStore()
 
-  // console.log(primaryColor)
+  // Hide the canvas as soon as the document might unload so a reload never
+  // flashes a white canvas. beforeunload is deliberately kept as the hide
+  // trigger (it fires the earliest), but it is only a *maybe*: on Android an
+  // out-of-scope navigation is diverted to a browser context and this document
+  // survives, so hiding must always be paired with restore paths.
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      setIsPageUnloading(true)
+    const hide = () => setIsPageUnloading(true)
+    const show = () => setIsPageUnloading(false)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") show()
     }
-    window.addEventListener("beforeunload", handleBeforeUnload)
+    window.addEventListener("beforeunload", hide)
+    // Restore on bfcache revival (back from an external page)...
+    window.addEventListener("pageshow", show)
+    // ...and when the surviving document comes back to the foreground.
+    document.addEventListener("visibilitychange", handleVisibilityChange)
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload)
+      window.removeEventListener("beforeunload", hide)
+      window.removeEventListener("pageshow", show)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
   }, [])
 

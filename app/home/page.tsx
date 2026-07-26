@@ -49,6 +49,7 @@ import {
 } from "@/src/features/files"
 import { setDriveConfig } from "@/src/features/files"
 import { createGoogleDriveClient } from "@/src/features/files"
+import { pendingPickWorkHref } from "@/src/features/files"
 
 const LoginPage = () => {
   const [loading, setLoading] = useState(false)
@@ -184,6 +185,16 @@ export default function Page() {
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const scrollTargetRef = useRef<Node | undefined>(undefined)
+
+  // A cold relaunch lands here (start_url) even when a picker round trip is
+  // still waiting to be finished on the files page - route back to it so the
+  // pick resumes instead of rotting until its TTL.
+  useEffect(() => {
+    const pendingHref = pendingPickWorkHref()
+    if (pendingHref) {
+      routerActionsRef.current.go(pendingHref)
+    }
+  }, [])
 
   const driveStatus = fileStoreState.driveStatus
   // console.log(driveStatus)
