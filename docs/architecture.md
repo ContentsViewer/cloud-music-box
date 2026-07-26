@@ -1,6 +1,7 @@
 # Cloud Music Box — Architecture
 
-Last updated: 2026-07 (after the feature-based restructuring and audio-bus unification).
+Last updated: 2026-07 (after the trigger_onepick picker migration; added dependency
+graph, startup flow, and picker round-trip diagrams).
 
 ## Overview
 
@@ -145,14 +146,190 @@ AppRouterCacheProvider
                                       AudioPlayer, PlayerCard, page children)
 ```
 
+### Store / feature dependency graph
+
+Arrows mean "depends on / reads". Note the only feature→feature edge is
+**player → files** (PlayerStore calls FileStore for track content); everything
+else composes at the page layer or goes through cross-cutting providers.
+
+```mermaid
+graph LR
+  subgraph shared["src/stores (cross-cutting)"]
+    Theme["ThemeStore"]
+    Router["Router"]
+    Net["NetworkMonitor"]
+    ADS["AudioDynamicsSettings<br/>(localStorage)"]
+    BusP["AudioBusProvider"]
+  end
+
+  subgraph files["features/files"]
+    FS["FileStore"]
+    GDC["google-drive-client<br/>(implicit OAuth + picker)"]
+    ODC["onedrive-client<br/>(MSAL)"]
+  end
+
+  subgraph player["features/player"]
+    PS["PlayerStore"]
+    AP["AudioPlayer"]
+    PC["PlayerCard /<br/>timeline-slider"]
+  end
+
+  subgraph viz["features/visualizers"]
+    DBg["DynamicBackground"]
+    VZ["fb-sparse-cortex /<br/>lissajous / PitchBackdrop"]
+  end
+
+  Bus(("AudioBus<br/>(plain JS)"))
+  IDB[("IndexedDB<br/>file-db")]
+  LS[("localStorage")]
+  TC["ThemeChanger<br/>(app-layout)"]
+
+  FS --> Net
+  FS --> IDB
+  FS --> LS
+  FS --> GDC
+  FS --> ODC
+  GDC --> LS
+  ODC --> LS
+
+  PS --> FS
+  AP --> PS
+  AP -- "AudioFrame ~4 Hz" --> Bus
+  BusP -- "creates" --> Bus
+  PC --> PS
+  PC -. "subscribe" .-> Bus
+
+  DBg --> Theme
+  DBg --> ADS
+  VZ -. "subscribe" .-> Bus
+
+  TC --> PS
+  TC --> Theme
+```
+
+Pages (`app/*`) sit above this graph: they read FileStore/PlayerStore/Router and
+wire list components to the player via props (`onPlayTracks` / `activeFileId`).
+The pick-session module (`features/files/api/google-drive-pick-session.ts`) is
+plain localStorage I/O used by `app/files/google-drive-page.tsx` and
+`app/redirect/google-drive/page.tsx` on both sides of the picker round trip.
+
+## Startup initialization flow
+
+Everything below happens on every document that renders the app shell —
+including the OAuth redirect pages, since `AppLayout` wraps all routes.
+
+```mermaid
+flowchart TD
+  Mount["Provider tree mounts<br/>(layout.tsx → app-layout.tsx)"] --> SW["registerServiceWorker<br/>(AppLayout effect)"]
+  Mount --> NM["NetworkMonitor effect<br/>isOnline = navigator.onLine<br/>(first render: false)"]
+  Mount --> Init["FileStore init effect<br/>(StrictMode-guarded via ref)"]
+
+  Init --> Open["indexedDB.open('file-db')"]
+  Open -- "onupgradeneeded" --> Create["create object stores:<br/>files / blobs / albums / blobs-meta"]
+  Create --> LSread
+  Open -- "success" --> LSread["read localStorage:<br/>rootFolderId, blobsStorageMaxBytes<br/>(else storage.estimate × 0.7),<br/>blobsStorageUsageBytes"]
+  Open -- "error" --> Fail["snackbar only;<br/>configured stays false ⚠"]
+  Open -. "pending delete:<br/>no event at all" .-> Hang["waits forever ⚠"]
+
+  LSread --> Cfg{"DriveConfig<br/>(localStorage drive.config)?"}
+
+  Cfg -- "onedrive" --> OD["createOneDriveClient:<br/>MSAL initialize +<br/>handleRedirectPromise"]
+  OD --> ODacc{"accountInfo?"}
+  ODacc -- "yes" --> StOff["driveStatus = offline"]
+  ODacc -- "no" --> StNo["driveStatus = no-account"]
+
+  Cfg -- "google-drive" --> GD["createGoogleDriveClient<br/>(reads stored token/userInfo)"]
+  GD --> GDusr{"userInfo?"}
+  GDusr -- "yes" --> GRoot["ensure virtual 'root' folder in IDB;<br/>rootFolderId = 'root'"]
+  GDusr -- "no" --> GRootN["ensure virtual 'root' folder;<br/>driveStatus = no-account"]
+  GRoot --> StOff
+  GRootN --> Done
+
+  Cfg -- "none" --> StNo
+
+  StOff --> Done["configured = true"]
+  StNo --> Done
+
+  Done --> Gate{"isOnline &&<br/>driveStatus == offline?"}
+  Gate -- "yes" --> Conn["driveClient.connect()"]
+  Conn --> RootId["getRootFolderId →<br/>localStorage + state"]
+  RootId --> Online["driveStatus = online"]
+  Gate -- "no" --> Wait["stays offline; the connect effect<br/>re-runs when isOnline flips"]
+```
+
+Notes / hazards (all verified in code):
+
+- **`indexedDB.open` has no `onblocked` handler and no timeout**
+  (`file-store.tsx:727-751`). A pending `deleteDatabase` queues the open with
+  *no event at all* — `init()` never settles, `configured` never flips, and
+  every page gated on it renders nothing.
+- **`onversionchange` is an empty handler** (`file-store.tsx:752-755`). This
+  connection never closes when another context calls `deleteDatabase`, which is
+  what makes Settings → Reset App hang when a second tab (or a stranded
+  redirect tab) is alive.
+- **Init errors only show a snackbar** (`file-store.tsx:868-871`);
+  `driveStatus` stays `"not-configured"` and `app/home` / `app/files` render
+  `null` for that state — a blank screen behind a 5-second toast.
+- **`NetworkMonitor` starts as `false`** until its effect runs, so the connect
+  gate always fails on the first pass; connection happens on the re-render
+  after `isOnline` flips to the real value.
+- **MSAL redirect handling lives inside `createOneDriveClient`** — the
+  `/redirect/onedrive` page itself is just a spinner; the actual token
+  processing happens in FileStore init on that document. This is why the
+  OneDrive redirect page needs the full provider tree, while the Google Drive
+  redirect page only reads the URL and writes localStorage.
+- The picker resume effect (`google-drive-page.tsx:189-198`) is gated on
+  `fileStoreState.configured` — if init hangs, a returned pick outcome is
+  never processed.
+
 ## Files feature (cloud drives + cache)
 
 - `api/base-drive-client.ts` — types (`BaseFileItem`, `AudioTrackFileItem`, …),
   the `BaseDriveClient` interface, `DriveConfig` (localStorage), audio format map.
-- `api/google-drive-client.tsx` — OAuth 2.0 implicit flow + gapi/GIS/Picker.
+- `api/google-drive-client.tsx` — OAuth 2.0 implicit flow (login) +
+  `trigger_onepick` picker (top-level navigation; the in-page JS Picker is gone).
+- `api/google-drive-pick-session.ts` — pick state that survives the picker's
+  top-level navigation (localStorage + 10 min TTL).
 - `api/onedrive-client.tsx` — MSAL + Microsoft Graph.
 - `stores/file-store.tsx` — IndexedDB (`file-db`: files / blobs / blobs-meta / albums),
   LRU blob cache (70% of quota), download queue, drive-client orchestration.
+
+## Google Drive picker round trip (trigger_onepick)
+
+The picker is a top-level navigation, not a modal. State that must survive
+leaving the document lives in `google-drive-pick-session.ts`
+(localStorage + 10 min TTL; localStorage because iOS may hand the redirect
+back to a different browsing context).
+
+```mermaid
+flowchart TD
+  Add["Add button → intro dialog<br/>(shown every time)"] --> Leave["leaveForFilesPick:<br/>save PickSession →<br/>location.href = consent+picker URL"]
+  Leave --> Google["Google: consent screen<br/>+ picker (trigger_onepick)"]
+  Google -- "?picked_file_ids= / ?error=" --> Redirect["/redirect/google-drive:<br/>write outcome into PickSession"]
+  Redirect --> Return["navigate to returnHref"]
+  Return --> Resume["google-drive-page resume effect<br/>(gate: fileStoreState.configured)"]
+  Resume --> Meta["getFilesMetadata(ids)<br/>rebuild picker results"]
+  Meta --> Check["checkFolderAccess<br/>per parent folder"]
+  Check -- "some folders<br/>not granted" --> Grant["folder-grant dialog →<br/>leaveForFolderGrant (file_ids=…)"]
+  Grant -.-> Google
+  Check -- "all granted" --> Finish["finishPick: addPickerGroup +<br/>updateFolderNames + refresh list"]
+```
+
+Platform behavior at the `location.href` hand-off differs, and it matters:
+
+- **Desktop / iOS PWA**: the document actually unloads; the redirect lands in
+  the same (or a fresh) context, `returnHref` navigation boots the app, the
+  resume effect picks up the outcome. Clean.
+- **Android WebAPK**: Chrome diverts the out-of-scope navigation to a browser
+  context and the **PWA document survives in the background**. If the Google
+  Drive app is installed and set up, its App Links interception of
+  `drive.google.com` breaks the return path, and the redirect lands in a plain
+  browser tab — which then boots a second copy of the app via `returnHref`
+  while the original PWA is still alive. (Storage is shared between WebAPK and
+  Chrome on Android, so the data still lands; the UX is the problem.)
+  This asymmetry — document survives on Android, dies elsewhere — is the root
+  of the duplicate-execution issue and of the visualizer's `beforeunload`
+  latch never being reset (`dynamic-background.tsx:117-153`).
 
 ## Visualizers feature
 
