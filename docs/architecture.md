@@ -341,6 +341,42 @@ different browsing context). The engine lives in
 renders its dialogs/overlays. Everything degrades to the pre-lock behavior
 when Web Locks / BroadcastChannel are unavailable.
 
+### Two picker modes
+
+The redirect flow above is the default, but Settings offers a second method
+(`google-drive-picker-mode.ts`, localStorage `googleDrive.pickerMode`):
+the classic **in-app iframe Picker** (`openFilesPicker`/`openFolderPicker`
+in the drive client). Neither method is good everywhere:
+
+|                    | redirect (default)         | in-app (iframe)             |
+| ------------------ | -------------------------- | --------------------------- |
+| Stays in the app   | no (Android can strand)    | yes                         |
+| Consent screen     | every pick                 | first pick only             |
+| Mobile multiselect | yes                        | no (upstream, one at a time)|
+| iOS home-screen    | fine                       | cookie wall can dead-end it |
+
+The modes differ **only in acquisition** — how picked results and folder
+grants are obtained. Everything downstream (`continueWithPicked`: access
+checks → `awaiting-user` record + grant dialog → commit + bookkeeping) is
+shared. The in-app path never touches the locks, the watchdog or the
+leaving/at-google phases: the document never leaves, so the ownership
+contract has nothing to protect. Its own risks are covered instead by an
+escape chip rendered above the picker (abort → dispose → empty resolve),
+an `Action.LOADED` watchdog (~10 s) whose dialog offers "Use Google page"
+as the way out, and a per-folder grant loop (the iframe picker has no
+`file_ids` batch mode).
+
+Why the iOS dead-end cannot be fixed on our side (measured 2026-07-28):
+the picker's server authenticates with Google session cookies, not the
+OAuth token — fetching the picker URL with a valid `oauth_token` but no
+cookies returns **401** (and top-level with cookies returns **403**; the
+page is iframe-only). Under iOS home-screen cookie blocking the iframe
+therefore renders a dead-end sign-in dialog. Google's embedder libraries
+show no Storage Access API adoption (`apis.google.com/js/api.js` and
+`accounts.google.com/gsi/client`: 0 hits for `requestStorageAccess`;
+GIS carries 81 FedCM references instead). The picker bundle itself can
+only be searched from DevTools while a picker is open.
+
 ```mermaid
 flowchart TD
   Add["Add button → intro dialog<br/>(shown every time)"] --> Leave["owner: acquire cmb.gdrive-pick.owner,<br/>save record (phase: leaving),<br/>arm watchdog → location.href"]

@@ -23,6 +23,7 @@ import {
   GoogleDriveClient,
   GooglePickerResult,
 } from "../api/google-drive-client"
+import { getGooglePickerMode } from "../api/google-drive-picker-mode"
 import {
   PICK_CHANNEL,
   PICK_OWNER_LOCK,
@@ -52,6 +53,17 @@ export type PickHandoffState =
 // stuck-recovery listener below repairs the rare false positive.
 const WATCHDOG_MS = 4000
 const STUCK_RECOVERY_MS = 30000
+// How long the in-app (iframe) picker may go without reporting Action.LOADED
+// before the user is offered a way out. The known cause is the iOS cookie
+// wall, where the picker renders a dead-end dialog instead of loading.
+const PICKER_LOAD_WARNING_MS = 10000
+
+export interface InAppPickerState {
+  /** Shown in the escape-hatch chrome above the picker. */
+  label: string
+  /** True once the load watchdog fired without Action.LOADED. */
+  loadWarning: boolean
+}
 
 // --- Owner lock (module scope: it must survive React unmounts, because the
 // --- document - the actual owner - does) ------------------------------------
@@ -104,12 +116,15 @@ export function pendingPickWorkHref(): string | undefined {
 interface UseGoogleDrivePickFlowOptions {
   /** Where the round trip should land the user (captures the current folder). */
   getReturnHref: () => string
+  /** Drive folder the in-app picker should start in (undefined = Drive root). */
+  getPickerParentId?: () => string | undefined
   /** Called after a continuation committed; the page refreshes its list. */
   onCommitted: () => void
 }
 
 export function useGoogleDrivePickFlow({
   getReturnHref,
+  getPickerParentId,
   onCommitted,
 }: UseGoogleDrivePickFlowOptions) {
   const [fileStoreState, fileStoreActions] = useFileStore()
@@ -118,14 +133,22 @@ export function useGoogleDrivePickFlow({
   const [folderGrantPrompt, setFolderGrantPrompt] =
     useState<PickFlowRecord | null>(null)
   const [pendingFolderNameCount, setPendingFolderNameCount] = useState(0)
+  // Non-null while an in-app (iframe) picker is on screen.
+  const [inAppPicker, setInAppPicker] = useState<InAppPickerState | null>(null)
 
   // Fresh values for callbacks that outlive a render.
   const fileStoreRef = useRef({ state: fileStoreState, actions: fileStoreActions })
   fileStoreRef.current = { state: fileStoreState, actions: fileStoreActions }
   const getReturnHrefRef = useRef(getReturnHref)
   getReturnHrefRef.current = getReturnHref
+  const getPickerParentIdRef = useRef(getPickerParentId)
+  getPickerParentIdRef.current = getPickerParentId
   const onCommittedRef = useRef(onCommitted)
   onCommittedRef.current = onCommitted
+  const pickerAbortRef = useRef<AbortController | null>(null)
+  // Set when the user closes the picker through the escape hatch; a folder
+  // grant loop checks it to stop instead of marching through the rest.
+  const pickerCancelRequestedRef = useRef(false)
 
   const watchdogDisarmRef = useRef<() => void>(() => {})
   const stuckRecoveryDisarmRef = useRef<() => void>(() => {})
@@ -183,6 +206,59 @@ export function useGoogleDrivePickFlow({
     onCommittedRef.current()
   }
 
+  /**
+   * The merge point of the two acquisition paths (redirect and in-app): from
+   * picked tracks with metadata to either a commit or a persisted
+   * `awaiting-user` record with the folder-grant dialog showing.
+   */
+  const continueWithPicked = async (
+    client: GoogleDriveClient,
+    picked: GooglePickerResult[],
+    returnHref: string
+  ) => {
+    const parentIds = Array.from(
+      new Set(
+        picked
+          .map(f => f.parentId)
+          .filter((id): id is string => id !== undefined)
+      )
+    )
+
+    setBusy("Checking folders…")
+    const folderNames = new Map<string, string>()
+    const needAccess: string[] = []
+    for (const parentId of parentIds) {
+      const { hasAccess, folderName } = await client.checkFolderAccess(parentId)
+      if (hasAccess && folderName) {
+        folderNames.set(parentId, folderName)
+      } else {
+        needAccess.push(parentId)
+      }
+    }
+
+    if (needAccess.length > 0) {
+      // drive.file grants never cascade from a folder to its contents, so
+      // a folder the user did not pick is unreadable - including its name.
+      // `awaiting-user` persists the dialog itself: if the app dies here,
+      // the next boot re-shows it instead of losing the picked tracks.
+      const next: PickFlowRecord = {
+        v: 2,
+        step: "folders",
+        phase: "awaiting-user",
+        startedAt: Date.now(),
+        returnHref,
+        files: picked,
+        folderNames: Array.from(folderNames.entries()),
+        pendingFolderIds: needAccess,
+      }
+      savePickFlow(next)
+      setFolderGrantPrompt(next)
+      return
+    }
+
+    await commitPick(picked, folderNames, [])
+  }
+
   const runContinuation = async (
     record: PickFlowRecord & { phase: "returned" }
   ) => {
@@ -217,48 +293,7 @@ export function useGoogleDrivePickFlow({
           return
         }
 
-        const parentIds = Array.from(
-          new Set(
-            picked
-              .map(f => f.parentId)
-              .filter((id): id is string => id !== undefined)
-          )
-        )
-
-        setBusy("Checking folders…")
-        const folderNames = new Map<string, string>()
-        const needAccess: string[] = []
-        for (const parentId of parentIds) {
-          const { hasAccess, folderName } =
-            await client.checkFolderAccess(parentId)
-          if (hasAccess && folderName) {
-            folderNames.set(parentId, folderName)
-          } else {
-            needAccess.push(parentId)
-          }
-        }
-
-        if (needAccess.length > 0) {
-          // drive.file grants never cascade from a folder to its contents, so
-          // a folder the user did not pick is unreadable - including its name.
-          // Ask for those in one batch instead of stranding placeholders.
-          // `awaiting-user` persists the dialog itself: if the app dies here,
-          // the next boot re-shows it instead of losing the picked tracks.
-          const next: PickFlowRecord = {
-            ...record,
-            step: "folders",
-            phase: "awaiting-user",
-            startedAt: Date.now(),
-            files: picked,
-            folderNames: Array.from(folderNames.entries()),
-            pendingFolderIds: needAccess,
-          }
-          savePickFlow(next)
-          setFolderGrantPrompt(next)
-          return
-        }
-
-        await commitPick(picked, folderNames, [])
+        await continueWithPicked(client, picked, record.returnHref)
         return
       }
 
@@ -326,6 +361,119 @@ export function useGoogleDrivePickFlow({
     }
     void run()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // --- In-app (iframe) picker path -----------------------------------------
+  //
+  // No lock, no PickFlowRecord, no watchdog: the document never leaves, so
+  // the ownership contract has nothing to protect. The only persisted state
+  // is the shared `awaiting-user` record written by continueWithPicked.
+
+  /** Runs one picker with the escape-hatch state, abort wiring and load watchdog. */
+  const withInAppPicker = async <T,>(
+    label: string,
+    run: (opts: { signal: AbortSignal; onLoaded: () => void }) => Promise<T>
+  ): Promise<T> => {
+    const abort = new AbortController()
+    pickerAbortRef.current = abort
+    setInAppPicker({ label, loadWarning: false })
+    // The picker normally reports LOADED within a second or two; staying
+    // silent this long means it is stuck (the iOS cookie wall renders a
+    // dead-end dialog instead), so surface a way out.
+    const loadTimer = window.setTimeout(() => {
+      setInAppPicker(current =>
+        current ? { ...current, loadWarning: true } : current
+      )
+    }, PICKER_LOAD_WARNING_MS)
+    try {
+      return await run({
+        signal: abort.signal,
+        onLoaded: () => window.clearTimeout(loadTimer),
+      })
+    } finally {
+      window.clearTimeout(loadTimer)
+      pickerAbortRef.current = null
+      setInAppPicker(null)
+    }
+  }
+
+  const beginInAppFilesPick = async () => {
+    const client = getGoogleClient()
+    if (!client) return
+    pickerCancelRequestedRef.current = false
+    try {
+      const picked = await withInAppPicker("Add music from Google Drive", opts =>
+        client.openFilesPicker(getPickerParentIdRef.current?.(), opts)
+      )
+      if (picked.length === 0) return // picker cancel or escape hatch
+      await continueWithPicked(client, picked, getReturnHrefRef.current())
+    } catch (error) {
+      console.error(error)
+      enqueueSnackbar(`${error}`, { variant: "error" })
+      clearPickFlow()
+    } finally {
+      setHandoff(current =>
+        current.phase === "busy" ? { phase: "idle" } : current
+      )
+    }
+  }
+
+  /**
+   * Grants pending folders one picker at a time - the iframe picker has no
+   * batch-grant mode (that is a redirect-flow exclusive via file_ids). A
+   * cancelled or skipped folder simply stays on its placeholder name.
+   */
+  const runInAppFolderGrant = async (
+    files: GooglePickerResult[],
+    knownFolderNames: [string, string][],
+    pendingFolderIds: string[]
+  ) => {
+    const client = getGoogleClient()
+    if (!client) return
+    pickerCancelRequestedRef.current = false
+    const folderNames = new Map(knownFolderNames)
+    const total = pendingFolderIds.length
+    try {
+      for (let i = 0; i < total; i++) {
+        // Escape hatch pressed: keep the rest as placeholders instead of
+        // marching the user through more pickers.
+        if (pickerCancelRequestedRef.current) break
+        const folderId = pendingFolderIds[i]
+        const folder = await withInAppPicker(
+          total > 1 ? `Folder ${i + 1} of ${total}` : "Allow the folder",
+          opts => client.openFolderPicker(folderId, opts)
+        )
+        if (folder && folder.id === folderId) {
+          folderNames.set(folderId, folder.name)
+        }
+      }
+      const stillMissing = pendingFolderIds.filter(id => !folderNames.has(id))
+      await commitPick(files, folderNames, stillMissing)
+      if (stillMissing.length > 0) {
+        enqueueSnackbar("Saved with temporary folder names")
+      }
+    } catch (error) {
+      console.error(error)
+      enqueueSnackbar(`${error}`, { variant: "error" })
+      clearPickFlow()
+    } finally {
+      setHandoff(current =>
+        current.phase === "busy" ? { phase: "idle" } : current
+      )
+    }
+  }
+
+  /** Escape hatch: dispose the current picker and stop the flow. */
+  const cancelInAppPicker = useCallback(() => {
+    pickerCancelRequestedRef.current = true
+    pickerAbortRef.current?.abort()
+  }, [])
+
+  /** "Keep waiting" on the load warning - hides the dialog, picker stays. */
+  const keepWaitingInAppPicker = useCallback(() => {
+    setInAppPicker(current =>
+      current ? { ...current, loadWarning: false } : current
+    )
   }, [])
 
   // --- Owner: leaving for Google -------------------------------------------
@@ -438,6 +586,10 @@ export function useGoogleDrivePickFlow({
   }
 
   const beginFilesPick = useCallback(() => {
+    if (getGooglePickerMode() === "in-app") {
+      void beginInAppFilesPick()
+      return
+    }
     lastLeaveRef.current = beginFilesPick
     void departForGoogle(
       {
@@ -455,10 +607,18 @@ export function useGoogleDrivePickFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /** From the folder-grant dialog: leave to grant the pending folders. */
+  /** From the folder-grant dialog: grant the pending folders (mode decides how). */
   const beginFolderGrant = useCallback((record: PickFlowRecord) => {
-    lastLeaveRef.current = () => beginFolderGrant(record)
     setFolderGrantPrompt(null)
+    if (getGooglePickerMode() === "in-app") {
+      void runInAppFolderGrant(
+        record.files,
+        record.folderNames,
+        record.pendingFolderIds
+      )
+      return
+    }
+    lastLeaveRef.current = () => beginFolderGrant(record)
     void departForGoogle(
       {
         ...record,
@@ -495,6 +655,10 @@ export function useGoogleDrivePickFlow({
 
   /** From the menu: re-request names for folders skipped earlier. */
   const beginFolderNamesRetry = useCallback((folderIds: string[]) => {
+    if (getGooglePickerMode() === "in-app") {
+      void runInAppFolderGrant([], [], folderIds)
+      return
+    }
     lastLeaveRef.current = () => beginFolderNamesRetry(folderIds)
     void departForGoogle(
       {
@@ -576,11 +740,14 @@ export function useGoogleDrivePickFlow({
     handoff,
     folderGrantPrompt,
     pendingFolderNameCount,
+    inAppPicker,
     beginFilesPick,
     beginFolderGrant,
     skipFolderGrant,
     beginFolderNamesRetry,
     dismissStuck,
     retryStuck,
+    cancelInAppPicker,
+    keepWaitingInAppPicker,
   }
 }

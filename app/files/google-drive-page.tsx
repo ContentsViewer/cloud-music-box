@@ -28,6 +28,7 @@ import DialogTitle from "@mui/material/DialogTitle"
 import {
   ArrowBack,
   MoreVert,
+  CloseRounded,
   CloudDownload,
   CloudOff,
   HomeRounded,
@@ -52,7 +53,9 @@ import DownloadingIndicator from "@/src/components/downloading-indicator"
 import {
   AudioTrackFileItem,
   BaseFileItem,
+  getGooglePickerMode,
   loadPendingFolderNameIds,
+  setGooglePickerMode,
   useGoogleDrivePickFlow,
 } from "@/src/features/files"
 import { AddRounded } from "@mui/icons-material"
@@ -84,17 +87,46 @@ export default function GoogleDrivePage() {
     handoff,
     folderGrantPrompt,
     pendingFolderNameCount,
+    inAppPicker,
     beginFilesPick,
     beginFolderGrant,
     skipFolderGrant,
     beginFolderNamesRetry,
     dismissStuck,
     retryStuck,
+    cancelInAppPicker,
+    keepWaitingInAppPicker,
   } = useGoogleDrivePickFlow({
     getReturnHref: () =>
       folderId ? `/files#${encodeURIComponent(folderId)}` : "/files",
+    getPickerParentId: () =>
+      folderId && folderId !== fileStoreState.rootFolderId
+        ? folderId
+        : undefined,
     onCommitted: () => setLocalRefreshNonce(n => n + 1),
   })
+
+  // Which picker method is active - drives dialog copy only, so a mount-time
+  // read is enough (changing it happens on the settings page or through the
+  // in-page fallback below, which updates this state as well). Kept in state
+  // rather than read during render because the static export renders without
+  // localStorage.
+  const [pickerModeIsInApp, setPickerModeIsInApp] = useState(false)
+  useEffect(() => {
+    setPickerModeIsInApp(getGooglePickerMode() === "in-app")
+  }, [])
+
+  // ESC closes the picker when focus is on our document. (While focus sits
+  // inside Google's cross-origin iframe, key events never reach us - the
+  // clickable escape chip is the reliable exit; this is just a convenience.)
+  useEffect(() => {
+    if (inAppPicker === null) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") cancelInAppPicker()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [inAppPicker, cancelInAppPicker])
 
   const [themeStoreState] = useThemeStore()
 
@@ -215,6 +247,12 @@ export default function GoogleDrivePage() {
   // useGoogleDrivePickFlow; this page renders its dialogs and overlays.
 
   const handleAddFiles = () => {
+    // The intro dialog exists to warn that the redirect method leaves the app;
+    // the in-app picker never leaves, so it opens directly.
+    if (getGooglePickerMode() === "in-app") {
+      beginFilesPick()
+      return
+    }
     // Shown every time, not just once: the pick navigates away from the app, and
     // being thrown out to Google with no warning is disorienting however often
     // it happens. Because it repeats, the dialog has to stay short enough to
@@ -492,7 +530,9 @@ export default function GoogleDrivePage() {
             {`Google grants access one item at a time, so allowing your tracks did not include the ${folderGrantPrompt?.pendingFolderIds.length ?? 0} folder${(folderGrantPrompt?.pendingFolderIds.length ?? 0) > 1 ? "s" : ""} they came from. Without that, they appear under a temporary name.`}
           </Typography>
           <Typography sx={{ mt: 2 }}>
-            This opens Google once more — you can select them all in one go.
+            {pickerModeIsInApp
+              ? "The picker opens once for each folder."
+              : "This opens Google once more — you can select them all in one go."}
           </Typography>
           <Typography sx={{ mt: 2, color: colorOnSurfaceVariant }}>
             Skipping is fine. Your music is already saved, and you can pick the
@@ -518,7 +558,7 @@ export default function GoogleDrivePage() {
           <Button
             autoFocus
             variant="contained"
-            endIcon={<OpenInNewRounded />}
+            endIcon={pickerModeIsInApp ? undefined : <OpenInNewRounded />}
             onClick={() => {
               if (!folderGrantPrompt) return
               beginFolderGrant(folderGrantPrompt)
@@ -547,7 +587,9 @@ export default function GoogleDrivePage() {
         </DialogTitle>
         <DialogContent sx={{ paddingBottom: "24px" }}>
           <Typography>
-            {`This opens Google so you can allow the ${retryPromptIds?.length ?? 0} folder${(retryPromptIds?.length ?? 0) > 1 ? "s" : ""}. You come back here automatically.`}
+            {pickerModeIsInApp
+              ? `The picker opens once for each of the ${retryPromptIds?.length ?? 0} folder${(retryPromptIds?.length ?? 0) > 1 ? "s" : ""}.`
+              : `This opens Google so you can allow the ${retryPromptIds?.length ?? 0} folder${(retryPromptIds?.length ?? 0) > 1 ? "s" : ""}. You come back here automatically.`}
           </Typography>
         </DialogContent>
         <DialogActions
@@ -562,7 +604,7 @@ export default function GoogleDrivePage() {
           <Button
             autoFocus
             variant="contained"
-            endIcon={<OpenInNewRounded />}
+            endIcon={pickerModeIsInApp ? undefined : <OpenInNewRounded />}
             onClick={confirmRetryFolderNames}
           >
             Continue
@@ -613,6 +655,93 @@ export default function GoogleDrivePage() {
             onClick={retryStuck}
           >
             Try again
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Escape hatch above the in-app picker: whatever state Google's iframe
+          is in (including the iOS cookie dead-end), this stays reachable. */}
+      {inAppPicker !== null &&
+        createPortal(
+          <Box
+            component="div"
+            sx={{
+              position: "fixed",
+              top: `calc(env(safe-area-inset-top, 0px) + 8px)`,
+              right: `calc(env(safe-area-inset-right, 0px) + 8px)`,
+              zIndex: 100000,
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              px: 1.5,
+              py: 0.5,
+              borderRadius: "999px",
+              backgroundColor: "rgba(0, 0, 0, 0.65)",
+              color: "#fff",
+            }}
+          >
+            <Typography variant="body2">{inAppPicker.label}</Typography>
+            <IconButton
+              size="small"
+              aria-label="Close the picker"
+              onClick={cancelInAppPicker}
+              sx={{ color: "#fff" }}
+            >
+              <CloseRounded fontSize="small" />
+            </IconButton>
+          </Box>,
+          document.body
+        )}
+
+      {/* The in-app picker never reported LOADED - almost always the iOS
+          cookie wall. Offer the way out instead of a dead end. */}
+      <Dialog
+        open={inAppPicker?.loadWarning === true}
+        onClose={keepWaitingInAppPicker}
+        sx={{ zIndex: 100001, "& .MuiDialog-paper": { borderRadius: "28px" } }}
+      >
+        <DialogTitle
+          sx={{
+            paddingTop: "24px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
+            paddingBottom: "16px",
+          }}
+        >
+          The picker didn&apos;t load
+        </DialogTitle>
+        <DialogContent sx={{ paddingBottom: "24px" }}>
+          <Typography>
+            Google&apos;s picker has not appeared. In the installed app on iOS
+            this usually cannot be fixed — the picker needs cookies that the
+            system blocks there.
+          </Typography>
+          <Typography sx={{ mt: 2, color: colorOnSurfaceVariant }}>
+            The Google-page method works instead: it opens Google in this tab
+            and brings you back.
+          </Typography>
+        </DialogContent>
+        <DialogActions
+          sx={{
+            paddingTop: "0px",
+            paddingBottom: "24px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
+          }}
+        >
+          <Button onClick={keepWaitingInAppPicker}>Keep waiting</Button>
+          <Button onClick={cancelInAppPicker}>Close</Button>
+          <Button
+            variant="contained"
+            endIcon={<OpenInNewRounded />}
+            onClick={() => {
+              cancelInAppPicker()
+              setGooglePickerMode("redirect")
+              setPickerModeIsInApp(false)
+              setIntroOpen(true)
+            }}
+          >
+            Use Google page
           </Button>
         </DialogActions>
       </Dialog>

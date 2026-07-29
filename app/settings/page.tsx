@@ -7,7 +7,13 @@ import {
   useAudioDynamicsSettingsStore,
   VisualizerType,
 } from "@/src/stores/audio-dynamics-settings"
-import { useFileStore } from "@/src/features/files"
+import {
+  getDriveConfig,
+  getGooglePickerMode,
+  GooglePickerMode,
+  setGooglePickerMode,
+  useFileStore,
+} from "@/src/features/files"
 import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
@@ -359,6 +365,76 @@ function VisualizerSettingsArea() {
   )
 }
 
+function GoogleDriveSettingsArea() {
+  const [themeStoreState] = useThemeStore()
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+  // The static export renders without localStorage, so both the visibility
+  // (drive type) and the current value are read after mount (same hydration
+  // guard as the visualizer Select above).
+  const [visible, setVisible] = useState(false)
+  const [mode, setMode] = useState<GooglePickerMode>("redirect")
+  useEffect(() => {
+    setVisible(getDriveConfig()?.type === "google-drive")
+    setMode(getGooglePickerMode())
+  }, [])
+
+  if (!visible) return null
+
+  return (
+    <div
+      css={css({
+        display: "flex",
+        flexDirection: "column",
+        marginTop: "16px",
+      })}
+    >
+      <Typography variant="h6">Google Drive</Typography>
+      <List>
+        <ListItem>
+          <ListItemText
+            primary="Add music using"
+            secondary={
+              mode === "in-app"
+                ? "Stays inside the app; Google asks for consent only once. On phones you can pick only one file at a time, and it may not load in the installed app on iOS."
+                : "Opens Google in this tab and comes back. Multi-select works everywhere; Google asks for consent each time."
+            }
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
+          />
+          <Select
+            size="small"
+            value={mode}
+            onChange={event => {
+              const next = event.target.value as GooglePickerMode
+              setMode(next)
+              setGooglePickerMode(next)
+            }}
+            sx={{
+              minWidth: 160,
+              // MD3 outlined text field: extra-small (4px) corner
+              borderRadius: "4px",
+            }}
+            MenuProps={{
+              PaperProps: {
+                elevation: 2,
+                sx: { borderRadius: "4px" },
+              },
+            }}
+          >
+            <MenuItem value="redirect">Google page</MenuItem>
+            <MenuItem value="in-app">In-app picker</MenuItem>
+          </Select>
+        </ListItem>
+      </List>
+    </div>
+  )
+}
+
 function ResetSettingsArea() {
   const [resetAppDialogOpen, setResetAppDialogOpen] = useState(false)
   const [backdropOpen, setBackdropOpen] = useState(false)
@@ -560,6 +636,7 @@ export default function Page() {
           <StorageSettingsArea />
           <ScreenSettingsArea />
           <VisualizerSettingsArea />
+          <GoogleDriveSettingsArea />
           <ResetSettingsArea />
           <Typography variant="h6" sx={{ mt: 2 }}>
             About
