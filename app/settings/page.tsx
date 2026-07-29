@@ -19,7 +19,7 @@ import {
   MaterialDynamicColors,
   hexFromArgb,
 } from "@material/material-color-utilities"
-import { ArrowBackRounded, SettingsRounded } from "@mui/icons-material"
+import { ArrowBackRounded, Cloud, SettingsRounded } from "@mui/icons-material"
 import {
   Box,
   IconButton,
@@ -32,6 +32,7 @@ import {
   Theme,
   List,
   ListItem,
+  ListItemIcon,
   ListItemText,
   ListItemButton,
   Button,
@@ -40,8 +41,9 @@ import {
   Backdrop,
   CircularProgress,
   Switch,
-  Select,
-  MenuItem,
+  FormControlLabel,
+  Radio,
+  RadioGroup,
 } from "@mui/material"
 import Dialog from "@mui/material/Dialog"
 import DialogTitle from "@mui/material/DialogTitle"
@@ -310,9 +312,14 @@ function VisualizerSettingsArea() {
   // The settings store reads localStorage in its initializer, so the client's
   // first render can differ from the statically exported HTML (default
   // "lissajous"); showing the SSR default until mounted avoids the hydration
-  // text mismatch in the Select
+  // text mismatch
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
+  const [dialogOpen, setDialogOpen] = useState(false)
+
+  const visualizerType = mounted
+    ? audioDynamicsSettings.visualizerType
+    : "lissajous"
 
   return (
     <div
@@ -324,63 +331,160 @@ function VisualizerSettingsArea() {
     >
       <Typography variant="h6">Visualizer</Typography>
       <List>
-        <ListItem>
+        <ListItemButton onClick={() => setDialogOpen(true)}>
           <ListItemText
             primary="Type"
-            secondary="Select the background visualizer."
+            secondary={
+              visualizerType === "sparse-cortex" ? "Sparse Cortex" : "Lissajous"
+            }
             secondaryTypographyProps={{
               sx: {
                 color: colorOnSurfaceVariant,
               },
             }}
           />
-          <Select
-            size="small"
-            value={mounted ? audioDynamicsSettings.visualizerType : "lissajous"}
-            onChange={event => {
-              audioDynamicsSettingsActions.setVisualizerType(
-                event.target.value as VisualizerType
-              )
-            }}
-            sx={{
-              minWidth: 160,
-              // MD3 outlined text field: extra-small (4px) corner
-              borderRadius: "4px",
-            }}
-            MenuProps={{
-              // MD3 menu container: extra-small corner, elevation level 2
-              // (paper color is already MD3 surface-container via the theme)
-              PaperProps: {
-                elevation: 2,
-                sx: { borderRadius: "4px" },
-              },
-            }}
-          >
-            <MenuItem value="lissajous">Lissajous</MenuItem>
-            <MenuItem value="sparse-cortex">Sparse Cortex</MenuItem>
-          </Select>
-        </ListItem>
+        </ListItemButton>
       </List>
+      <SettingsRadioDialog
+        open={dialogOpen}
+        title="Visualizer"
+        value={visualizerType}
+        options={[
+          {
+            value: "lissajous",
+            label: "Lissajous",
+            description:
+              "A stream of nonlinear particles from the raw signal, driven by the dynamics and colored by the melody.",
+          },
+          {
+            value: "sparse-cortex",
+            label: "Sparse Cortex",
+            description:
+              "A learning particle field that organizes itself around the music.",
+          },
+        ]}
+        onClose={() => setDialogOpen(false)}
+        onSelect={next => {
+          audioDynamicsSettingsActions.setVisualizerType(next as VisualizerType)
+          setDialogOpen(false)
+        }}
+      />
     </div>
   )
 }
 
-function GoogleDriveSettingsArea() {
+interface SettingsRadioOption<T extends string> {
+  value: T
+  label: string
+  description: string
+}
+
+// The Android ListPreference pattern (per MD3 / Android settings guidance):
+// the list row shows only the current value; this dialog shows every option
+// with its description so the trade-offs can be compared before choosing.
+// Tapping a radio applies immediately and closes - there is no staged choice,
+// so the only button is Cancel (the explicit close affordance on touch,
+// where ESC does not exist and the back gesture is history navigation).
+function SettingsRadioDialog<T extends string>({
+  open,
+  title,
+  value,
+  options,
+  onClose,
+  onSelect,
+}: {
+  open: boolean
+  title: string
+  value: T
+  options: SettingsRadioOption<T>[]
+  onClose: () => void
+  onSelect: (value: T) => void
+}) {
   const [themeStoreState] = useThemeStore()
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
-  // The static export renders without localStorage, so both the visibility
-  // (drive type) and the current value are read after mount (same hydration
-  // guard as the visualizer Select above).
-  const [visible, setVisible] = useState(false)
-  const [mode, setMode] = useState<GooglePickerMode>("redirect")
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
+    >
+      <DialogTitle
+        sx={{
+          paddingTop: "24px",
+          paddingLeft: "24px",
+          paddingRight: "24px",
+          paddingBottom: "16px",
+        }}
+      >
+        {title}
+      </DialogTitle>
+      <DialogContent sx={{ paddingBottom: "8px" }}>
+        <RadioGroup
+          value={value}
+          onChange={event => onSelect(event.target.value as T)}
+        >
+          {options.map(option => (
+            <FormControlLabel
+              key={option.value}
+              value={option.value}
+              control={<Radio />}
+              sx={{ alignItems: "flex-start", marginBottom: "12px", marginRight: 0 }}
+              label={
+                <Box component="div" sx={{ paddingTop: "9px" }}>
+                  <Typography>{option.label}</Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ color: colorOnSurfaceVariant }}
+                  >
+                    {option.description}
+                  </Typography>
+                </Box>
+              }
+            />
+          ))}
+        </RadioGroup>
+      </DialogContent>
+      <DialogActions
+        sx={{
+          paddingTop: "0px",
+          paddingBottom: "24px",
+          paddingLeft: "24px",
+          paddingRight: "24px",
+        }}
+      >
+        <Button onClick={onClose}>Cancel</Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
+function AccountSettingsArea() {
+  const [themeStoreState] = useThemeStore()
+  const [fileStoreState] = useFileStore()
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+  // The static export renders without localStorage, so the provider and the
+  // current picker mode are read after mount (same hydration guard as the
+  // other settings areas).
+  const [providerType, setProviderType] = useState<
+    "google-drive" | "onedrive" | undefined
+  >(undefined)
+  const [pickerMode, setPickerMode] = useState<GooglePickerMode>("redirect")
+  const [pickerDialogOpen, setPickerDialogOpen] = useState(false)
   useEffect(() => {
-    setVisible(getDriveConfig()?.type === "google-drive")
-    setMode(getGooglePickerMode())
+    setProviderType(getDriveConfig()?.type)
+    setPickerMode(getGooglePickerMode())
   }, [])
 
-  if (!visible) return null
+  if (!providerType) return null
+
+  const signedIn =
+    fileStoreState.driveStatus === "online" ||
+    fileStoreState.driveStatus === "offline"
 
   return (
     <div
@@ -390,47 +494,61 @@ function GoogleDriveSettingsArea() {
         marginTop: "16px",
       })}
     >
-      <Typography variant="h6">Google Drive</Typography>
+      <Typography variant="h6">Account</Typography>
       <List>
         <ListItem>
+          <ListItemIcon sx={{ color: "inherit" }}>
+            <Cloud />
+          </ListItemIcon>
           <ListItemText
-            primary="Add music using"
-            secondary={
-              mode === "in-app"
-                ? "Stays inside the app; Google asks for consent only once. On phones you can pick only one file at a time, and it may not load in the installed app on iOS."
-                : "Opens Google in this tab and comes back. Multi-select works everywhere; Google asks for consent each time."
-            }
+            primary={providerType === "google-drive" ? "Google Drive" : "OneDrive"}
+            secondary={signedIn ? "Signed in" : "Not signed in"}
             secondaryTypographyProps={{
               sx: {
                 color: colorOnSurfaceVariant,
               },
             }}
           />
-          <Select
-            size="small"
-            value={mode}
-            onChange={event => {
-              const next = event.target.value as GooglePickerMode
-              setMode(next)
-              setGooglePickerMode(next)
-            }}
-            sx={{
-              minWidth: 160,
-              // MD3 outlined text field: extra-small (4px) corner
-              borderRadius: "4px",
-            }}
-            MenuProps={{
-              PaperProps: {
-                elevation: 2,
-                sx: { borderRadius: "4px" },
-              },
-            }}
-          >
-            <MenuItem value="redirect">Google page</MenuItem>
-            <MenuItem value="in-app">In-app picker</MenuItem>
-          </Select>
         </ListItem>
+        {providerType === "google-drive" ? (
+          <ListItemButton onClick={() => setPickerDialogOpen(true)}>
+            <ListItemText
+              primary="Add music using"
+              secondary={pickerMode === "in-app" ? "In-app picker" : "Google page"}
+              secondaryTypographyProps={{
+                sx: {
+                  color: colorOnSurfaceVariant,
+                },
+              }}
+            />
+          </ListItemButton>
+        ) : null}
       </List>
+      <SettingsRadioDialog
+        open={pickerDialogOpen}
+        title="Add music using"
+        value={pickerMode}
+        options={[
+          {
+            value: "redirect",
+            label: "Google page",
+            description:
+              "Opens Google in this tab and comes back. Multi-select works everywhere; Google asks for consent each time.",
+          },
+          {
+            value: "in-app",
+            label: "In-app picker",
+            description:
+              "Stays inside the app; consent only once. On phones you pick one file at a time, and it may not load in the installed app on iOS.",
+          },
+        ]}
+        onClose={() => setPickerDialogOpen(false)}
+        onSelect={next => {
+          setPickerMode(next)
+          setGooglePickerMode(next)
+          setPickerDialogOpen(false)
+        }}
+      />
     </div>
   )
 }
@@ -633,10 +751,10 @@ export default function Page() {
             width: "100%",
           }}
         >
+          <AccountSettingsArea />
           <StorageSettingsArea />
           <ScreenSettingsArea />
           <VisualizerSettingsArea />
-          <GoogleDriveSettingsArea />
           <ResetSettingsArea />
           <Typography variant="h6" sx={{ mt: 2 }}>
             About
