@@ -50,6 +50,7 @@ import {
 import { setDriveConfig } from "@/src/features/files"
 import { createGoogleDriveClient } from "@/src/features/files"
 import { pendingPickWorkHref } from "@/src/features/files"
+import { InstallPromoCard } from "@/src/components/install-promo"
 
 const LoginPage = () => {
   const [loading, setLoading] = useState(false)
@@ -82,17 +83,42 @@ const LoginPage = () => {
     <div
       css={css({
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
-        marginTop: 64,
       })}
     >
+      {/* Install first is the loss-free order on iOS (a home-screen app's
+          storage is separate from this tab), so the promotion banner sits
+          above the sign-in card. The old 64px top margin doubles as its
+          reserved slot: with no banner the sign-in card sits exactly where it
+          always did, and a banner arriving later (Chromium fires
+          beforeinstallprompt seconds in) barely moves it. */}
+      <div
+        css={css({
+          minHeight: 64,
+          alignSelf: "stretch",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+        })}
+      >
+        {/* Width formula identical to the sign-in card below - one column,
+            pixel-aligned at every viewport. 8px up to the app bar, 16px down
+            to the sign-in card (standard surface separation). */}
+        <InstallPromoCard
+          signedIn={false}
+          css={css({
+            width: "80%",
+            maxWidth: 400,
+            margin: "8px auto 16px",
+          })}
+        />
+      </div>
       <Paper
         sx={{
           maxWidth: 400,
           width: "80%",
           padding: 2,
-          margin: "auto",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -281,6 +307,16 @@ export default function Page() {
               px: 2,
             }}
           >
+            {/* Banner spans the same 1040px content column as the grid, so
+                its edges line up with the tiles. */}
+            <InstallPromoCard
+              signedIn
+              css={css({
+                width: "100%",
+                maxWidth: "1040px",
+                margin: "0 auto 16px",
+              })}
+            />
             <Box
               component="div"
               sx={{

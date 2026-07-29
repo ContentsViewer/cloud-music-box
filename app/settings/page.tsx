@@ -46,6 +46,8 @@ import Dialog from "@mui/material/Dialog"
 import DialogTitle from "@mui/material/DialogTitle"
 import { enqueueSnackbar } from "notistack"
 import { css } from "@emotion/react"
+import { useInstallPrompt } from "@/src/hooks/use-install-prompt"
+import { HowToInstallDialog } from "@/src/components/install-promo"
 
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
@@ -672,6 +674,65 @@ function ResetSettingsArea() {
   )
 }
 
+// Re-entry point for installing after the home-page card was dismissed, so
+// this deliberately ignores the dismiss flag. Hidden entirely when no install
+// path exists here: already installed / running standalone / no prompt event
+// and no manual path (e.g. desktop Firefox).
+function AppSettingsArea() {
+  const [themeStoreState] = useThemeStore()
+  const [fileStoreState] = useFileStore()
+  const { canPrompt, canManualInstall, inBrowserTab, promptInstall } =
+    useInstallPrompt()
+  const [howToOpen, setHowToOpen] = useState(false)
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
+  if (!inBrowserTab || (!canPrompt && !canManualInstall)) return null
+
+  const signedIn =
+    fileStoreState.driveStatus === "online" ||
+    fileStoreState.driveStatus === "offline"
+
+  return (
+    <div
+      css={css({
+        display: "flex",
+        flexDirection: "column",
+        marginTop: "16px",
+      })}
+    >
+      <Typography variant="h6">App</Typography>
+      <List>
+        <ListItemButton
+          onClick={() => {
+            if (canPrompt) {
+              promptInstall()
+            } else {
+              setHowToOpen(true)
+            }
+          }}
+        >
+          <ListItemText
+            primary="Install app"
+            secondary="Works offline and keeps playing in the background."
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
+          />
+        </ListItemButton>
+      </List>
+      <HowToInstallDialog
+        open={howToOpen}
+        signedIn={signedIn}
+        onClose={() => setHowToOpen(false)}
+      />
+    </div>
+  )
+}
+
 export default function Page() {
   const [routerState, routerActions] = useRouter()
   const [themeStoreState] = useThemeStore()
@@ -745,6 +806,7 @@ export default function Page() {
           <ScreenSettingsArea />
           <VisualizerSettingsArea />
           <ResetSettingsArea />
+          <AppSettingsArea />
           <Typography variant="h6" sx={{ mt: 2 }}>
             About
           </Typography>
