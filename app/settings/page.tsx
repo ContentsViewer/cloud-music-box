@@ -21,15 +21,12 @@ import {
 } from "@material/material-color-utilities"
 import { ArrowBackRounded, Cloud, SettingsRounded } from "@mui/icons-material"
 import {
-  Box,
   IconButton,
   Paper,
   Toolbar,
   Typography,
   alpha,
   Link,
-  SxProps,
-  Theme,
   List,
   ListItem,
   ListItemIcon,
@@ -65,11 +62,7 @@ function formatBytes(bytes: number, decimals = 2) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i]
 }
 
-interface StorageSettingsAreaProps {
-  sx?: SxProps<Theme>
-}
-
-function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
+function StorageSettingsArea() {
   const [quota, setQuota] = useState<number | undefined>(undefined)
   const [usage, setUsage] = useState<number | undefined>(undefined)
   const [themeStoreState] = useThemeStore()
@@ -101,13 +94,11 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
   )
 
   return (
-    <Box
-      component="div"
-      sx={{
-        ...sx,
+    <div
+      css={css({
         display: "flex",
         flexDirection: "column",
-      }}
+      })}
     >
       <Typography variant="h6">Storage</Typography>
       <List>
@@ -222,7 +213,7 @@ function StorageSettingsArea({ sx }: StorageSettingsAreaProps) {
           </Backdrop>,
           document.body
         )}
-    </Box>
+    </div>
   )
 }
 
@@ -433,7 +424,7 @@ function SettingsRadioDialog<T extends string>({
               control={<Radio />}
               sx={{ alignItems: "flex-start", marginBottom: "12px", marginRight: 0 }}
               label={
-                <Box component="div" sx={{ paddingTop: "9px" }}>
+                <div css={css({ paddingTop: "9px" })}>
                   <Typography>{option.label}</Typography>
                   <Typography
                     variant="body2"
@@ -441,7 +432,7 @@ function SettingsRadioDialog<T extends string>({
                   >
                     {option.description}
                   </Typography>
-                </Box>
+                </div>
               }
             />
           ))}
@@ -701,12 +692,11 @@ export default function Page() {
   )
 
   return (
-    <Box
-      component="div"
-      sx={{
+    <div
+      css={css({
         height: "100%",
         overflow: "hidden",
-      }}
+      })}
     >
       <AppTopBar scrollTarget={scrollTargetRef.current}>
         <Toolbar>
@@ -726,30 +716,29 @@ export default function Page() {
           </Typography>
         </Toolbar>
       </AppTopBar>
-      <Box
-        component="div"
-        ref={scrollTargetRef}
-        sx={{
-          ml: `env(safe-area-inset-left, 0)`,
-          mr: `env(safe-area-inset-right, 0)`,
-          px: 2,
-          pt: 8,
+      <div
+        ref={scrollTargetRef as unknown as React.Ref<HTMLDivElement>}
+        css={css({
+          marginLeft: `env(safe-area-inset-left, 0)`,
+          marginRight: `env(safe-area-inset-right, 0)`,
+          paddingLeft: "16px",
+          paddingRight: "16px",
+          paddingTop: "64px",
           overflow: "auto",
           height: "100%",
           scrollbarColor: `${colorOnSurfaceVariant} transparent`,
           scrollbarWidth: "thin",
-          pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
-        }}
+          paddingBottom: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+        })}
       >
-        <Box
-          component="div"
-          sx={{
+        <div
+          css={css({
             display: "flex",
             flexDirection: "column",
             maxWidth: "1040px",
             margin: "0 auto",
             width: "100%",
-          }}
+          })}
         >
           <AccountSettingsArea />
           <StorageSettingsArea />
@@ -802,15 +791,14 @@ export default function Page() {
             >
               © 2024- Cloud Music Box
             </Typography>
-            <Box
-              component="div"
-              sx={{
+            <div
+              css={css({
                 display: "flex",
                 flexDirection: "row",
-                gap: 1,
+                gap: "8px",
                 width: "100%",
                 justifyContent: "flex-end",
-              }}
+              })}
             >
               <Link
                 variant="body2"
@@ -828,7 +816,7 @@ export default function Page() {
               >
                 GitHub
               </Link>
-            </Box>
+            </div>
           </Paper>
           <div
             css={css({
@@ -867,8 +855,8 @@ export default function Page() {
               </a>
             </div>
           </div>
-        </Box>
-      </Box>
-    </Box>
+        </div>
+      </div>
+    </div>
   )
 }
