@@ -21,6 +21,10 @@ import * as mm from "music-metadata-browser"
 import { AudioBusProvider } from "@/src/stores/audio-bus-provider"
 import { css } from "@emotion/css"
 import { registerServiceWorker } from "./register-sw"
+// Side-effect import: beforeinstallprompt fires once per page load on
+// whatever route the user landed on; the module-scope listener must be
+// registered app-wide or the event is lost until the next full reload.
+import "@/src/hooks/use-install-prompt"
 import {
   AudioDynamicsSettingsProvider,
   useAudioDynamicsSettingsStore,

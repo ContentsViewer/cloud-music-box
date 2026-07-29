@@ -28,6 +28,13 @@ export interface GooglePickerResult {
   parentId?: string
 }
 
+export interface InAppPickerOptions {
+  /** Abort to dispose the picker and settle immediately with an empty result. */
+  signal?: AbortSignal
+  /** Fired when the picker iframe reports Action.LOADED (load watchdogs hook here). */
+  onLoaded?: () => void
+}
+
 export interface GoogleDriveClient extends BaseDriveClient {
   loginRedirect(): Promise<void>
   saveAccessToken(token: string): void
@@ -37,7 +44,17 @@ export interface GoogleDriveClient extends BaseDriveClient {
   startFilesPick(): void
   /** Leaves the app for a picker limited to `folderIds`, to grant access to them. */
   startFolderGrant(folderIds: string[]): void
-  /** The picker only hands back ids, so names/types have to be fetched separately. */
+  /** In-app (iframe) picker: choose tracks without leaving the document. */
+  openFilesPicker(
+    parentId?: string,
+    opts?: InAppPickerOptions
+  ): Promise<GooglePickerResult[]>
+  /** In-app (iframe) picker: grant access to one folder (shown alone via file ids). */
+  openFolderPicker(
+    folderId: string,
+    opts?: InAppPickerOptions
+  ): Promise<GooglePickerResult | null>
+  /** The redirect picker only hands back ids, so names/types have to be fetched separately. */
   getFilesMetadata(fileIds: string[]): Promise<GooglePickerResult[]>
   checkFolderAccess(folderId: string): Promise<{ hasAccess: boolean; folderName?: string }>
 }
@@ -52,6 +69,13 @@ const DB_KEY_TOKEN_EXPIRES = "googleDrive.tokenExpires"
 // the user has already picked.
 const GOOGLE_CLIENT_ID =
   "636784171461-qe09gc3cupq8iagds8hk16cb6k6cvle4.apps.googleusercontent.com"
+
+// In-app (iframe) picker credentials. The developer key only unlocks publicly
+// shared data; private files still go through the OAuth token. The app id is
+// the Cloud project number - required with drive.file so picker grants attach
+// to this app.
+const GOOGLE_DEVELOPER_KEY = "AIzaSyDnV3ERZBz85HEqzGKXWIoNw79YEC8MsYQ"
+const GOOGLE_APP_ID = "636784171461"
 
 export function saveAccessToken(token: string) {
   localStorage.setItem(DB_KEY_ACCESS_TOKEN, token)
@@ -95,6 +119,17 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
         })
       }
       document.head.appendChild(script)
+    })
+  }
+
+  // Load the Google Picker module (needs gapi from loadGoogleAPI first)
+  const loadGooglePicker = () => {
+    return new Promise<void>(resolve => {
+      if (window.google?.picker) {
+        resolve()
+        return
+      }
+      window.gapi.load("picker", () => resolve())
     })
   }
 
@@ -300,6 +335,50 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
     return Date.now() < parseInt(expiresAt) - marginMs
   }
 
+  // Shared runner for the in-app (iframe) pickers. The old implementation
+  // could leave its promise unsettled forever when Google's callback never
+  // fired (the iOS cookie wall); the abort signal and the single settle path
+  // make that impossible now.
+  const runInAppPicker = <T,>(
+    opts: InAppPickerOptions | undefined,
+    emptyResult: T,
+    build: (onAction: (data: any) => void) => any,
+    onPicked: (docs: any[]) => T
+  ) =>
+    new Promise<T>((resolve, reject) => {
+      let settled = false
+      let picker: any
+      const onAbort = () => settle(() => resolve(emptyResult))
+      const settle = (fn: () => void) => {
+        if (settled) return
+        settled = true
+        opts?.signal?.removeEventListener("abort", onAbort)
+        try {
+          picker?.dispose()
+        } catch {}
+        fn()
+      }
+      if (opts?.signal?.aborted) {
+        resolve(emptyResult)
+        return
+      }
+      opts?.signal?.addEventListener("abort", onAbort)
+      try {
+        picker = build((data: any) => {
+          if (data.action === window.google.picker.Action.LOADED) {
+            opts?.onLoaded?.()
+          } else if (data.action === window.google.picker.Action.PICKED) {
+            settle(() => resolve(onPicked(data.docs)))
+          } else if (data.action === window.google.picker.Action.CANCEL) {
+            settle(() => resolve(emptyResult))
+          }
+        })
+        picker.setVisible(true)
+      } catch (error) {
+        settle(() => reject(error))
+      }
+    })
+
   const init = async () => {
     userInfo = localStorage.getItem(DB_KEY_USER_INFO) || undefined
     accessToken = localStorage.getItem(DB_KEY_ACCESS_TOKEN) || undefined
@@ -363,6 +442,83 @@ export async function createGoogleDriveClient(): Promise<GoogleDriveClient> {
         allow_folder_selection: "true",
         file_ids: folderIds.join(","),
       })
+    },
+    async openFilesPicker(parentId?: string, opts?: InAppPickerOptions) {
+      await loadGoogleAPI()
+      await loadGooglePicker()
+      if (!accessToken || !isTokenValid()) {
+        enqueueSnackbarWithAction()
+        throw new Error("Access token expired, reauthorization required")
+      }
+      const token = accessToken
+      return runInAppPicker<GooglePickerResult[]>(
+        opts,
+        [],
+        onAction => {
+          // Folders are shown so the user can navigate into them.
+          const docsView = new window.google.picker.DocsView()
+            .setIncludeFolders(true)
+            .setParent(parentId || "root")
+          return new window.google.picker.PickerBuilder()
+            .addView(docsView)
+            .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)
+            .setOAuthToken(token)
+            .setDeveloperKey(GOOGLE_DEVELOPER_KEY)
+            .setAppId(GOOGLE_APP_ID)
+            .setOrigin(window.location.origin)
+            .setCallback(onAction)
+            .build()
+        },
+        docs =>
+          docs.map((doc: any) => ({
+            id: doc.id,
+            name: doc.name,
+            mimeType: doc.mimeType,
+            parentId: doc.parentId || doc.parents?.[0] || undefined,
+          }))
+      )
+    },
+    async openFolderPicker(folderId: string, opts?: InAppPickerOptions) {
+      await loadGoogleAPI()
+      await loadGooglePicker()
+      if (!accessToken || !isTokenValid()) {
+        enqueueSnackbarWithAction()
+        throw new Error("Access token expired, reauthorization required")
+      }
+      const token = accessToken
+      return runInAppPicker<GooglePickerResult | null>(
+        opts,
+        null,
+        onAction => {
+          // Folders only; setFileIds pins the view to exactly this folder so
+          // there is nothing to hunt for. (Undocumented but long-working - the
+          // redirect flow's file_ids parameter is the same mechanism.)
+          const docsView = new window.google.picker.DocsView()
+            .setIncludeFolders(true)
+            .setMimeTypes("application/vnd.google-apps.folder")
+            .setSelectFolderEnabled(true)
+          docsView.setFileIds(folderId)
+          return new window.google.picker.PickerBuilder()
+            .addView(docsView)
+            .setOAuthToken(token)
+            .setDeveloperKey(GOOGLE_DEVELOPER_KEY)
+            .setAppId(GOOGLE_APP_ID)
+            .setOrigin(window.location.origin)
+            .setTitle("Select the folder to grant access")
+            .setCallback(onAction)
+            .build()
+        },
+        docs => {
+          const folder = docs[0]
+          if (!folder) return null
+          return {
+            id: folder.id,
+            name: folder.name,
+            mimeType: folder.mimeType,
+            parentId: folder.parentId || folder.parents?.[0] || undefined,
+          }
+        }
+      )
     },
     async getFilesMetadata(fileIds: string[]): Promise<GooglePickerResult[]> {
       const results = await Promise.all(
