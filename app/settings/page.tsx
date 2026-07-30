@@ -34,6 +34,7 @@ import {
   ListItemButton,
   Button,
   DialogContent,
+  DialogContentText,
   DialogActions,
   Backdrop,
   CircularProgress,
@@ -154,35 +155,14 @@ function StorageSettingsArea() {
       <Dialog
         open={clearLocalDataDialogOpen}
         onClose={handleCloseClearLocalDataDialog}
-        sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
       >
-        <DialogTitle
-          sx={{
-            paddingTop: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-            paddingBottom: "16px",
-          }}
-        >
-          Clear Local Data
-        </DialogTitle>
-        <DialogContent
-          sx={{
-            paddingBottom: "24px",
-          }}
-        >
-          <Typography>
+        <DialogTitle>Clear Local Data</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
             Clear the downloaded audio files. This action cannot be undone.
-          </Typography>
+          </DialogContentText>
         </DialogContent>
-        <DialogActions
-          sx={{
-            paddingTop: "0px",
-            paddingBottom: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-          }}
-        >
+        <DialogActions>
           <Button autoFocus onClick={handleCloseClearLocalDataDialog}>
             Cancel
           </Button>
@@ -399,21 +379,10 @@ function SettingsRadioDialog<T extends string>({
   )
 
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
-    >
-      <DialogTitle
-        sx={{
-          paddingTop: "24px",
-          paddingLeft: "24px",
-          paddingRight: "24px",
-          paddingBottom: "16px",
-        }}
-      >
-        {title}
-      </DialogTitle>
+    <Dialog open={open} onClose={onClose}>
+      <DialogTitle>{title}</DialogTitle>
+      {/* Radio rows carry their own bottom margin, so the content pane
+          deliberately keeps less bottom padding than the MD3 default. */}
       <DialogContent sx={{ paddingBottom: "8px" }}>
         <RadioGroup
           value={value}
@@ -440,14 +409,7 @@ function SettingsRadioDialog<T extends string>({
           ))}
         </RadioGroup>
       </DialogContent>
-      <DialogActions
-        sx={{
-          paddingTop: "0px",
-          paddingBottom: "24px",
-          paddingLeft: "24px",
-          paddingRight: "24px",
-        }}
-      >
+      <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
       </DialogActions>
     </Dialog>
@@ -580,40 +542,19 @@ function ResetSettingsArea() {
         onClose={() => {
           setResetAppDialogOpen(false)
         }}
-        sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
       >
-        <DialogTitle
-          sx={{
-            paddingTop: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-            paddingBottom: "16px",
-          }}
-        >
-          Reset App
-        </DialogTitle>
-        <DialogContent
-          sx={{
-            paddingBottom: "24px",
-          }}
-        >
-          <Typography>
+        <DialogTitle>Reset App</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
             This will reset all settings and reload the app, including:
-          </Typography>
-          <ul>
+          </DialogContentText>
+          <DialogContentText component="ul">
             <li>Clear cached local music data</li>
             <li>Sign out from connected cloud storage</li>
-          </ul>
-          <Typography>This action cannot be undone.</Typography>
+          </DialogContentText>
+          <DialogContentText>This action cannot be undone.</DialogContentText>
         </DialogContent>
-        <DialogActions
-          sx={{
-            paddingTop: "0px",
-            paddingBottom: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-          }}
-        >
+        <DialogActions>
           <Button
             autoFocus
             onClick={() => {

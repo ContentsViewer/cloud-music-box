@@ -213,6 +213,70 @@ export const ThemeStoreProvider = ({
       typography: {
         fontFamily: notoSans.style.fontFamily,
       },
+      components: {
+        // The MD3 dialog spec (m3.material.io/components/dialogs/specs) is
+        // defined once here instead of being repeated per dialog: 28dp
+        // corners, max 560dp width, surface-container-high container,
+        // 24dp paddings (title-to-body 16dp comes from the title's bottom
+        // padding plus MUI's built-in title+content adjacency rule),
+        // headline-small title, on-surface-variant supporting text.
+        MuiDialog: {
+          styleOverrides: {
+            paper: {
+              borderRadius: 28,
+              maxWidth: 560,
+              backgroundColor: hexFromArgb(
+                MaterialDynamicColors.surfaceContainerHigh.getArgb(
+                  state.scheme
+                )
+              ),
+              // MUI dark mode paints elevation as a translucent white
+              // gradient on top of the background color, which would shift
+              // the container off its token.
+              backgroundImage: "none",
+            },
+          },
+        },
+        MuiDialogTitle: {
+          styleOverrides: {
+            root: {
+              padding: "24px 24px 16px",
+              // headline-small. responsiveFontSizes injects h6 sizes under
+              // these exact media keys, so they must be overridden per key or
+              // the media rules win over a plain fontSize.
+              fontSize: "1.5rem",
+              "@media (min-width:600px)": { fontSize: "1.5rem" },
+              "@media (min-width:900px)": { fontSize: "1.5rem" },
+              "@media (min-width:1200px)": { fontSize: "1.5rem" },
+              fontWeight: 400,
+              lineHeight: 1.334,
+            },
+          },
+        },
+        MuiDialogContent: {
+          styleOverrides: {
+            root: {
+              padding: "24px",
+            },
+          },
+        },
+        MuiDialogActions: {
+          styleOverrides: {
+            root: {
+              padding: "0 24px 24px",
+            },
+          },
+        },
+        MuiDialogContentText: {
+          styleOverrides: {
+            root: {
+              color: hexFromArgb(
+                MaterialDynamicColors.onSurfaceVariant.getArgb(state.scheme)
+              ),
+            },
+          },
+        },
+      },
     })
   )
 

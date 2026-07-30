@@ -9,10 +9,9 @@ import type { PrecacheEntry, SerwistGlobalConfig } from "serwist"
 
 import { Serwist } from "serwist"
 
-// This declares the value of `injectionPoint` to TypeScript.
-// `injectionPoint` is the string that will be replaced by the
-// actual precache manifest. By default, this string is set to
-// `"self.__SW_MANIFEST"`.
+// This declares the value of `injectionPoint` to TypeScript: the
+// `__SW_MANIFEST` property on the worker global is the string the build
+// replaces with the actual precache manifest.
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
     __SW_MANIFEST: (PrecacheEntry | string)[] | undefined
@@ -167,13 +166,20 @@ const buildRuntimeCaching = (serwist: Serwist): RuntimeCaching[] =>
         },
       ]
 
+// Read the injection point exactly once - the build-time injection requires
+// a single occurrence of the token in the emitted source (comments included,
+// which is why no comment here spells it out).
+const precacheManifest = self.__SW_MANIFEST
+
 const serwist = new Serwist({
-  precacheEntries: self.__SW_MANIFEST,
+  precacheEntries: precacheManifest,
   precacheOptions: {
     cacheName: "serwist-precache",
     // Navigations to URLs outside the manifest (deep link typos etc.) get the
-    // prerendered 404 page instead of hanging on the network.
-    navigateFallback: "404.html",
+    // prerendered 404 page instead of hanging on the network. Bound only when
+    // a manifest exists: createHandlerBoundToURL throws at construction for
+    // non-precached URLs, which would kill the whole dev SW (no manifest).
+    ...(precacheManifest ? { navigateFallback: "404.html" } : {}),
   },
   // skipWaiting/clientsClaim stay disabled: updates apply when the user
   // accepts the "A New Version is Available." snackbar, and the precache

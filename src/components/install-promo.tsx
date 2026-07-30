@@ -7,6 +7,7 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  DialogContentText,
   DialogTitle,
   Typography,
   alpha,
@@ -35,54 +36,27 @@ export function HowToInstallDialog({
   signedIn: boolean
   onClose: () => void
 }) {
-  const [themeStoreState] = useThemeStore()
-  const colorOnSurfaceVariant = hexFromArgb(
-    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
-  )
-
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
-    >
-      <DialogTitle
-        sx={{
-          paddingTop: "24px",
-          paddingLeft: "24px",
-          paddingRight: "24px",
-          paddingBottom: "16px",
-        }}
-      >
-        Install app
-      </DialogTitle>
-      <DialogContent
-        sx={{
-          paddingBottom: "24px",
-        }}
-      >
-        <Typography>Add this app to your home screen:</Typography>
-        <ol>
+    <Dialog open={open} onClose={onClose}>
+      <DialogTitle>Install app</DialogTitle>
+      <DialogContent>
+        <DialogContentText>
+          Add this app to your home screen:
+        </DialogContentText>
+        <DialogContentText component="ol">
           <li>Tap the Share button in your browser.</li>
           <li>Choose &quot;Add to Home Screen&quot;.</li>
           <li>Open Cloud Music Box from the home screen.</li>
-        </ol>
-        <Typography variant="body2" sx={{ color: colorOnSurfaceVariant }}>
+        </DialogContentText>
+        <DialogContentText variant="body2">
           {signedIn
             ? "The installed app starts fresh: you'll need to sign in to " +
               "your cloud storage again, and music will be downloaded again."
             : "Tip: install first - sign-in and downloads made in a browser " +
               "tab don't carry over to the installed app."}
-        </Typography>
+        </DialogContentText>
       </DialogContent>
-      <DialogActions
-        sx={{
-          paddingTop: "0px",
-          paddingBottom: "24px",
-          paddingLeft: "24px",
-          paddingRight: "24px",
-        }}
-      >
+      <DialogActions>
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>

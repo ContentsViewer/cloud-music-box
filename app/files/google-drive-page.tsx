@@ -449,22 +449,9 @@ export default function GoogleDrivePage() {
       </Box>
 
       {/* Shown before every hand-off to Google, so it is built to be skimmed. */}
-      <Dialog
-        open={introOpen}
-        onClose={() => setIntroOpen(false)}
-        sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
-      >
-        <DialogTitle
-          sx={{
-            paddingTop: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-            paddingBottom: "16px",
-          }}
-        >
-          Add music from Google Drive
-        </DialogTitle>
-        <DialogContent sx={{ paddingBottom: "24px" }}>
+      <Dialog open={introOpen} onClose={() => setIntroOpen(false)}>
+        <DialogTitle>Add music from Google Drive</DialogTitle>
+        <DialogContent>
           <Typography>
             Picking files happens on Google&apos;s own page, so this app steps
             aside for a moment.
@@ -485,14 +472,7 @@ export default function GoogleDrivePage() {
             Google asks you to allow access each time you pick — that is normal.
           </Typography>
         </DialogContent>
-        <DialogActions
-          sx={{
-            paddingTop: "0px",
-            paddingBottom: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-          }}
-        >
+        <DialogActions>
           <Button onClick={() => setIntroOpen(false)}>Cancel</Button>
           <Button
             autoFocus
@@ -510,22 +490,9 @@ export default function GoogleDrivePage() {
       </Dialog>
 
       {/* Only appears when a picked track sits in a folder we cannot read. */}
-      <Dialog
-        open={folderGrantPrompt !== null}
-        onClose={() => {}}
-        sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
-      >
-        <DialogTitle
-          sx={{
-            paddingTop: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-            paddingBottom: "16px",
-          }}
-        >
-          Allow the folders too
-        </DialogTitle>
-        <DialogContent sx={{ paddingBottom: "24px" }}>
+      <Dialog open={folderGrantPrompt !== null} onClose={() => {}}>
+        <DialogTitle>Allow the folders too</DialogTitle>
+        <DialogContent>
           <Typography>
             {`Google grants access one item at a time, so allowing your tracks did not include the ${folderGrantPrompt?.pendingFolderIds.length ?? 0} folder${(folderGrantPrompt?.pendingFolderIds.length ?? 0) > 1 ? "s" : ""} they came from. Without that, they appear under a temporary name.`}
           </Typography>
@@ -539,14 +506,7 @@ export default function GoogleDrivePage() {
             names up later from the menu.
           </Typography>
         </DialogContent>
-        <DialogActions
-          sx={{
-            paddingTop: "0px",
-            paddingBottom: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-          }}
-        >
+        <DialogActions>
           <Button
             onClick={() => {
               if (!folderGrantPrompt) return
@@ -573,33 +533,16 @@ export default function GoogleDrivePage() {
       <Dialog
         open={retryPromptIds !== null}
         onClose={() => setRetryPromptIds(null)}
-        sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
       >
-        <DialogTitle
-          sx={{
-            paddingTop: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-            paddingBottom: "16px",
-          }}
-        >
-          Get folder names
-        </DialogTitle>
-        <DialogContent sx={{ paddingBottom: "24px" }}>
+        <DialogTitle>Get folder names</DialogTitle>
+        <DialogContent>
           <Typography>
             {pickerModeIsInApp
               ? `The picker opens once for each of the ${retryPromptIds?.length ?? 0} folder${(retryPromptIds?.length ?? 0) > 1 ? "s" : ""}.`
               : `This opens Google so you can allow the ${retryPromptIds?.length ?? 0} folder${(retryPromptIds?.length ?? 0) > 1 ? "s" : ""}. You come back here automatically.`}
           </Typography>
         </DialogContent>
-        <DialogActions
-          sx={{
-            paddingTop: "0px",
-            paddingBottom: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-          }}
-        >
+        <DialogActions>
           <Button onClick={() => setRetryPromptIds(null)}>Cancel</Button>
           <Button
             autoFocus
@@ -614,22 +557,9 @@ export default function GoogleDrivePage() {
 
       {/* Appears when tapping Continue produced no navigation at all - seen on
           Android when the Google Drive app is installed but never set up. */}
-      <Dialog
-        open={handoff.phase === "stuck"}
-        onClose={dismissStuck}
-        sx={{ "& .MuiDialog-paper": { borderRadius: "28px" } }}
-      >
-        <DialogTitle
-          sx={{
-            paddingTop: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-            paddingBottom: "16px",
-          }}
-        >
-          Couldn&apos;t open Google
-        </DialogTitle>
-        <DialogContent sx={{ paddingBottom: "24px" }}>
+      <Dialog open={handoff.phase === "stuck"} onClose={dismissStuck}>
+        <DialogTitle>Couldn&apos;t open Google</DialogTitle>
+        <DialogContent>
           <Typography>
             Nothing happened when this app tried to open Google.
           </Typography>
@@ -639,14 +569,7 @@ export default function GoogleDrivePage() {
             again.
           </Typography>
         </DialogContent>
-        <DialogActions
-          sx={{
-            paddingTop: "0px",
-            paddingBottom: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-          }}
-        >
+        <DialogActions>
           <Button onClick={dismissStuck}>Close</Button>
           <Button
             autoFocus
@@ -698,19 +621,11 @@ export default function GoogleDrivePage() {
       <Dialog
         open={inAppPicker?.loadWarning === true}
         onClose={keepWaitingInAppPicker}
-        sx={{ zIndex: 100001, "& .MuiDialog-paper": { borderRadius: "28px" } }}
+        // Must float above the picker iframe and the escape chip.
+        sx={{ zIndex: 100001 }}
       >
-        <DialogTitle
-          sx={{
-            paddingTop: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-            paddingBottom: "16px",
-          }}
-        >
-          The picker didn&apos;t load
-        </DialogTitle>
-        <DialogContent sx={{ paddingBottom: "24px" }}>
+        <DialogTitle>The picker didn&apos;t load</DialogTitle>
+        <DialogContent>
           <Typography>
             Google&apos;s picker has not appeared. In the installed app on iOS
             this usually cannot be fixed — the picker needs cookies that the
@@ -721,14 +636,7 @@ export default function GoogleDrivePage() {
             and brings you back.
           </Typography>
         </DialogContent>
-        <DialogActions
-          sx={{
-            paddingTop: "0px",
-            paddingBottom: "24px",
-            paddingLeft: "24px",
-            paddingRight: "24px",
-          }}
-        >
+        <DialogActions>
           <Button onClick={keepWaitingInAppPicker}>Keep waiting</Button>
           <Button onClick={cancelInAppPicker}>Close</Button>
           <Button
