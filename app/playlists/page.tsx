@@ -19,7 +19,6 @@ import {
   playlistTrackIds,
   usePlaylistStore,
 } from "@/src/features/playlists"
-import { Theme } from "@emotion/react"
 import {
   MaterialDynamicColors,
   hexFromArgb,
@@ -37,7 +36,6 @@ import {
   SettingsRounded,
 } from "@mui/icons-material"
 import {
-  Box,
   Button,
   ButtonBase,
   Dialog,
@@ -51,7 +49,6 @@ import {
   ListItemText,
   Menu,
   MenuItem,
-  SxProps,
   Toolbar,
   Tooltip,
   Typography,
@@ -155,13 +152,12 @@ const PlaylistCard = React.memo(function PlaylistCard({
   const count = playlistTrackIds(playlist).length
 
   return (
-    <Box
-      component="div"
-      sx={{
+    <div
+      css={css({
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-      }}
+      })}
     >
       <ButtonBase
         sx={{ borderRadius: "10%", width: "100%" }}
@@ -187,15 +183,13 @@ const PlaylistCard = React.memo(function PlaylistCard({
       <Typography variant="body2" sx={{ color: colorOnSurfaceVariant }}>
         {count} {count === 1 ? "track" : "tracks"}
       </Typography>
-    </Box>
+    </div>
   )
 })
 
 const PlaylistListPage = React.memo(function PlaylistListPage({
-  sx,
   onMount,
 }: {
-  sx?: SxProps<Theme>
   onMount?: () => void
 }) {
   const [playlistState] = usePlaylistStore()
@@ -218,11 +212,19 @@ const PlaylistListPage = React.memo(function PlaylistListPage({
   )
 
   return (
-    <Box component="div" sx={{ p: { xs: 3, sm: 4 }, px: 6, ...sx }}>
+    <div
+      css={css({
+        padding: "24px 48px",
+        "@media (min-width: 600px)": { padding: "32px 48px" },
+      })}
+    >
       {playlistState.playlists.length === 0 ? (
-        <Box
-          component="div"
-          sx={{ maxWidth: "560px", margin: "0 auto", textAlign: "center" }}
+        <div
+          css={css({
+            maxWidth: "560px",
+            margin: "0 auto",
+            textAlign: "center",
+          })}
         >
           <QueueMusicRounded
             sx={{ fontSize: 64, color: colorOnSurfaceVariant }}
@@ -240,21 +242,20 @@ const PlaylistListPage = React.memo(function PlaylistListPage({
             {playlistState.analyzedTrackCount === 1 ? "track has" : "tracks have"}{" "}
             been analyzed so far.
           </Typography>
-        </Box>
+        </div>
       ) : (
-        <Box
-          component="div"
-          sx={{
-            gap: 3,
-            gridTemplateColumns: {
-              xs: "repeat(auto-fill, minmax(120px, 1fr))",
-              sm: "repeat(auto-fill, minmax(144px, 1fr))",
+        <div
+          css={css({
+            gap: "24px",
+            gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+            "@media (min-width: 600px)": {
+              gridTemplateColumns: "repeat(auto-fill, minmax(144px, 1fr))",
             },
             display: "grid",
             maxWidth: "1040px",
             margin: "0 auto",
             width: "100%",
-          }}
+          })}
         >
           {playlistState.playlists.map(playlist => (
             <PlaylistCard
@@ -263,19 +264,17 @@ const PlaylistListPage = React.memo(function PlaylistListPage({
               onOpen={onOpen}
             />
           ))}
-        </Box>
+        </div>
       )}
-    </Box>
+    </div>
   )
 })
 
 const PlaylistPage = React.memo(function PlaylistPage({
   playlist,
-  sx,
   onMount,
 }: {
   playlist?: PlaylistItem
-  sx?: SxProps<Theme>
   onMount?: () => void
 }) {
   const [playerState, playerActions] = usePlayerStore()
@@ -392,42 +391,41 @@ const PlaylistPage = React.memo(function PlaylistPage({
   )
 
   return (
-    <Box
-      component="div"
-      sx={{
-        ...sx,
+    <div
+      css={css({
         display: "flex",
         flexDirection: "column",
         maxWidth: "1040px",
         margin: "0 auto",
         width: "100%",
-      }}
+      })}
     >
-      <Box
-        component="div"
-        sx={{
+      <div
+        css={css({
           display: "flex",
-          flexDirection: { xs: "column", sm: "row" },
-          px: 4,
-          gap: 2,
+          flexDirection: "column",
+          "@media (min-width: 600px)": { flexDirection: "row" },
+          paddingLeft: "32px",
+          paddingRight: "32px",
+          gap: "16px",
           width: "100%",
-          my: 3,
-        }}
+          marginTop: "24px",
+          marginBottom: "24px",
+        })}
       >
         <AlbumCover
           sx={{ width: "200px", height: "200px", alignSelf: "center" }}
           coverUrl={coverUrl}
         />
-        <Box
-          component="div"
-          sx={{
+        <div
+          css={css({
             flexGrow: 1,
             display: "flex",
             flexDirection: "column",
             minWidth: 0,
             width: "100%",
             justifyContent: "space-around",
-          }}
+          })}
         >
           <Typography
             variant="h5"
@@ -447,15 +445,14 @@ const PlaylistPage = React.memo(function PlaylistPage({
           >
             {confirmedTracks.length} kept · {provisionalTracks.length} suggested
           </Typography>
-          <Box
-            component="div"
-            sx={{
+          <div
+            css={css({
               display: "flex",
               flexDirection: "row",
               justifyContent: "flex-end",
               alignItems: "center",
-              gap: 1,
-            }}
+              gap: "8px",
+            })}
           >
             <Button
               startIcon={<PlayArrowRounded />}
@@ -502,9 +499,9 @@ const PlaylistPage = React.memo(function PlaylistPage({
                 <ListItemText>Delete Playlist</ListItemText>
               </MenuItem>
             </Menu>
-          </Box>
-        </Box>
-      </Box>
+          </div>
+        </div>
+      </div>
 
       {notMatchingYet ? (
         <Typography sx={{ px: 4, pb: 2, color: colorOnSurfaceVariant }}>
@@ -525,15 +522,15 @@ const PlaylistPage = React.memo(function PlaylistPage({
       />
 
       {provisionalTracks.length > 0 ? (
-        <Box component="div" sx={{ mt: 2 }}>
-          <Box component="div" sx={{ px: 4 }}>
+        <div css={css({ marginTop: "16px" })}>
+          <div css={css({ paddingLeft: "32px", paddingRight: "32px" })}>
             <Typography variant="h6">Suggested</Typography>
             <Typography variant="body2" sx={{ color: colorOnSurfaceVariant }}>
               Matched by sound. These come and go as the playlist changes — pin
               one to keep it for good.
             </Typography>
-          </Box>
-          <Box component="div" sx={{ opacity: 0.72 }}>
+          </div>
+          <div css={css({ opacity: 0.72 })}>
             <TrackList
               cssStyle={css({ paddingLeft: 0, paddingRight: 0 })}
               tracks={provisionalTracks}
@@ -544,8 +541,8 @@ const PlaylistPage = React.memo(function PlaylistPage({
               onPlayTracks={playFromSection}
               secondaryAction={candidateActions}
             />
-          </Box>
-        </Box>
+          </div>
+        </div>
       ) : null}
 
       <PlaylistNameDialog
@@ -594,7 +591,7 @@ const PlaylistPage = React.memo(function PlaylistPage({
           </Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    </div>
   )
 })
 
@@ -620,7 +617,7 @@ export default function Page() {
   const downloadingCount = Object.keys(fileStoreState.syncingTrackFiles).length
 
   return (
-    <Box component="div" sx={{ height: "100%", overflow: "hidden" }}>
+    <div css={css({ height: "100%", overflow: "hidden" })}>
       <AppTopBar scrollTarget={scrollTarget}>
         <Toolbar>
           <IconButton
@@ -686,62 +683,59 @@ export default function Page() {
           </div>
         </Toolbar>
       </AppTopBar>
-      <Box
-        component="div"
-        sx={{
-          ml: `env(safe-area-inset-left, 0)`,
-          mr: `env(safe-area-inset-right, 0)`,
+      <div
+        css={css({
+          marginLeft: `env(safe-area-inset-left, 0)`,
+          marginRight: `env(safe-area-inset-right, 0)`,
           position: "relative",
           height: "100%",
           overflow: "hidden",
-        }}
+        })}
       >
         <Fade in={currentPlaylist !== undefined} timeout={1000} unmountOnExit>
-          <Box
-            component="div"
-            ref={playlistPageRef}
-            sx={{
+          <div
+            ref={playlistPageRef as unknown as React.Ref<HTMLDivElement>}
+            css={css({
               position: "absolute",
               top: 0,
               right: 0,
               left: 0,
-              pt: 8,
-              pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+              paddingTop: "64px",
+              paddingBottom: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
               overflow: "auto",
               height: "100%",
               scrollbarColor: `${colorOnSurfaceVariant} transparent`,
               scrollbarWidth: "thin",
-            }}
+            })}
           >
             <PlaylistPage
               playlist={currentPlaylist}
               onMount={() => setScrollTarget(playlistPageRef.current)}
             />
-          </Box>
+          </div>
         </Fade>
         <Fade in={currentPlaylist === undefined} timeout={1000} unmountOnExit>
-          <Box
-            component="div"
-            ref={playlistListRef}
-            sx={{
+          <div
+            ref={playlistListRef as unknown as React.Ref<HTMLDivElement>}
+            css={css({
               position: "absolute",
               top: 0,
               right: 0,
               left: 0,
-              pt: 8,
-              pb: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
+              paddingTop: "64px",
+              paddingBottom: `calc(env(safe-area-inset-bottom, 0) + 144px)`,
               overflow: "auto",
               height: "100%",
               scrollbarColor: `${colorOnSurfaceVariant} transparent`,
               scrollbarWidth: "thin",
-            }}
+            })}
           >
             <PlaylistListPage
               onMount={() => setScrollTarget(playlistListRef.current)}
             />
-          </Box>
+          </div>
         </Fade>
-      </Box>
-    </Box>
+      </div>
+    </div>
   )
 }

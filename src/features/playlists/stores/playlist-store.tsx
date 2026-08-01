@@ -16,9 +16,15 @@ import {
   fitFeatureSpace,
 } from "@/src/lib/playlists/feature-space"
 import {
+  admitTrackToPlaylist,
   recomputePlaylist,
-  TrackVectorEntry,
 } from "@/src/lib/playlists/prototype"
+import {
+  buildStandardizedCorpus,
+  StandardizedCorpus,
+  TrackVectorEntry,
+  upsertStandardizedTrack,
+} from "@/src/lib/playlists/standardized-corpus"
 
 /** Refit the feature space once the corpus has grown by this much */
 const MODEL_REFIT_GROWTH = 1.2
@@ -51,6 +57,12 @@ export interface PlaylistItem {
   // ── Derived: a cache, rebuilt from the sets above whenever anything moves ─
   /** Automatically matched, nearest first. Never feeds back into the definition. */
   provisionalIds: string[]
+  /**
+   * Parallel to provisionalIds. Lets a newly analyzed track be inserted in
+   * order without rescanning the corpus. Missing or inconsistent means the
+   * playlist falls back to a full rebuild, so older records stay readable.
+   */
+  provisionalDistances?: Float32Array
   prototype: Float32Array
   axisWeights: Float32Array
   radius: number
@@ -119,6 +131,8 @@ const PlaylistStoreDispatchContext = createContext<
 interface PlaylistStoreInternals {
   playlists: React.MutableRefObject<PlaylistItem[]>
   corpus: React.MutableRefObject<TrackVectorEntry[] | null>
+  /** The corpus standardized against `model`. Dropped when the model is refitted. */
+  standardized: React.MutableRefObject<StandardizedCorpus | null>
   model: React.MutableRefObject<FeatureSpaceModel | null>
   queue: React.MutableRefObject<Promise<void>>
 }
@@ -132,9 +146,6 @@ function createId(): string {
   if (c && typeof c.randomUUID === "function") return c.randomUUID()
   return `pl-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`
 }
-
-const derivedSignature = (p: PlaylistItem) =>
-  `${p.featureVersion}|${p.radius}|${p.provisionalIds.join(",")}`
 
 export const usePlaylistStore = () => {
   const state = useContext(PlaylistStoreStateContext)
@@ -206,54 +217,117 @@ export const usePlaylistStore = () => {
         .objectStore("playlist-model")
         .put(fitted, MODEL_KEY)
       internals.model.current = fitted
+      // The coordinate system moved: every standardized vector is now wrong
+      internals.standardized.current = null
       return fitted
     }
 
     /**
-     * Rebuilds every playlist's derived state and persists the ones that moved.
-     * Cheap enough (corpus × dim × playlists) to always run in full rather than
-     * maintain a separate incremental path that could disagree with this one.
+     * The corpus standardized against the current model, built at most once per
+     * model. `spaceChanged` means the coordinate system was just (re)built, so
+     * every playlist's derived state is stale and must be rebuilt.
      */
-    const recomputeAll = async (playlists: PlaylistItem[]) => {
+    const ensureSpace = async (): Promise<{
+      model: FeatureSpaceModel
+      space: StandardizedCorpus
+      spaceChanged: boolean
+    } | null> => {
       const corpus = await loadCorpus()
       const model = await ensureModel(corpus)
-      if (!model) {
+      if (!model) return null
+
+      const cached = internals.standardized.current
+      if (cached) return { model, space: cached, spaceChanged: false }
+
+      const space = buildStandardizedCorpus(corpus, model)
+      internals.standardized.current = space
+      return { model, space, spaceChanged: true }
+    }
+
+    const persist = (playlists: PlaylistItem[]) => {
+      if (playlists.length === 0) return
+      const store = requireDb()
+        .transaction("playlists", "readwrite")
+        .objectStore("playlists")
+      for (const playlist of playlists) store.put(playlist)
+    }
+
+    /** Full rebuild of one playlist. O(corpus × dim + corpus log corpus). */
+    const rebuild = (
+      playlist: PlaylistItem,
+      space: StandardizedCorpus,
+      model: FeatureSpaceModel
+    ): PlaylistItem => {
+      const result = recomputePlaylist({
+        seedIds: playlist.seedIds,
+        confirmedIds: playlist.confirmedIds,
+        rejectedIds: playlist.rejectedIds,
+        corpus: space,
+        model,
+      })
+      return {
+        ...playlist,
+        prototype: result.prototype,
+        axisWeights: result.axisWeights,
+        radius: result.radius,
+        provisionalIds: result.provisionalIds,
+        provisionalDistances: result.provisionalDistances,
+        featureVersion: TRACK_FEATURE_VERSION,
+        updatedAt: Date.now(),
+      }
+    }
+
+    /** Only for a refit or a cold start — the coordinate system changed. */
+    const rebuildAll = (
+      playlists: PlaylistItem[],
+      space: StandardizedCorpus,
+      model: FeatureSpaceModel
+    ) => {
+      const next = playlists.map(p => rebuild(p, space, model))
+      persist(next)
+      commit(next)
+      return next
+    }
+
+    /**
+     * Only the playlist whose own three sets changed. The others are a pure
+     * function of inputs that did not move, so their result is provably
+     * identical — recomputing them would also break React's object identity.
+     */
+    const rebuildOne = (
+      playlists: PlaylistItem[],
+      id: string,
+      space: StandardizedCorpus,
+      model: FeatureSpaceModel
+    ) => {
+      let updated: PlaylistItem | undefined
+      const next = playlists.map(p => {
+        if (p.id !== id) return p
+        updated = rebuild(p, space, model)
+        return updated
+      })
+      if (updated) persist([updated])
+      commit(next)
+      return next
+    }
+
+    /**
+     * Rebuilds after a truth-set change: just the touched playlist, unless the
+     * feature space was rebuilt in the meantime. Callers are already inside the
+     * mutation queue, so this must not enqueue again.
+     */
+    const rebuildAfterChange = async (
+      playlists: PlaylistItem[],
+      id: string
+    ) => {
+      const space = await ensureSpace()
+      if (!space) {
         commit(playlists)
         return playlists
       }
-
-      const db = requireDb()
-      const now = Date.now()
-      const next = playlists.map(p => {
-        const result = recomputePlaylist({
-          seedIds: p.seedIds,
-          confirmedIds: p.confirmedIds,
-          rejectedIds: p.rejectedIds,
-          corpus,
-          model,
-        })
-        return {
-          ...p,
-          prototype: result.prototype,
-          axisWeights: result.axisWeights,
-          radius: result.radius,
-          provisionalIds: result.provisionalIds,
-          featureVersion: TRACK_FEATURE_VERSION,
-          updatedAt: now,
-        }
-      })
-
-      const store = db
-        .transaction("playlists", "readwrite")
-        .objectStore("playlists")
-      for (let i = 0; i < next.length; i++) {
-        if (derivedSignature(next[i]) !== derivedSignature(playlists[i])) {
-          store.put(next[i])
-        }
-      }
-
-      commit(next)
-      return next
+      return space.spaceChanged
+        ? rebuildAll(playlists, space.space, space.model)
+        : rebuildOne(playlists, id, space.space, space.model)
     }
 
     /** Serializes mutations so a track finishing mid-edit cannot interleave */
@@ -284,8 +358,7 @@ export const usePlaylistStore = () => {
         const updated = { ...change(current[index]), updatedAt: Date.now() }
         const next = [...current]
         next[index] = updated
-        putPlaylist(updated)
-        await recomputeAll(next)
+        await rebuildAfterChange(next, id)
       })
 
     return {
@@ -312,11 +385,10 @@ export const usePlaylistStore = () => {
             createdAt: now,
             updatedAt: now,
           }
-          putPlaylist(playlist)
-          const next = await recomputeAll([
-            ...internals.playlists.current,
-            playlist,
-          ])
+          const next = await rebuildAfterChange(
+            [...internals.playlists.current, playlist],
+            playlist.id
+          )
           return next.find(p => p.id === playlist.id) ?? playlist
         }),
 
@@ -402,8 +474,68 @@ export const usePlaylistStore = () => {
           db.transaction("track-features", "readwrite")
             .objectStore("track-features")
             .put(record)
-          internals.corpus.current = null
-          await recomputeAll(internals.playlists.current)
+
+          // Keep the cache warm. Discarding it would re-read and re-deserialize
+          // every record from IndexedDB just to learn about one addition.
+          const corpus = await loadCorpus()
+          const entry: TrackVectorEntry = { id: trackId, vector }
+          const existing = corpus.findIndex(c => c.id === trackId)
+          const isReplacement = existing >= 0
+          if (isReplacement) corpus[existing] = entry
+          else corpus.push(entry)
+          dispatch({ type: "setAnalyzedTrackCount", payload: corpus.length })
+
+          // A replaced descriptor moves a track other playlists may already
+          // hold, which can change their definitions. Only a brand new track
+          // qualifies for the incremental path.
+          if (isReplacement) internals.standardized.current = null
+
+          const space = await ensureSpace()
+          if (!space) {
+            commit(internals.playlists.current)
+            return
+          }
+          const { model, space: sc, spaceChanged } = space
+
+          if (spaceChanged) {
+            rebuildAll(internals.playlists.current, sc, model)
+            return
+          }
+
+          upsertStandardizedTrack(sc, entry, model)
+          const standardized = sc.index.get(trackId)
+          if (!standardized) {
+            rebuildAll(internals.playlists.current, sc, model)
+            return
+          }
+
+          // The incremental step. A track nobody has confirmed or rejected
+          // cannot move any definition, so the only possible effect is joining
+          // a candidate list — no corpus scan, no re-derivation.
+          const changed: PlaylistItem[] = []
+          const next = internals.playlists.current.map(playlist => {
+            const outcome = admitTrackToPlaylist({
+              trackId,
+              vector: standardized,
+              playlist,
+              corpusSize: sc.ids.length,
+            })
+            if (outcome.type === "unchanged") return playlist
+            const updated =
+              outcome.type === "needs-full-recompute"
+                ? rebuild(playlist, sc, model)
+                : {
+                    ...playlist,
+                    provisionalIds: outcome.provisionalIds,
+                    provisionalDistances: outcome.provisionalDistances,
+                    updatedAt: Date.now(),
+                  }
+            changed.push(updated)
+            return updated
+          })
+
+          persist(changed)
+          commit(next)
         }),
     }
   }, [dispatch, internals])
@@ -424,11 +556,12 @@ export const PlaylistStoreProvider = ({
 
   const playlists = useRef<PlaylistItem[]>([])
   const corpus = useRef<TrackVectorEntry[] | null>(null)
+  const standardized = useRef<StandardizedCorpus | null>(null)
   const model = useRef<FeatureSpaceModel | null>(null)
   const queue = useRef<Promise<void>>(Promise.resolve())
   const internals = useMemo(
-    () => ({ playlists, corpus, model, queue }),
-    [playlists, corpus, model, queue]
+    () => ({ playlists, corpus, standardized, model, queue }),
+    [playlists, corpus, standardized, model, queue]
   )
 
   const [fileStoreState] = useFileStore()
@@ -454,6 +587,9 @@ export const PlaylistStoreProvider = ({
       corpus.current = features
         .filter(r => r.version === TRACK_FEATURE_VERSION)
         .map(r => ({ id: r.id, vector: r.vector }))
+      // Built lazily on the first mutation, which also reconciles every
+      // playlist once per session against whatever is on disk
+      standardized.current = null
 
       stored.sort((a, b) => a.createdAt - b.createdAt)
       playlists.current = stored

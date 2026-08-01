@@ -1,4 +1,5 @@
-import { FeatureSpaceModel, standardize } from "./feature-space"
+import { FeatureSpaceModel } from "./feature-space"
+import { StandardizedCorpus } from "./standardized-corpus"
 
 // Turns the three sets a user actually controls — seed, confirmed, rejected —
 // into the prototype/weights/radius a playlist is scored with.
@@ -29,12 +30,6 @@ export interface PlaylistDefinition {
   prototype: Float32Array
   axisWeights: Float32Array
   radius: number
-}
-
-export interface TrackVectorEntry {
-  id: string
-  /** Raw (unstandardized) feature vector */
-  vector: Float32Array
 }
 
 export function playlistDistance(
@@ -175,31 +170,26 @@ export function derivePlaylistDefinition(input: {
 export interface PlaylistRecomputeResult extends PlaylistDefinition {
   /** Automatically matched tracks, nearest first. Never includes confirmed or rejected. */
   provisionalIds: string[]
+  /** Parallel to provisionalIds. Lets a new track be inserted without rescanning. */
+  provisionalDistances: Float32Array
 }
 
 /**
  * Rebuilds a playlist's definition and its provisional membership from scratch.
- * Cost is O(corpus × dim); at a few thousand tracks this is a couple of
- * milliseconds, which is why there is no worker anywhere in this feature.
+ * Cost is O(corpus × dim + corpus log corpus). Needed whenever the playlist's
+ * own three sets change, or whenever the feature space is refitted.
+ *
+ * A newly analyzed track does NOT need this — see admitTrackToPlaylist.
  */
 export function recomputePlaylist(input: {
   seedIds: string[]
   confirmedIds: string[]
   rejectedIds: string[]
-  corpus: TrackVectorEntry[]
+  corpus: StandardizedCorpus
   model: FeatureSpaceModel
 }): PlaylistRecomputeResult {
   const { seedIds, confirmedIds, rejectedIds, corpus, model } = input
   const dim = model.dim
-
-  // One flat buffer of standardized vectors; the views below are windows into it
-  const flat = new Float32Array(corpus.length * dim)
-  const byId = new Map<string, Float32Array>()
-  for (let i = 0; i < corpus.length; i++) {
-    const view = flat.subarray(i * dim, (i + 1) * dim)
-    standardize(corpus[i].vector, model, view)
-    byId.set(corpus[i].id, view)
-  }
 
   const seedSet = new Set(seedIds)
   const confirmedSet = new Set(confirmedIds)
@@ -208,7 +198,7 @@ export function recomputePlaylist(input: {
   const pick = (ids: string[]) => {
     const out: Float32Array[] = []
     for (const id of ids) {
-      const v = byId.get(id)
+      const v = corpus.index.get(id)
       if (v) out.push(v)
     }
     return out
@@ -223,13 +213,16 @@ export function recomputePlaylist(input: {
   })
 
   const candidates: { id: string; distance: number }[] = []
-  for (const entry of corpus) {
-    if (confirmedSet.has(entry.id) || rejectedSet.has(entry.id)) continue
-    const v = byId.get(entry.id)
-    if (!v) continue
+  for (let i = 0; i < corpus.ids.length; i++) {
+    const id = corpus.ids[i]
+    if (confirmedSet.has(id) || rejectedSet.has(id)) continue
     candidates.push({
-      id: entry.id,
-      distance: playlistDistance(v, definition.prototype, definition.axisWeights),
+      id,
+      distance: playlistDistance(
+        corpus.vectors[i],
+        definition.prototype,
+        definition.axisWeights
+      ),
     })
   }
   candidates.sort((a, b) => a.distance - b.distance)
@@ -237,16 +230,122 @@ export function recomputePlaylist(input: {
   // Upper clamp: a playlist that matches most of the library says nothing.
   // Confirmed tracks are members regardless of radius, so this never drops one.
   let radius = definition.radius
-  const maxMembers = Math.floor(corpus.length * MAX_MEMBER_FRACTION)
+  const maxMembers = memberCap(corpus.ids.length)
   if (candidates.length > maxMembers && maxMembers > 0) {
     radius = Math.min(radius, candidates[maxMembers - 1].distance)
   }
 
-  const provisionalIds: string[] = []
-  for (const c of candidates) {
-    if (c.distance > radius) break
-    provisionalIds.push(c.id)
+  let admitted = 0
+  while (admitted < candidates.length && candidates[admitted].distance <= radius) {
+    admitted++
+  }
+  const provisionalIds: string[] = new Array(admitted)
+  const provisionalDistances = new Float32Array(admitted)
+  for (let i = 0; i < admitted; i++) {
+    provisionalIds[i] = candidates[i].id
+    provisionalDistances[i] = candidates[i].distance
   }
 
-  return { ...definition, radius, provisionalIds }
+  return { ...definition, radius, provisionalIds, provisionalDistances }
+}
+
+export function memberCap(corpusSize: number): number {
+  return Math.floor(corpusSize * MAX_MEMBER_FRACTION)
+}
+
+export type AdmitOutcome =
+  | { type: "unchanged" }
+  | {
+      type: "updated"
+      provisionalIds: string[]
+      provisionalDistances: Float32Array
+    }
+  /** The cached distances are missing or inconsistent — fall back to recomputePlaylist */
+  | { type: "needs-full-recompute" }
+
+/**
+ * Offers one newly analyzed track to a playlist.
+ *
+ * This is the whole incremental update, and it is correct only because of the
+ * contract that keeps the feature honest: an automatically matched track never
+ * influences the definition. So a track nobody has confirmed or rejected cannot
+ * move `prototype`, `axisWeights` or `radius` — the sole possible effect is that
+ * it joins the candidate list. No corpus scan, no re-derivation.
+ *
+ * Cost is O(dim + P), against O(corpus × dim + corpus log corpus) for a rebuild.
+ */
+export function admitTrackToPlaylist(input: {
+  trackId: string
+  /** Standardized vector of the new track */
+  vector: Float32Array
+  playlist: {
+    confirmedIds: string[]
+    rejectedIds: string[]
+    provisionalIds: string[]
+    provisionalDistances?: Float32Array
+    prototype: Float32Array
+    axisWeights: Float32Array
+    radius: number
+  }
+  corpusSize: number
+}): AdmitOutcome {
+  const { trackId, vector, playlist, corpusSize } = input
+  const { provisionalIds, provisionalDistances, prototype, axisWeights } = playlist
+
+  if (prototype.length !== vector.length || axisWeights.length !== vector.length) {
+    return { type: "needs-full-recompute" }
+  }
+  if (
+    !provisionalDistances ||
+    provisionalDistances.length !== provisionalIds.length
+  ) {
+    return { type: "needs-full-recompute" }
+  }
+
+  if (
+    provisionalIds.includes(trackId) ||
+    playlist.confirmedIds.includes(trackId) ||
+    playlist.rejectedIds.includes(trackId)
+  ) {
+    return { type: "unchanged" }
+  }
+
+  const distance = playlistDistance(vector, prototype, axisWeights)
+  if (distance > playlist.radius) return { type: "unchanged" }
+
+  // Binary search on the ascending distances
+  let lo = 0
+  let hi = provisionalDistances.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (provisionalDistances[mid] <= distance) lo = mid + 1
+    else hi = mid
+  }
+
+  const nextIds = [...provisionalIds]
+  nextIds.splice(lo, 0, trackId)
+  const nextDistances = new Float32Array(provisionalDistances.length + 1)
+  nextDistances.set(provisionalDistances.subarray(0, lo), 0)
+  nextDistances[lo] = distance
+  nextDistances.set(provisionalDistances.subarray(lo), lo + 1)
+
+  // Same upper clamp as a full rebuild, applied on the way in. Note this is
+  // where incremental and full can diverge: the cap loosens as the corpus grows,
+  // but a track dropped here is not reconsidered until the next full rebuild.
+  const cap = memberCap(corpusSize)
+  if (cap > 0 && nextIds.length > cap) {
+    if (nextIds[cap] === trackId) return { type: "unchanged" }
+    nextIds.length = cap
+    return {
+      type: "updated",
+      provisionalIds: nextIds,
+      provisionalDistances: nextDistances.slice(0, cap),
+    }
+  }
+
+  return {
+    type: "updated",
+    provisionalIds: nextIds,
+    provisionalDistances: nextDistances,
+  }
 }

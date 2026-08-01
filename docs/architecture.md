@@ -556,24 +556,65 @@ stateDiagram-v2
   distribution on a fixed stride (so a refit is reproducible). **No PCA**: a
   playlist learns a per-axis weight, and that only means something while the axes
   stay interpretable.
+- `src/lib/playlists/standardized-corpus.ts` — the whole corpus standardized once
+  against the current model. `standardize()` reads only `(vector, model)`, never
+  the other tracks, so this is identical for every playlist scored in one pass;
+  building it per playlist duplicated an N×D pass and an N-entry string-keyed Map
+  M times over. Vectors are separate arrays rather than views into one flat buffer
+  so that a newly analyzed track can be appended without rebuilding anything.
 - `src/lib/playlists/prototype.ts` — Rocchio prototype (seed weighted ×2, negative
   pull expressed as a displacement so the result stays a point in feature space,
   and only rejects within 2× the radius counted), per-axis inverse variance with
   shrinkage `(Σd² + λ)/(n + λ)`, λ = 4 — at n = 1 every axis shrinks identically,
   so a single seed is exactly spherical with no special case. Membership is capped
-  at 30 % of the analyzed library.
+  at 30 % of the analyzed library. Also `admitTrackToPlaylist`, the incremental
+  counterpart (below).
 - `stores/playlist-store.tsx` — the three IndexedDB stores, a serialized mutation
-  queue, and a full recompute after every change. Full recomputes are cheap enough
-  (~0.2 ms per playlist over 400 tracks) that maintaining a separate incremental
-  path would only create something that could disagree.
+  queue, the standardized-corpus cache, and the update paths below.
 - The feature space is refitted when the corpus grows by 20 % or 20 tracks; the
   playlists' derived values are simply rebuilt afterwards.
+
+### Update paths
+
+There is no single "recompute everything" entry point, because the three things
+that can change a playlist have genuinely different costs. N = analyzed tracks,
+M = playlists, D = 39 dimensions, P = one playlist's candidate count.
+
+| Trigger | What runs | Cost | Measured (N=5000, M=10) |
+|---|---|---|---|
+| A track finishes analysis | `admitTrackToPlaylist` per playlist | O(M·D + P) | **20 µs** |
+| Keep / Remove / create | `recomputePlaylist` for that one playlist | O(N·D + N log N) | **1.6 ms** |
+| Model refit / cold start | standardize once, then rebuild all | O(D·N log N + M·(N·D + N log N)) | 19 ms |
+
+The incremental path is legal only because of the contract above: **a track
+nobody has confirmed or rejected cannot move `prototype`, `axisWeights` or
+`radius`**, so the sole possible effect of a new descriptor is joining a
+candidate list. No corpus scan, no re-derivation. `provisionalDistances` is
+cached alongside `provisionalIds` purely to make that insertion a binary search;
+a record missing it (or with a length mismatch) reports
+`needs-full-recompute` and falls back, so older records stay readable.
+
+Only the touched playlist is rebuilt on an edit, because `recomputePlaylist` is a
+pure function of `(three sets, corpus, model)` and none of those moved for the
+others — recomputing them would produce bit-identical results and would also
+break React's object identity for every card.
+
+**Known bounded divergence**: the 30 % cap loosens as the corpus grows, but the
+incremental path does not reconsider a candidate it dropped earlier. The next
+full rebuild (any edit, or a refit) corrects it. Not user-visible.
 
 **Only played tracks are candidates** — a descriptor exists only for audio that
 was actually heard. Offline whole-track analysis is possible later
 (`decodeAudioData` is main-thread only and peaks at ~100 MB of PCM for a long
 FLAC, which is why it was not the first choice) and would slot in by writing the
 same `track-features` records.
+
+If it lands, it must be **a batch entry point, not a loop over the incremental
+one**. Feeding N tracks through `recordTrackFeatures` one at a time triggers a
+refit every 20 tracks, each O(D·N log N) — O(N² log N · D / 20) overall, minutes
+of blocked main thread at N=5000. A batch path writes every record, rebuilds the
+corpus, refits once, and rebuilds every playlist once. The split above is what
+makes that a small addition rather than a rewrite.
 
 ## Visualizers feature
 
