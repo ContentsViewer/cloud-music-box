@@ -26,6 +26,8 @@ const withSerwist = withSerwistInit({
     { url: "settings.txt", revision: revision },
     { url: "albums.html", revision: revision },
     { url: "albums.txt", revision: revision },
+    { url: "playlists.html", revision: revision },
+    { url: "playlists.txt", revision: revision },
   ],
   reloadOnOnline: false,
   register: false,

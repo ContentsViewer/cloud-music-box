@@ -1,7 +1,7 @@
 # Cloud Music Box — Architecture
 
-Last updated: 2026-07 (after the trigger_onepick picker migration; added dependency
-graph, startup flow, and picker round-trip diagrams).
+Last updated: 2026-08 (added the playlists feature: per-track acoustic descriptors
+and seed-grown playlists; `file-db` moved to version 2).
 
 ## Overview
 
@@ -40,13 +40,22 @@ src/
       components/          #   dynamic-background, fb-sparse-cortex, lissajous-curve
       lib/                 #   pitch helpers
       index.ts             #   public API
+    playlists/             # Seed-grown playlists + per-track descriptors
+      components/          #   track-feature-recorder, playlist-name-dialog
+      hooks/               #   use-playlist-actions (menu items + dialogs for pages)
+      lib/                 #   analysis-setting (localStorage)
+      stores/              #   playlist-store
+      index.ts             #   public API
   components/              # Cross-cutting UI atoms (app-top-bar, marquee-text, covers, ...)
   stores/                  # Cross-cutting React providers (theme, network, router,
                            # audio-bus-provider, audio-dynamics-settings)
   hooks/                   # Cross-cutting React hooks
   lib/                     # Cross-cutting non-React logic (MUST NOT import React)
-    audio/                 #   audio-bus, audio-frame, audio-analyser
+    audio/                 #   audio-bus, audio-frame, audio-analyser,
+                           #   track-feature-accumulator
+    playlists/             #   feature-space (robust z), prototype (Rocchio + membership)
     theming/               #   album-art color extraction (worker)
+    idb/                   #   idbRequest promise wrapper
     gtag.ts
 ```
 
@@ -62,11 +71,17 @@ src/
 
 - Features may import freely from shared code (`src/components`, `src/stores`,
   `src/hooks`, `src/lib`).
-- Feature→feature imports go through the target's `index.ts` only, and the only
-  allowed edge is **player → files** (playback needs track content). The reverse
-  edge does not exist: list components (`FileList`, `TrackList`) expose
-  `onPlayTracks` / `activeFileId` props and the **pages** wire them to
-  `usePlayerStore` — cross-feature composition happens at the page layer.
+- Feature→feature imports go through the target's `index.ts` only, and there are
+  exactly two allowed edges: **player → files** (playback needs track content)
+  and **playlists → files** (descriptors and playlists live in the same
+  IndexedDB connection, and playlist pages resolve track ids to file records).
+  No cycles: files depends on neither, and playlists does not import player.
+  List components (`FileList`, `TrackList`) expose `onPlayTracks` /
+  `activeFileId` / `extraMenuItems` props and the **pages** wire them to
+  `usePlayerStore` / `usePlaylistActions` — cross-feature composition happens at
+  the page layer. `TrackFeatureRecorder` follows the same rule from the other
+  direction: it takes the active track as a prop rather than reading the player
+  store, and `app-layout.tsx` supplies it.
 - `src/lib/` never imports React. React glue for a lib subsystem (e.g. the audio-bus
   provider) lives in `src/stores/`.
 - **Bundle-isolation exception:** a page may deep-import a specific `features/*/api`
@@ -99,7 +114,11 @@ AudioBus (src/lib/audio/audio-bus.ts, created per app by AudioBusProvider)
   ├─ fb-sparse-cortex   … stitches windows by file position; drives its own Logic loop
   ├─ lissajous-curve    … writes frames into a mutable render context (no re-render)
   ├─ PitchBackdrop      … pitch → CSS background color (local state in a memo leaf)
-  └─ timeline-slider    … playback position display (local state in a memo leaf)
+  ├─ timeline-slider    … playback position display (local state in a memo leaf)
+  └─ track-feature-accumulator … MFCC/centroid/flux/tempo statistics for playlists
+                                 (subscribed by TrackFeatureRecorder; ~1 ms of CPU
+                                  per second of audio, and not subscribed at all
+                                  once a track is described well enough)
 ```
 
 **AudioFrame contract:** `samples0/1` are **read-only views** into the decoded track
@@ -139,17 +158,20 @@ AppRouterCacheProvider
       └ NetworkMonitorProvider  (isOnline)
         └ FileStoreProvider     (IndexedDB + drive clients)
           └ PlayerStoreProvider (depends on FileStore for track content)
-            └ AudioDynamicsSettingsProvider  (visualizer type, appeal mode; localStorage)
-              └ AudioBusProvider             (creates the AudioBus instance)
-                └ AppMain
-                  └ SnackbarProvider (innermost; ThemeChanger, DynamicBackground,
-                                      AudioPlayer, PlayerCard, page children)
+            └ PlaylistStoreProvider          (depends on FileStore for the IDB handle)
+              └ AudioDynamicsSettingsProvider  (visualizer type, appeal mode; localStorage)
+                └ AudioBusProvider             (creates the AudioBus instance)
+                  └ AppMain
+                    └ SnackbarProvider (innermost; ThemeChanger,
+                                        PlaylistTrackRecorder, DynamicBackground,
+                                        AudioPlayer, PlayerCard, page children)
 ```
 
 ### Store / feature dependency graph
 
-Arrows mean "depends on / reads". Note the only feature→feature edge is
-**player → files** (PlayerStore calls FileStore for track content); everything
+Arrows mean "depends on / reads". The only feature→feature edges are
+**player → files** (PlayerStore calls FileStore for track content) and
+**playlists → files** (PlaylistStore shares the `file-db` connection); everything
 else composes at the page layer or goes through cross-cutting providers.
 
 ```mermaid
@@ -179,10 +201,16 @@ graph LR
     VZ["fb-sparse-cortex /<br/>lissajous / PitchBackdrop"]
   end
 
+  subgraph pl["features/playlists"]
+    PLS["PlaylistStore"]
+    TFR["TrackFeatureRecorder<br/>(prop-driven)"]
+  end
+
   Bus(("AudioBus<br/>(plain JS)"))
   IDB[("IndexedDB<br/>file-db")]
   LS[("localStorage")]
   TC["ThemeChanger<br/>(app-layout)"]
+  PTR["PlaylistTrackRecorder<br/>(app-layout)"]
 
   FS --> Net
   FS --> IDB
@@ -205,6 +233,14 @@ graph LR
 
   TC --> PS
   TC --> Theme
+
+  PLS --> FS
+  PLS --> IDB
+  TFR --> PLS
+  TFR -. "subscribe" .-> Bus
+  TFR --> LS
+  PTR --> PS
+  PTR -- "trackId, duration<br/>(props)" --> TFR
 ```
 
 Pages (`app/*`) sit above this graph: they read FileStore/PlayerStore/Router and
@@ -224,11 +260,12 @@ flowchart TD
   Mount --> NM["NetworkMonitor effect<br/>isOnline = navigator.onLine<br/>(first render: false)"]
   Mount --> Init["FileStore init effect<br/>(StrictMode-guarded via ref)"]
 
-  Init --> Open["indexedDB.open('file-db')"]
-  Open -- "onupgradeneeded" --> Create["create object stores:<br/>files / blobs / albums / blobs-meta"]
+  Init --> Open["indexedDB.open('file-db', 2)"]
+  Open -- "onupgradeneeded" --> Create["create missing object stores<br/>(each guarded by objectStoreNames.contains):<br/>files / blobs / albums / blobs-meta /<br/>track-features / playlists / playlist-model"]
   Create --> LSread
   Open -- "success" --> LSread["read localStorage:<br/>rootFolderId, blobsStorageMaxBytes<br/>(else storage.estimate × 0.7),<br/>blobsStorageUsageBytes"]
   Open -- "error" --> Fail["snackbar only;<br/>configured stays false ⚠"]
+  Open -- "blocked by another tab" --> Blocked["persistent snackbar:<br/>close the other tabs"]
   Open -. "pending delete:<br/>no event at all" .-> Hang["waits forever ⚠"]
 
   LSread --> Cfg{"DriveConfig<br/>(localStorage drive.config)?"}
@@ -259,14 +296,22 @@ flowchart TD
 
 Notes / hazards (all verified in code):
 
-- **`indexedDB.open` has no `onblocked` handler and no timeout**
-  (`file-store.tsx:727-751`). A pending `deleteDatabase` queues the open with
-  *no event at all* — `init()` never settles, `configured` never flips, and
-  every page gated on it renders nothing.
-- **`onversionchange` is an empty handler** (`file-store.tsx:752-755`). This
-  connection never closes when another context calls `deleteDatabase`, which is
-  what makes Settings → Reset App hang when a second tab (or a stranded
-  redirect tab) is alive.
+- **The upgrade handler must stay idempotent.** `FILE_DB_VERSION` is 2 and every
+  `createObjectStore` sits behind an `objectStoreNames.contains` guard, because a
+  v1 database (opened originally with no version argument) re-enters the handler
+  on its way to v2. An unguarded `createObjectStore("files")` there throws
+  `ConstraintError`, aborts the whole upgrade, and leaves the app permanently
+  unconfigured. Adding a store means bumping the version and adding one more
+  guarded branch — never reordering or removing the existing ones.
+- **`onblocked` is handled** (persistent snackbar asking the user to close other
+  tabs) but there is still **no timeout**: a pending `deleteDatabase` queues the
+  open with *no event at all* — `init()` never settles and `configured` never
+  flips. ⚠
+- **`onversionchange` closes the connection** and flips `configured` to false
+  with a "reload the app" snackbar, so another tab's upgrade or
+  `deleteDatabase` is not blocked by this document. Transactions after that
+  point fail with a clear "not configured" error instead of raw
+  `InvalidStateError`s.
 - **Init errors only show a snackbar** (`file-store.tsx:868-871`);
   `driveStatus` stays `"not-configured"` and `app/home` / `app/files` render
   `null` for that state — a blank screen behind a 5-second toast.
@@ -291,8 +336,10 @@ Notes / hazards (all verified in code):
 - `api/google-drive-pick-session.ts` — pick state that survives the picker's
   top-level navigation (localStorage + 10 min TTL).
 - `api/onedrive-client.tsx` — MSAL + Microsoft Graph.
-- `stores/file-store.tsx` — IndexedDB (`file-db`: files / blobs / blobs-meta / albums),
-  LRU blob cache (70% of quota), download queue, drive-client orchestration.
+- `stores/file-store.tsx` — IndexedDB (`file-db` v2: files / blobs / blobs-meta /
+  albums / track-features / playlists / playlist-model), LRU blob cache (70% of
+  quota), download queue, drive-client orchestration. It owns the connection and
+  the schema for every store, including the three the playlists feature uses.
 
 ## Google Drive picker round trip (trigger_onepick)
 
@@ -396,6 +443,137 @@ flowchart TD
 A cold relaunch lands on home (`start_url`), so `app/home/page.tsx` checks
 `pendingPickWorkHref()` once on mount and routes back to `returnHref` when a
 `returned`/`awaiting-user` record is waiting.
+
+## Playlists feature (seed + relevance feedback)
+
+A playlist is **seeded by the user from one or more tracks** and then grows on its
+own from what has been played. It is not a cluster: the user's own tracks are the
+definition, and their Keep/Remove actions are the training signal.
+
+### Why not unsupervised clustering
+
+Generating playlists automatically (k-means over the descriptors, silhouette for
+k, an adjective lexicon for names) was designed and rejected before any code was
+written. The reasons are structural, not practical:
+
+1. **There is no ground truth.** Clustering can only recover "sounds alike",
+   which the genre/album/artist tags already encode. Intent — *for working*, *for
+   the night drive* — cuts across the acoustic space and cannot emerge from it.
+2. **There is no way to disagree.** The only lever on a partition is "regenerate",
+   which moves everything at once. Nothing lets the user say "not this one".
+3. **The names are fiction.** `Fast & Bright` is a post-hoc rationalization of
+   whichever axis happened to separate, not a name anybody asked for.
+
+Seeding turns the same machinery into a well-posed problem: seed = positive,
+Keep/Add = positive, Remove = negative, so a playlist is a one-class classifier
+whose definition the user supplies. Two things fall out for free that clustering
+could not do: a track can belong to several playlists (a partition forbids it),
+and "regenerate" stops existing as a concept.
+
+### The contract
+
+**Truth is three id sets — `seedIds`, `confirmedIds`, `rejectedIds` — and each
+track's raw vector. Everything else is a cache.** `prototype`, `axisWeights`,
+`radius` and `provisionalIds` are recomputed from those sets by a pure function
+(`src/lib/playlists/prototype.ts`), so refitting the feature space just rebuilds
+them; there is no state that can drift out of agreement with the user's actions.
+
+**Automatically matched tracks never move the definition.** If they did, the
+prototype would wander and eventually swallow the library. Promotion happens only
+through Keep or Add to Playlist — never through "the user did not remove it",
+which is an *absence*, indistinguishable from never having looked at the screen.
+Implicit signals are available (`playSourceUrl` plus `onEnded` would give an exact
+"played to completion from this playlist") and were deliberately left out of the
+first version: they add evidence to record and an explanation to owe. Adding them
+later means storing the evidence and keeping the weights derived, which the
+contract above already allows.
+
+Because Keep is the only promotion path, a user who only ever removes tracks is a
+realistic case, and Rocchio degenerates under negatives-only feedback. Two
+invariants in `derivePlaylistDefinition` prevent it: the effective γ is clamped by
+`|confirmed| / |nearRejected|` (and `seedIds ⊆ confirmedIds` is never empty, so
+there is always a positive anchor), and the radius floor is
+`seedRadiusDefault × 0.5` so a playlist cannot converge on empty. Removed tracks
+stay out through `rejectedIds` regardless of the radius.
+
+Keep is presented as **pinning**, because that is what it does for the user:
+suggestions come and go as the definition changes, and a kept track stops moving.
+"Teaching the algorithm" is a side effect, not the pitch.
+
+### Flow
+
+```mermaid
+flowchart TD
+    A["Track plays"] --> B{"Already described?<br/>coverage ≥ 60 s and ≥ 50%"}
+    B -- Yes --> Z["Do not even subscribe"]
+    B -- No --> C["Subscribe to the AudioBus<br/>(0.5 s windows, ~4 Hz)"]
+    C --> D["Hop 2048/1024: MFCC, centroid,<br/>rolloff, flatness, flux, loudness,<br/>stereo width; onset envelope for tempo"]
+    D --> E{"Track changes"}
+    E --> F{"coverage ≥ 30 s and ≥ 20%<br/>and better than before?"}
+    F -- No --> G["Discard: a partial listen<br/>is a poor description"]
+    F -- Yes --> H["One put into track-features"]
+    H --> I["Recompute every playlist<br/>(corpus × dim × playlists ≈ ms)"]
+    I --> J{"In rejectedIds?"}
+    J -- Yes --> K["Never matched"]
+    J -- No --> L{"distance ≤ radius"}
+    L -- Yes --> M["provisionalIds<br/>(definition untouched)"]
+    L -- No --> N["No match. There is no<br/>'uncategorized' bucket."]
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unanalyzed
+    Unanalyzed --> Outside: played, distance > radius
+    Unanalyzed --> Provisional: played, distance ≤ radius
+    Outside --> Provisional: definition changed
+    Provisional --> Outside: definition changed
+    Provisional --> Confirmed: Keep
+    Provisional --> Rejected: Remove
+    Outside --> Confirmed: Add to Playlist
+    Confirmed --> Rejected: Remove
+    Rejected --> Confirmed: Add to Playlist
+    note right of Confirmed
+        Only Confirmed and Rejected
+        define the playlist
+    end note
+```
+
+### Pieces
+
+- `src/lib/audio/track-feature-accumulator.ts` — ~39-dimension descriptor built
+  from the frames the player already emits. A covered-range set makes each hop
+  count exactly once despite the ~50 % window overlap and any seeking, which is
+  what makes `coverageSeconds` trustworthy. Hops are claimed by the position they
+  *start* at (their window may reach into a neighboring frame's audio) so the hop
+  grid stays contiguous — a gap there breaks tempo detection. Silence gates the
+  spectral statistics but **not** the flux history: silence → attack is the
+  strongest onset there is. Tempo scores fractional candidate periods over a
+  1p/2p/3p/4p comb and takes the shortest one that fits, because a musical period
+  is rarely a whole number of hops and the strongest integer lag is usually a
+  multiple of the real one.
+- `src/lib/playlists/feature-space.ts` — robust z-score (median/IQR) fitted over
+  the corpus, plus `seedRadiusDefault` sampled from the corpus distance
+  distribution on a fixed stride (so a refit is reproducible). **No PCA**: a
+  playlist learns a per-axis weight, and that only means something while the axes
+  stay interpretable.
+- `src/lib/playlists/prototype.ts` — Rocchio prototype (seed weighted ×2, negative
+  pull expressed as a displacement so the result stays a point in feature space,
+  and only rejects within 2× the radius counted), per-axis inverse variance with
+  shrinkage `(Σd² + λ)/(n + λ)`, λ = 4 — at n = 1 every axis shrinks identically,
+  so a single seed is exactly spherical with no special case. Membership is capped
+  at 30 % of the analyzed library.
+- `stores/playlist-store.tsx` — the three IndexedDB stores, a serialized mutation
+  queue, and a full recompute after every change. Full recomputes are cheap enough
+  (~0.2 ms per playlist over 400 tracks) that maintaining a separate incremental
+  path would only create something that could disagree.
+- The feature space is refitted when the corpus grows by 20 % or 20 tracks; the
+  playlists' derived values are simply rebuilt afterwards.
+
+**Only played tracks are candidates** — a descriptor exists only for audio that
+was actually heard. Offline whole-track analysis is possible later
+(`decodeAudioData` is main-thread only and peaks at ~100 MB of PCM for a long
+FLAC, which is why it was not the first choice) and would slot in by writing the
+same `track-features` records.
 
 ## Visualizers feature
 

@@ -5,6 +5,7 @@ import { enqueueSnackbar } from "notistack"
 import { useEffect, useRef, useState } from "react"
 import { FileList } from "@/src/features/files"
 import { usePlayerStore } from "@/src/features/player"
+import { usePlaylistActions } from "@/src/features/playlists"
 import {
   Backdrop,
   Badge,
@@ -133,6 +134,12 @@ export default function GoogleDrivePage() {
   const [routerState, routerActions] = useRouter()
   const routerActionsRef = useRef(routerActions)
   routerActionsRef.current = routerActions
+
+  // Playlist entry points are wired in by the page: the files feature must not
+  // depend on the playlists feature (see docs/architecture.md dependency rules)
+  const { trackMenuItems, dialogs: playlistDialogs } = usePlaylistActions({
+    onCreated: playlist => routerActionsRef.current.goPlaylist(playlist.id),
+  })
 
   useEffect(() => {
     if (routerState.pathname !== "/files") return
@@ -445,8 +452,10 @@ export default function GoogleDrivePage() {
           folderId={folderId}
           activeFileId={playerState.activeTrack?.file.id}
           onPlayTracks={playerActions.playTrack}
+          extraMenuItems={trackMenuItems}
         />
       </Box>
+      {playlistDialogs}
 
       {/* Shown before every hand-off to Google, so it is built to be skimmed. */}
       <Dialog open={introOpen} onClose={() => setIntroOpen(false)}>

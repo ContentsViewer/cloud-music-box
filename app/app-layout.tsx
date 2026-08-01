@@ -5,6 +5,10 @@ import { PlayerCard } from "@/src/features/player"
 import { FileStoreProvider } from "@/src/features/files"
 import { PlayerStoreProvider, usePlayerStore } from "@/src/features/player"
 import { DynamicBackground } from "@/src/features/visualizers"
+import {
+  PlaylistStoreProvider,
+  TrackFeatureRecorder,
+} from "@/src/features/playlists"
 import { Box, Fade, Button, styled } from "@mui/material"
 import {
   MaterialDesignContent,
@@ -101,6 +105,20 @@ const ThemeChanger = () => {
   return null
 }
 
+// The playlists feature does not import the player (only player → files is an
+// allowed feature→feature edge), so the active track is wired in here — the same
+// composition-at-the-page-layer rule as onPlayTracks.
+const PlaylistTrackRecorder = () => {
+  const [playerState] = usePlayerStore()
+  const file = playerState.activeTrack?.file
+  return (
+    <TrackFeatureRecorder
+      trackId={file?.id}
+      durationSeconds={file?.metadata?.format.duration ?? playerState.duration}
+    />
+  )
+}
+
 const AppMain = ({ children }: { children: React.ReactNode }) => {
   const [playerCardExpanded, setPlayerCardExpanded] = useState<boolean>(false)
   const snackbarContainerClass = css`
@@ -127,6 +145,7 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
       }}
     >
       <ThemeChanger />
+      <PlaylistTrackRecorder />
       <DynamicBackground />
       <AudioPlayer />
       <Box
@@ -204,11 +223,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <NetworkMonitorProvider>
         <FileStoreProvider>
           <PlayerStoreProvider>
-            <AudioDynamicsSettingsProvider>
-              <AudioBusProvider>
-                <AppMain>{children}</AppMain>
-              </AudioBusProvider>
-            </AudioDynamicsSettingsProvider>
+            <PlaylistStoreProvider>
+              <AudioDynamicsSettingsProvider>
+                <AudioBusProvider>
+                  <AppMain>{children}</AppMain>
+                </AudioBusProvider>
+              </AudioDynamicsSettingsProvider>
+            </PlaylistStoreProvider>
           </PlayerStoreProvider>
         </FileStoreProvider>
       </NetworkMonitorProvider>

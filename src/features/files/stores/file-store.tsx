@@ -11,6 +11,7 @@ import {
   useState,
 } from "react"
 import { useNetworkMonitor } from "@/src/stores/network-monitor"
+import { idbRequest } from "@/src/lib/idb/request"
 import * as mm from "music-metadata-browser"
 import assert from "assert"
 import {
@@ -23,6 +24,20 @@ import {
 import { BaseDriveClient } from "../api/base-drive-client"
 import { createOneDriveClient } from "../api/onedrive-client"
 import { createGoogleDriveClient } from "../api/google-drive-client"
+
+export const FILE_DB_NAME = "file-db"
+
+/**
+ * IndexedDB schema version. Bump when adding an object store.
+ *
+ * The upgrade handler is **idempotent**: every store is created behind an
+ * `objectStoreNames.contains` guard, so a user on any older version reaches the
+ * current schema in one step. Never drop those guards — v1 databases (opened
+ * without a version argument) re-enter the handler on the way to v2, and an
+ * unguarded `createObjectStore("files")` would throw ConstraintError and abort
+ * the whole upgrade, leaving the app permanently unconfigured.
+ */
+export const FILE_DB_VERSION = 2
 
 interface SyncTask {
   fileId: string
@@ -202,7 +217,7 @@ export const useFileStore = () => {
           throw new Error("File database not initialized")
         }
 
-        const count = await getIdbRequest(
+        const count = await idbRequest(
           refState.current.fileDb
             .transaction("blobs")
             .objectStore("blobs")
@@ -218,7 +233,7 @@ export const useFileStore = () => {
         if (!fileDb) {
           throw new Error("File database not initialized")
         }
-        const count = await getIdbRequest(
+        const count = await idbRequest(
           fileDb.transaction("blobs").objectStore("blobs").count(id)
         )
         if (count > 0) return
@@ -269,7 +284,7 @@ export const useFileStore = () => {
           if (track.type !== "audio-track") {
             throw new Error("Item is not a track")
           }
-          const blob = (await getIdbRequest(
+          const blob = (await idbRequest(
             fileDb.transaction("blobs", "readonly").objectStore("blobs").get(id)
           )) as Blob | undefined
           if (blob) {
@@ -328,7 +343,7 @@ export const useFileStore = () => {
           throw new Error("File database not initialized")
         }
 
-        const albumIds = await getIdbRequest<string[]>(
+        const albumIds = await idbRequest<string[]>(
           refState.current.fileDb
             .transaction("albums")
             .objectStore("albums")
@@ -348,13 +363,13 @@ export const useFileStore = () => {
           throw new Error("File database not initialized")
         }
 
-        await getIdbRequest(
+        await idbRequest(
           refState.current.fileDb
             .transaction("blobs", "readwrite")
             .objectStore("blobs")
             .clear()
         )
-        await getIdbRequest(
+        await idbRequest(
           refState.current.fileDb
             .transaction("blobs-meta", "readwrite")
             .objectStore("blobs-meta")
@@ -565,17 +580,6 @@ async function mergeAndSyncFileItem(
   return merged as BaseFileItem
 }
 
-function getIdbRequest<T>(request: IDBRequest<T>) {
-  return new Promise<T>((resolve, reject) => {
-    request.onsuccess = event => {
-      resolve((event.target as IDBRequest).result)
-    }
-    request.onerror = event => {
-      reject((event.target as IDBRequest).error)
-    }
-  })
-}
-
 function releaseBlobsUntilLimit(
   db: IDBDatabase,
   limit: number,
@@ -620,7 +624,7 @@ function releaseBlobsUntilLimit(
 
 async function markBlobAccessed(db: IDBDatabase, id: string, blob: Blob) {
   const result = { appended: false }
-  let record = (await getIdbRequest(
+  let record = (await idbRequest(
     db.transaction("blobs-meta", "readonly").objectStore("blobs-meta").get(id)
   )) as BlobsMetaRecord | undefined
   if (record === undefined) {
@@ -633,7 +637,7 @@ async function markBlobAccessed(db: IDBDatabase, id: string, blob: Blob) {
   }
   record.lastAccessed = Date.now()
 
-  await getIdbRequest(
+  await idbRequest(
     db
       .transaction("blobs-meta", "readwrite")
       .objectStore("blobs-meta")
@@ -725,7 +729,7 @@ export const FileStoreProvider = ({
       let fileDb: IDBDatabase | undefined = undefined
       try {
         fileDb = await new Promise<IDBDatabase>((resolve, reject) => {
-          const req = indexedDB.open("file-db")
+          const req = indexedDB.open(FILE_DB_NAME, FILE_DB_VERSION)
 
           req.onsuccess = () => {
             resolve(req.result)
@@ -735,23 +739,57 @@ export const FileStoreProvider = ({
             reject(req.error)
           }
 
-          req.onupgradeneeded = ev => {
-            const db = req.result
+          // Another tab still holds a connection at the old version, so the
+          // upgrade cannot start. Without this the promise never settles and
+          // init hangs silently (a stranded OAuth redirect tab is enough).
+          req.onblocked = () => {
+            enqueueSnackbar(
+              "Please close the other tabs of this app to finish updating the local database.",
+              { variant: "error", persist: true }
+            )
+          }
 
-            db.createObjectStore("files", { keyPath: "id" })
-            db.createObjectStore("blobs")
-            db.createObjectStore("albums")
-            {
+          req.onupgradeneeded = () => {
+            const db = req.result
+            const names = db.objectStoreNames
+
+            if (!names.contains("files")) {
+              db.createObjectStore("files", { keyPath: "id" })
+            }
+            if (!names.contains("blobs")) {
+              db.createObjectStore("blobs")
+            }
+            if (!names.contains("albums")) {
+              db.createObjectStore("albums")
+            }
+            if (!names.contains("blobs-meta")) {
               const store = db.createObjectStore("blobs-meta", {
                 keyPath: "id",
               })
               store.createIndex("last-accessed", "lastAccessed")
             }
+            // v2: audio feature vectors and seed-grown playlists
+            if (!names.contains("track-features")) {
+              db.createObjectStore("track-features", { keyPath: "id" })
+            }
+            if (!names.contains("playlists")) {
+              db.createObjectStore("playlists", { keyPath: "id" })
+            }
+            if (!names.contains("playlist-model")) {
+              db.createObjectStore("playlist-model")
+            }
           }
         })
-        fileDb.onversionchange = event => {
-          const { oldVersion, newVersion } = event
-          // console.log("!!!!", event)
+        // Another tab wants to upgrade: release the connection so it is not
+        // blocked by us. Everything below this point needs a reload, so mark
+        // the store unconfigured instead of letting transactions throw.
+        fileDb.onversionchange = () => {
+          fileDb?.close()
+          dispatch({ type: "setConfigured", payload: false })
+          enqueueSnackbar(
+            "The local database was updated in another tab. Please reload the app.",
+            { variant: "error", persist: true }
+          )
         }
         dispatch({ type: "setFileDb", payload: fileDb })
         // enqueueSnackbar("File Database Connected", { variant: "success" })
@@ -840,11 +878,11 @@ export const FileStoreProvider = ({
               childrenIds: [],
             }
             // Create the root folder only if it does not exist
-            const existingRoot = await getIdbRequest(
+            const existingRoot = await idbRequest(
               fileDb.transaction("files").objectStore("files").get("root")
             )
             if (!existingRoot) {
-              await getIdbRequest(
+              await idbRequest(
                 fileDb
                   .transaction("files", "readwrite")
                   .objectStore("files")

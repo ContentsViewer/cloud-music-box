@@ -47,6 +47,13 @@ export const useRouter = () => {
         router.push(href, { scroll: false })
         window.localStorage.setItem("lastHref", href)
       },
+      goPlaylist: (playlistId?: string) => {
+        const href = `/playlists${
+          playlistId ? `#${encodeURIComponent(playlistId)}` : ""
+        }`
+        router.push(href, { scroll: false })
+        window.localStorage.setItem("lastHref", href)
+      },
       goHome: (options?: { reload: boolean }) => {
         const { reload = false } = options || {}
         

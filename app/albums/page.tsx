@@ -17,8 +17,10 @@ import {
   ArrowUpwardRounded,
   HomeRounded,
   MoreVert,
+  PlaylistAddRounded,
   SettingsRounded,
 } from "@mui/icons-material"
+import { usePlaylistActions } from "@/src/features/playlists"
 import {
   Box,
   Fade,
@@ -277,6 +279,14 @@ const AlbumPage = React.memo(function AlbumPage({
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
   const [tracks, setTracks] = useState<AudioTrackFileItem[] | undefined>([])
 
+  const routerActionsRef = useRef(routerActions)
+  routerActionsRef.current = routerActions
+  // Playlist entry points are wired in by the page: the files feature must not
+  // depend on the playlists feature (see docs/architecture.md dependency rules)
+  const { openCreateFrom, trackMenuItems, dialogs } = usePlaylistActions({
+    onCreated: playlist => routerActionsRef.current.goPlaylist(playlist.id),
+  })
+
   useEffect(() => {
     onMount?.()
   }, [])
@@ -374,6 +384,17 @@ const AlbumPage = React.memo(function AlbumPage({
           >
             <IconButton
               color="inherit"
+              title="Create a playlist seeded with this album"
+              disabled={!tracks || tracks.length === 0}
+              onClick={() => {
+                if (!tracks || tracks.length === 0) return
+                openCreateFrom(tracks)
+              }}
+            >
+              <PlaylistAddRounded color="inherit" />
+            </IconButton>
+            <IconButton
+              color="inherit"
               onClick={() => {
                 if (tracks === undefined) return
                 if (tracks.length === 0) return
@@ -395,10 +416,14 @@ const AlbumPage = React.memo(function AlbumPage({
           paddingRight: 0,
         })}
         tracks={tracks}
-        albumId={albumItem?.name}
+        sourceUrl={
+          albumItem ? `/albums#${encodeURIComponent(albumItem.name)}` : undefined
+        }
         activeTrack={playerState.activeTrack?.file}
         onPlayTracks={playerActions.playTrack}
+        extraMenuItems={trackMenuItems}
       />
+      {dialogs}
     </Box>
   )
 })
