@@ -48,6 +48,11 @@ import DialogTitle from "@mui/material/DialogTitle"
 import { enqueueSnackbar } from "notistack"
 import { css } from "@emotion/react"
 import { useInstallPrompt } from "@/src/hooks/use-install-prompt"
+import {
+  isTrackAnalysisEnabled,
+  setTrackAnalysisEnabled,
+  usePlaylistStore,
+} from "@/src/features/playlists"
 import { HowToInstallDialog } from "@/src/components/install-promo"
 
 import { useEffect, useRef, useState } from "react"
@@ -268,6 +273,59 @@ function ScreenSettingsArea() {
             checked={isFullScreen}
             edge="end"
             onChange={handleFullScreenToggle}
+          />
+        </ListItem>
+      </List>
+    </div>
+  )
+}
+
+function PlaylistSettingsArea() {
+  const [themeStoreState] = useThemeStore()
+  const [playlistState] = usePlaylistStore()
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+  // localStorage is read on the client only, so render the SSR default until
+  // mounted to avoid a hydration mismatch (same trick as the visualizer area)
+  const [mounted, setMounted] = useState(false)
+  const [enabled, setEnabled] = useState(true)
+  useEffect(() => {
+    setMounted(true)
+    setEnabled(isTrackAnalysisEnabled())
+  }, [])
+
+  return (
+    <div
+      css={css({
+        display: "flex",
+        flexDirection: "column",
+        marginTop: "16px",
+      })}
+    >
+      <Typography variant="h6">Playlists</Typography>
+      <List>
+        <ListItem>
+          <ListItemText
+            primary="Analyze played tracks"
+            secondary={
+              mounted
+                ? `Describes each track as you listen so playlists can suggest similar ones. ${playlistState.analyzedTrackCount} analyzed so far.`
+                : "Describes each track as you listen so playlists can suggest similar ones."
+            }
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
+          />
+          <Switch
+            checked={mounted ? enabled : true}
+            edge="end"
+            onChange={event => {
+              setEnabled(event.target.checked)
+              setTrackAnalysisEnabled(event.target.checked)
+            }}
           />
         </ListItem>
       </List>
@@ -745,6 +803,7 @@ export default function Page() {
           <AccountSettingsArea />
           <StorageSettingsArea />
           <ScreenSettingsArea />
+          <PlaylistSettingsArea />
           <VisualizerSettingsArea />
           <ResetSettingsArea />
           <AppSettingsArea />

@@ -101,22 +101,31 @@ const FileListInner = memo(function FileListInner({
   files,
   playTrack,
   activeFileId,
+  extraMenuItems,
 }: {
   files?: BaseFileItem[]
   playTrack: (file: AudioTrackFileItem) => void
   activeFileId?: string
+  extraMenuItems?: (
+    track: AudioTrackFileItem,
+    closeMenu: () => void
+  ) => React.ReactNode
 }) {
   const [, routerActions] = useRouter()
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null)
+  const [menuFile, setMenuFile] = useState<BaseFileItem | null>(null)
   const refMenuFile = useRef<BaseFileItem | null>(null)
 
   const onClickMenu = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>, file: BaseFileItem) => {
       refMenuFile.current = file
+      setMenuFile(file)
       setMenuAnchorEl(event.currentTarget)
     },
     []
   )
+
+  const closeMenu = useCallback(() => setMenuAnchorEl(null), [])
 
   return (
     <List>
@@ -132,7 +141,7 @@ const FileListInner = memo(function FileListInner({
       <Menu
         anchorEl={menuAnchorEl}
         open={Boolean(menuAnchorEl)}
-        onClose={() => setMenuAnchorEl(null)}
+        onClose={closeMenu}
         keepMounted
       >
         <MenuItem
@@ -148,6 +157,9 @@ const FileListInner = memo(function FileListInner({
         >
           <ListItemText>Open Album</ListItemText>
         </MenuItem>
+        {menuFile?.type === "audio-track"
+          ? extraMenuItems?.(menuFile as AudioTrackFileItem, closeMenu)
+          : null}
       </Menu>
     </List>
   )
@@ -165,6 +177,15 @@ export interface FileListProps {
     tracks: AudioTrackFileItem[],
     sourceUrl: string
   ) => void
+  /**
+   * Extra entries for the per-row overflow menu, for audio tracks only.
+   * Supplied by the page so other features can act on a track without this
+   * feature depending on them.
+   */
+  extraMenuItems?: (
+    track: AudioTrackFileItem,
+    closeMenu: () => void
+  ) => React.ReactNode
 }
 
 export function FileList(props: FileListProps) {
@@ -188,6 +209,7 @@ export function FileList(props: FileListProps) {
         files={files}
         playTrack={playTrack}
         activeFileId={props.activeFileId}
+        extraMenuItems={props.extraMenuItems}
       />
     </div>
   )

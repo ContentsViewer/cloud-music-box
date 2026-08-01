@@ -17,6 +17,7 @@ import {
   HomeRounded,
   Login,
   MoreVert,
+  QueueMusicRounded,
   SettingsRounded,
 } from "@mui/icons-material"
 import {
@@ -346,6 +347,15 @@ export default function Page() {
               >
                 <Typography variant="h6">Albums</Typography>
                 <AlbumRounded fontSize="large"></AlbumRounded>
+              </CardButton>
+
+              <CardButton
+                onClick={() => {
+                  routerActionsRef.current.goPlaylist()
+                }}
+              >
+                <Typography variant="h6">Playlists</Typography>
+                <QueueMusicRounded fontSize="large"></QueueMusicRounded>
               </CardButton>
 
               <CardButton

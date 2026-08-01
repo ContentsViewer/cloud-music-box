@@ -30,6 +30,8 @@ interface TrackListItemProps {
     event: React.MouseEvent<HTMLButtonElement>,
     track: AudioTrackFileItem
   ) => void
+  secondaryAction?: (track: AudioTrackFileItem) => React.ReactNode
+  hideTrackNumber?: boolean
 }
 
 const TrackListItem = React.memo(function TrackListItem({
@@ -37,6 +39,8 @@ const TrackListItem = React.memo(function TrackListItem({
   activeTrack,
   playTrack,
   onMenuClick,
+  secondaryAction,
+  hideTrackNumber,
 }: TrackListItemProps) {
   const [themeStoreState] = useThemeStore()
 
@@ -55,6 +59,7 @@ const TrackListItem = React.memo(function TrackListItem({
     <ListItem
       secondaryAction={
         <div>
+          {secondaryAction?.(track)}
           <IconButton
             sx={{
               color: colorOnSurfaceVariant,
@@ -78,11 +83,13 @@ const TrackListItem = React.memo(function TrackListItem({
         }}
         selected={selected}
       >
-        <ListItemIcon>
-          <Typography color={colorOnSurfaceVariant}>
-            {track.metadata?.common.track.no}
-          </Typography>
-        </ListItemIcon>
+        {hideTrackNumber ? null : (
+          <ListItemIcon>
+            <Typography color={colorOnSurfaceVariant}>
+              {track.metadata?.common.track.no}
+            </Typography>
+          </ListItemIcon>
+        )}
         <ListItemText
           primaryTypographyProps={{
             style: {
@@ -112,12 +119,22 @@ const TrackListInner = React.memo(function TrackListInner({
   tracks,
   activeTrack,
   playTrack,
+  extraMenuItems,
+  secondaryAction,
+  hideTrackNumber,
 }: {
   tracks?: AudioTrackFileItem[]
   activeTrack?: AudioTrackFileItem
   playTrack: (track: AudioTrackFileItem) => void
+  extraMenuItems?: (
+    track: AudioTrackFileItem,
+    closeMenu: () => void
+  ) => React.ReactNode
+  secondaryAction?: (track: AudioTrackFileItem) => React.ReactNode
+  hideTrackNumber?: boolean
 }) {
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null)
+  const [menuTrack, setMenuTrack] = useState<AudioTrackFileItem | null>(null)
   const refMenuTrack = useRef<AudioTrackFileItem | null>(null)
   const [, routerActions] = useRouter()
 
@@ -125,9 +142,12 @@ const TrackListInner = React.memo(function TrackListInner({
     (event: React.MouseEvent<HTMLButtonElement>, track: AudioTrackFileItem) => {
       setMenuAnchorEl(event.currentTarget)
       refMenuTrack.current = track
+      setMenuTrack(track)
     },
     []
   )
+
+  const closeMenu = useCallback(() => setMenuAnchorEl(null), [])
 
   return (
     <List>
@@ -138,12 +158,14 @@ const TrackListInner = React.memo(function TrackListInner({
           activeTrack={activeTrack}
           playTrack={playTrack}
           onMenuClick={onMenuClick}
+          secondaryAction={secondaryAction}
+          hideTrackNumber={hideTrackNumber}
         />
       ))}
       <Menu
         anchorEl={menuAnchorEl}
         open={Boolean(menuAnchorEl)}
-        onClose={() => setMenuAnchorEl(null)}
+        onClose={closeMenu}
         keepMounted
       >
         <MenuItem
@@ -155,6 +177,7 @@ const TrackListInner = React.memo(function TrackListInner({
         >
           <ListItemText>Open Files</ListItemText>
         </MenuItem>
+        {menuTrack ? extraMenuItems?.(menuTrack, closeMenu) : null}
       </Menu>
     </List>
   )
@@ -162,7 +185,10 @@ const TrackListInner = React.memo(function TrackListInner({
 
 interface TrackListProps {
   tracks: AudioTrackFileItem[] | undefined
-  albumId?: string
+  /** Deep link the player card's back arrow returns to, e.g. `/albums#<id>` */
+  sourceUrl?: string
+  /** Album order. Off for playlists, where the given order is the order. */
+  sortByTrackNumber?: boolean
   cssStyle?: SerializedStyles
   /** File of the currently playing track (for row highlighting) */
   activeTrack?: AudioTrackFileItem
@@ -172,18 +198,36 @@ interface TrackListProps {
     tracks: AudioTrackFileItem[],
     sourceUrl: string
   ) => void
+  /**
+   * Extra entries for the per-row overflow menu. Supplied by the page so that
+   * other features (playlists) can act on a track without this feature
+   * depending on them.
+   */
+  extraMenuItems?: (
+    track: AudioTrackFileItem,
+    closeMenu: () => void
+  ) => React.ReactNode
+  /** Inline controls rendered before the overflow button, e.g. Keep / Remove */
+  secondaryAction?: (track: AudioTrackFileItem) => React.ReactNode
+  hideTrackNumber?: boolean
 }
 
 export const TrackList = React.memo(function TrackList({
   tracks,
-  albumId,
+  sourceUrl,
+  sortByTrackNumber = true,
   cssStyle,
   activeTrack,
   onPlayTracks,
+  extraMenuItems,
+  secondaryAction,
+  hideTrackNumber,
 }: TrackListProps) {
-
   const tracksSorted = useMemo(() => {
-    return tracks?.sort((a, b) => {
+    if (!tracks) return tracks
+    if (!sortByTrackNumber) return tracks
+    // Copy first: sorting in place would reorder the caller's own array
+    return [...tracks].sort((a, b) => {
       const aDiskN = a.metadata?.common.disk?.no || 1
       const bDiskN = b.metadata?.common.disk?.no || 1
       const aTrackN = a.metadata?.common.track.no || 1
@@ -192,20 +236,20 @@ export const TrackList = React.memo(function TrackList({
       if (aDiskN !== bDiskN) return aDiskN - bDiskN
       return aTrackN - bTrackN
     })
-  }, [tracks])
+  }, [tracks, sortByTrackNumber])
 
   const playTrack = useCallback(
     (file: AudioTrackFileItem) => {
       const tracks = tracksSorted
 
       if (!tracks) return
-      if (!albumId) return
+      if (!sourceUrl) return
 
       const index = tracks.findIndex(t => t.id === file.id)
 
-      onPlayTracks(index, tracks, `/albums#${encodeURIComponent(albumId)}`)
+      onPlayTracks(index, tracks, sourceUrl)
     },
-    [tracksSorted, albumId, onPlayTracks]
+    [tracksSorted, sourceUrl, onPlayTracks]
   )
 
   return (
@@ -214,6 +258,9 @@ export const TrackList = React.memo(function TrackList({
         tracks={tracksSorted}
         activeTrack={activeTrack}
         playTrack={playTrack}
+        extraMenuItems={extraMenuItems}
+        secondaryAction={secondaryAction}
+        hideTrackNumber={hideTrackNumber}
       />
     </div>
   )
