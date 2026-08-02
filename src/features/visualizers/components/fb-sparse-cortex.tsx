@@ -65,8 +65,22 @@ const LOUD_FLOOR = 0.3 // input energy floor (no learning or seeding on silence 
 // --- INTERPRETATION layer parameters ---
 const G = 64 // G x G lattice
 const N = G * G // 4096 cells
-const K_ACTIVE = 82 // sparseness: simultaneous firings (12=differentiation-first vs 82=monochrome; 24=compromise with motion)
+const K_ACTIVE = 200 // sparseness: simultaneous firings (12=differentiation-first vs 82=monochrome; 24=compromise with motion)
 const ETA = 0.06 // learning rate (higher = the map breathes with the music; 0.06=too fluid, 0.02=crystalline)
+// [self-masked term] ADDED to the original update, never replacing it: each firing
+// cell is also pulled toward normalize(x^ * W_i / max W_i) - the input heard
+// through its own bands. Unlike the shared residual (one direction for every
+// fired cell) this direction differs per cell, so co-firing cells can diverge -
+// gently. The ever-present cooperation keeps relaxing everyone back toward the
+// live mixture, so the equilibrium is a TRANSIENT tint: cells catching a distinct
+// instrument take on its hue while it plays, and melt back when it stops.
+// 0 = exactly the original. Raise for deeper, longer-lived instrument tints.
+// Measured: 0.015 with no sharpening = zero effect (pairCos 0.997, i.e. exactly
+// the original) - without the L1 the mask stays broad, x^*mask ~ x^, and the term
+// is just another mixture-follower. The mild L1 below is what gives the mask its
+// narrowing feedback; these two only work as a pair.
+const ETA_SELF = 0.06
+const SHARP_SELF = 3
 // SOM annealing (Kohonen's textbook recipe): right after initialization, a large
 // neighborhood radius and strong cooperation coarsely align the whole map, then
 // both shrink over time to polish locally. A freshly batch-initialized map has
@@ -518,6 +532,7 @@ export const FbSparseCortex = () => {
   const seeded = useMemo(() => new Uint8Array(N), [])
   const mature = useMemo(() => new Float32Array(N), [])
   const actMem = useMemo(() => new Float32Array(N), [])
+  const selfT = useMemo(() => new Float32Array(DIM), []) // self-masked target scratch
   const stats = useMemo(
     () => ({
       seededCount: 0,
@@ -1014,6 +1029,7 @@ export const FbSparseCortex = () => {
         resE += resid[d] * resid[d]
       }
       stats.resFrac = resE / inputE
+      const xInv = 1 / (Math.sqrt(inputE) + 1e-9) // x^ scale for the self-masked term
 
       // SOM annealing: neighborhood radius and cooperation strength converge
       // exponentially from large to small with map age (cumulative seconds of
@@ -1045,10 +1061,30 @@ export const FbSparseCortex = () => {
           const yi = (drive[i] - kThr) * invMaxU // 0..1 (brightness)
           const aeff = alpha * act[i]
           const b = i * DIM
-          // non-negative sparse dictionary learning: D_i += eta*aeff*e ; clamp(>=0) ; unit L2
+          // self-masked target: the input heard through this cell's own bands
+          let mxw = 0
+          for (let d = 0; d < DIM; d++) if (W[b + d] > mxw) mxw = W[b + d]
+          const mInv = 1 / (mxw + 1e-9)
+          let tn = 0
+          for (let d = 0; d < DIM; d++) {
+            const v = featVec[d] * xInv * W[b + d] * mInv
+            selfT[d] = v
+            tn += v * v
+          }
+          const tInv = 1 / (Math.sqrt(tn) + 1e-6)
+          const sStep = ETA_SELF * dtScale
+          let mwS = 0
+          for (let d = 0; d < DIM; d++) mwS += W[b + d]
+          const cutS = (SHARP_SELF * sStep * mwS) / DIM // mask-narrowing feedback
+          // original shared-residual term + weak per-cell self-masked term
+          // (see ETA_SELF); clamp(>=0) ; unit L2
           let nrm = 0
           for (let d = 0; d < DIM; d++) {
-            let wv = W[b + d] + ETA * dtScale * aeff * resid[d]
+            let wv =
+              W[b + d] +
+              ETA * dtScale * aeff * resid[d] +
+              sStep * (selfT[d] * tInv - W[b + d]) -
+              cutS
             if (wv < 0) wv = 0
             W[b + d] = wv
             nrm += wv * wv
