@@ -296,36 +296,54 @@ const BG_FRAG = `
     gl_FragColor = vec4(col, uOpacity);
   }
 `
-// [Hemisphere mapping] shared by the three vertex shaders: square lattice -> disk
-// (Shirley-Chow concentric mapping) -> gnomonic projection of the hemisphere the
-// disk orthographically depicts (R = r/sqrt(1-r^2); rim radially toward infinity,
-// center near-identity)
+// [Hemisphere mapping] shared by the three vertex shaders: square lattice ->
+// elliptical-grid disk (Nowell), blended with the flat square by uRound
+// (0 = square, 1 = full disk, between = rounded square) -> gnomonic-style lift
+// R = r/(1-m^2)^beta. The divergence is driven by m = the fraction of the way to
+// the SQUARE boundary (Chebyshev), not by the disk radius: for the previous
+// Shirley mapping the two were identical (its radius was exactly max(|x|,|y|)),
+// and defining it this way keeps "the lattice rim sits at infinity" true at
+// every roundness instead of only at uRound = 1.
 const DISK_GLSL = `
   uniform float uHemi;
   uniform float uBeta;
+  uniform float uRound; // roundness lambda: 0 = flat square, 1 = elliptical disk
   uniform float uFlat; // 1 = bypass disk+hemisphere, render the raw lattice plane (debug)
   vec2 squareToDisk(vec2 p){
-    if (p.x*p.x > p.y*p.y) {
-      float phi = 0.78539816 * (p.y / p.x);
-      return p.x * vec2(cos(phi), sin(phi));
-    } else if (p.y != 0.0) {
-      float phi = 1.57079633 - 0.78539816 * (p.x / p.y);
-      return p.y * vec2(cos(phi), sin(phi));
-    }
-    return vec2(0.0);
+    // elliptical grid mapping (Nowell): square boundary -> unit circle, smooth,
+    // no creases; blended toward identity by uRound
+    vec2 e = vec2(p.x * sqrt(1.0 - 0.5 * p.y * p.y),
+                  p.y * sqrt(1.0 - 0.5 * p.x * p.x));
+    return mix(p, e, uRound);
   }
   // returns: xy = projected coords, z = tangential stretch s, w = radial stretch rs (>s)
   vec4 diskWarp(vec2 pos){
     float L = ${(SPLAT_LAYOUT + SPLAT_POS_OFFSET).toFixed(4)};
-    vec2 dp = squareToDisk(pos / L);
-    float r2 = dot(dp, dp);
-    float D = max(1.0 - r2, ${HALO_EPS.toFixed(3)});
-    float s = pow(D, -uBeta);              // R = r/(1-r^2)^beta; beta 0.5 = hemisphere
-    float rs = s * (1.0 + 2.0 * uBeta * r2 / D); // dR/dr
+    vec2 ps = pos / L;
+    vec2 dp = squareToDisk(ps);
+    float m = max(abs(ps.x), abs(ps.y)); // fraction to the square boundary
+    float D = max(1.0 - m * m, ${HALO_EPS.toFixed(3)});
+    float s = pow(D, -uBeta);              // R = r/(1-m^2)^beta; beta 0.5 = hemisphere
+    float rs = s * (1.0 + 2.0 * uBeta * m * m / D); // dR/dr
     // uHemi scales only the coordinates (the lens); s/rs stay the pure
     // divergence stretch so the rim brightness compensation is not affected by
     // zoom (uniform zoom conserves per-area light by itself)
     return mix(vec4(dp * s * L * uHemi, s, rs), vec4(pos, 1.0, 1.0), uFlat);
+  }
+  // area ratio (Jacobian determinant) of the blended square->disk map. The
+  // elliptical mapping is not equal-area (unlike Shirley): it compresses the
+  // corners, which would brighten them under additive blending. Gas brightness
+  // is multiplied by this so accumulated light stays uniform per screen area.
+  float diskDet(vec2 pos){
+    float L = ${(SPLAT_LAYOUT + SPLAT_POS_OFFSET).toFixed(4)};
+    vec2 ps = pos / L;
+    float a = sqrt(1.0 - 0.5 * ps.y * ps.y);
+    float b = sqrt(1.0 - 0.5 * ps.x * ps.x);
+    float xy = ps.x * ps.y;
+    float g = 1.0 - uRound;
+    float det = (g + uRound * a) * (g + uRound * b)
+              - uRound * uRound * xy * xy / (4.0 * a * b);
+    return mix(clamp(det, 0.05, 1.5), 1.0, uFlat);
   }
 `
 
@@ -362,8 +380,9 @@ const GAS_VERT = `
     vec2 pd = vec2(sd.x * uAspect, sd.y);
     vDir = dot(pd, pd) > 1e-8 ? normalize(pd) : vec2(1.0, 0.0);
     vAniso = tScale / rScale;
-    // Luminance: normalize by sprite area so on-screen falloff = (area dilution)^(HALO_BRIGHT-1)
-    vBright = aBright * pow(max(wp.z * wp.w, 1.0), ${HALO_BRIGHT.toFixed(3)}) / (rScale * tScale);
+    // Luminance: normalize by sprite area so on-screen falloff = (area dilution)^(HALO_BRIGHT-1);
+    // diskDet compensates the (non-equal-area) elliptical mapping's compression
+    vBright = aBright * diskDet(position.xy) * pow(max(wp.z * wp.w, 1.0), ${HALO_BRIGHT.toFixed(3)}) / (rScale * tScale);
     gl_Position = vec4(sd.x, sd.y, 0.0, 1.0);
   }
 `
@@ -700,17 +719,17 @@ export const FbSparseCortex = () => {
   // (uSize / uTint would snap back to their initial values)
   const gasUniforms = useMemo(
     // uSize is set by the resize effect
-    () => ({ uAspect: { value: 1 }, uSize: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uFlat: { value: 0 } }),
+    () => ({ uAspect: { value: 1 }, uSize: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uRound: { value: 1 }, uFlat: { value: 0 } }),
     []
   )
   const compUniforms = useMemo(() => ({ uTex: { value: gasRT.texture } }), [gasRT])
   const headUniforms = useMemo(
     // uSizeScale is set by the resize effect
-    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uSizeScale: { value: 1 }, uFlat: { value: 0 } }),
+    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uSizeScale: { value: 1 }, uRound: { value: 1 }, uFlat: { value: 0 } }),
     []
   )
   const trailUniforms = useMemo(
-    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uFlat: { value: 0 } }),
+    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uRound: { value: 1 }, uFlat: { value: 0 } }),
     []
   )
   const bgUniforms = useMemo(
@@ -727,6 +746,14 @@ export const FbSparseCortex = () => {
         headUniforms.uFlat.value = v
         trailUniforms.uFlat.value = v
         console.log(`[fbcx] projection: ${v ? "flat lattice" : "hemisphere"}`)
+      }
+      if (e.key === "," || e.key === ".") {
+        // roundness lambda tuning: , = squarer  . = rounder
+        const v = Math.min(1, Math.max(0, gasUniforms.uRound.value + (e.key === "." ? 0.05 : -0.05)))
+        gasUniforms.uRound.value = v
+        headUniforms.uRound.value = v
+        trailUniforms.uRound.value = v
+        console.log(`[fbcx] roundness lambda = ${v.toFixed(2)}`)
       }
     }
     window.addEventListener("keydown", onKey)
@@ -771,6 +798,13 @@ export const FbSparseCortex = () => {
         gasUniforms.uFlat.value = v
         headUniforms.uFlat.value = v
         trailUniforms.uFlat.value = v
+      },
+      // roundness lambda: 0 = flat square, 1 = full elliptical disk (also on , / . keys)
+      setRound: (v: number) => {
+        const c = Math.min(1, Math.max(0, v))
+        gasUniforms.uRound.value = c
+        headUniforms.uRound.value = c
+        trailUniforms.uRound.value = c
       },
     }
   }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, selfTune, audioBus, gasUniforms, headUniforms, trailUniforms])
