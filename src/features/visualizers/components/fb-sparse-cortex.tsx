@@ -90,6 +90,40 @@ const ETA = 0.06 // learning rate (higher = the map breathes with the music; 0.0
 // fair fresh-map comparison).
 const ETA_SELF = 0.12
 const SHARP_SELF = 3
+// [residual second round] The single missing piece for "a NEW instrument joins
+// while others keep playing -> a new cluster appears": plain k-WTA scores the
+// raw mixture, so specialists of an added part can never outscore the
+// mixture-matchers and the added part never opens its own region. After round 1
+// reconstructs and subtracts what it explained (the resid/alpha computation that
+// already exists), a second selection round scores W . resid: whatever round 1
+// did NOT explain - i.e. the newly added part - picks its own winners, which
+// pour heat at their own location. Runs only when meaningful residual energy is
+// left, so the extra winners breathe with the arrangement instead of being a
+// fixed budget. Round-2 winners LEARN toward the residual (same shared-residual
+// rule as round 1, with the residual as their target): a truly novel sound
+// matches nobody at first (best cos with the residual measured ~0.03), so
+// selection alone can never bootstrap - but a coherent residual picks the SAME
+// near-match cells hop after hop, learning compounds, and within a second they
+// are genuine specialists that win round 1 on the raw mixture and open their
+// own district. An incoherent (noise) residual picks different cells each hop,
+// nothing compounds, and the L1 cut prunes the thin junk - the existing
+// self-mask machinery is what makes recruitment selective to real structure.
+const K2_ACTIVE = 48 // max extra winners fitted to the unexplained residual
+// Energy gate kept LOW: cooperation absorbs a newly added instrument into the
+// field within seconds, so the exploitable residual is a brief entry transient
+// plus a small steady leak (measured 0.02-0.05 synthetic, 0.03-0.18 real music;
+// the first 0.12 gate never fired at all).
+const R2_MIN_E = 0.04
+// Cosine floor kept BELOW the measured noise ceiling (cos 0.02-0.05): a novel
+// instrument's first hops score exactly as low as noise - only temporal
+// coherence (compounding, above) separates them, so the floor cannot. The first
+// 0.35 floor demanded 10x the best match that ever occurs and fired once in
+// 132 samples. Live-tunable via __fbcx.selfTune.r2cos.
+const R2_MIN_COS = 0.02
+// Recruitment speed: round-2 learning step is ETA * r2gain * y2 * resE toward
+// the residual (y2 = normalized round-2 ramp). ~1 -> bootstrap in O(10) hops
+// when the residual direction holds. Live-tunable via __fbcx.selfTune.r2gain.
+const R2_GAIN = 1
 // SOM annealing (Kohonen's textbook recipe): right after initialization, a large
 // neighborhood radius and strong cooperation coarsely align the whole map, then
 // both shrink over time to polish locally. A freshly batch-initialized map has
@@ -557,19 +591,27 @@ export const FbSparseCortex = () => {
   const usage = useMemo(() => new Float32Array(N), [])
   const drive = useMemo(() => new Float32Array(N), [])
   const driveSorted = useMemo(() => new Float32Array(N), [])
+  // [residual second round] scores against the unexplained residual + fired set
+  const drive2 = useMemo(() => new Float32Array(N), [])
+  const drive2Sorted = useMemo(() => new Float32Array(N), [])
+  const fired2 = useMemo(() => new Uint8Array(N), [])
   const heat = useMemo(() => new Float32Array(N), [])
   const seeded = useMemo(() => new Uint8Array(N), [])
   const mature = useMemo(() => new Float32Array(N), [])
   const actMem = useMemo(() => new Float32Array(N), [])
   const selfT = useMemo(() => new Float32Array(DIM), []) // self-masked target scratch
-  // live-tunable copies of ETA_SELF / SHARP_SELF for window exploration
-  // (exposed as __fbcx.selfTune; combine with the "r" reset for fair A/B runs)
-  const selfTune = useMemo(() => ({ eta: ETA_SELF, sharp: SHARP_SELF }), [])
+  // live-tunable copies of ETA_SELF / SHARP_SELF / round-2 floors for window
+  // exploration (exposed as __fbcx.selfTune; combine with "r" for fair A/B runs)
+  const selfTune = useMemo(
+    () => ({ eta: ETA_SELF, sharp: SHARP_SELF, r2cos: R2_MIN_COS, r2gain: R2_GAIN }),
+    []
+  )
   const stats = useMemo(
     () => ({
       seededCount: 0,
       inputE: 0,
       kThr: 0,
+      nWin2: 0, // residual second-round winners this hop (0 = nothing unexplained)
       resFrac: 0,
       windows: 0, // number of windows received
       seams: 0, // times the stitching broke (excluding the first window; 0 = perfectly continuous)
@@ -778,6 +820,7 @@ export const FbSparseCortex = () => {
   useEffect(() => {
     ;(window as any).__fbcx = {
       G, M, DIM, seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats,
+      drive, drive2, // selection scores (round 1 = mixture, round 2 = residual)
       selfTune, // live ETA_SELF/SHARP_SELF tuning (window exploration)
       audioBus, // record/replay verification: console can capture and re-emit frames
       setSeedRng: (fn: (() => number) | null) => { seedRngRef.current = fn ?? Math.random },
@@ -807,7 +850,7 @@ export const FbSparseCortex = () => {
         trailUniforms.uRound.value = c
       },
     }
-  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, selfTune, audioBus, gasUniforms, headUniforms, trailUniforms])
+  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, drive, drive2, selfTune, audioBus, gasUniforms, headUniforms, trailUniforms])
 
   // [Logic input] Subscribe to the audio bus and stitch 0.5 s window snapshots by
   // file position. Push reception without React state (no re-renders, no interim
@@ -1093,6 +1136,44 @@ export const FbSparseCortex = () => {
       stats.resFrac = resE / inputE
       const xInv = 1 / (Math.sqrt(inputE) + 1e-9) // x^ scale for the self-masked term
 
+      // [residual second round] see the constants block. Score every non-fired
+      // cell against what round 1 left unexplained; add winners above the floors.
+      fired2.fill(0)
+      let kThr2 = 0
+      let invMaxU2 = 0
+      let nWin2 = 0
+      if (resE > R2_MIN_E * inputE) {
+        let max2 = -1e9
+        for (let i = 0; i < N; i++) {
+          if (!seeded[i] || drive[i] >= kThr) {
+            drive2[i] = -1e9 // round-1 winners keep their seat; no double firing
+            continue
+          }
+          const b = i * DIM
+          let s = 0
+          for (let d = 0; d < DIM; d++) s += W[b + d] * resid[d]
+          drive2[i] = s
+          if (s > max2) max2 = s
+        }
+        const floor2 = selfTune.r2cos * Math.sqrt(resE) // |W| ~ 1, so s = cos x |resid|
+        if (max2 > floor2) {
+          drive2Sorted.set(drive2)
+          kThr2 = nthLargest(drive2Sorted, N, K2_ACTIVE)
+          if (kThr2 < floor2) kThr2 = floor2
+          invMaxU2 = 1 / (max2 - kThr2 + 1e-6)
+          for (let i = 0; i < N; i++) {
+            if (drive2[i] >= kThr2) {
+              fired2[i] = 1
+              nWin2++
+            }
+          }
+        }
+      }
+      stats.nWin2 = nWin2
+      // recruitment amplitude for round-2 learning: scales with how much energy
+      // is actually left unexplained (quiet leak -> tiny steps, real entry -> fast)
+      const r2Amp = nWin2 > 0 ? selfTune.r2gain * Math.sqrt(resE) : 0
+
       // SOM annealing: neighborhood radius and cooperation strength converge
       // exponentially from large to small with map age (cumulative seconds of
       // audible audio). Early = coarse alignment of the whole map, later = local polish.
@@ -1114,14 +1195,21 @@ export const FbSparseCortex = () => {
       let nTouched = 0
       let nDirty = 0
       for (let i = 0; i < N; i++) {
-        const fired = seeded[i] && drive[i] >= kThr ? 1 : 0
+        const fired1 = seeded[i] && drive[i] >= kThr
+        const fired = fired1 || fired2[i] ? 1 : 0
         usage[i] = (1 - USE_ALPHA * dtScale) * usage[i] + USE_ALPHA * dtScale * fired
         thr[i] += GAMMA_IP * dtScale * (usage[i] - P_TARGET)
         if (thr[i] > THR_MAX) thr[i] = THR_MAX
         else if (thr[i] < 0) thr[i] = 0
         if (fired) {
-          const yi = (drive[i] - kThr) * invMaxU // 0..1 (brightness)
-          const aeff = alpha * act[i]
+          // brightness: round-1 winners on the mixture ramp, round-2 winners on
+          // their own residual ramp (their raw drive sits below kThr by design)
+          const yi = fired1 ? (drive[i] - kThr) * invMaxU : (drive2[i] - kThr2) * invMaxU2
+          // round-1 winners absorb the residual scaled by their reconstruction
+          // share; round-2 recruits absorb it scaled by recruitment amplitude
+          // (same shared-residual rule, the residual IS their target - this is
+          // what turns a barely-matching recruit into a specialist of the new part)
+          const aeff = fired1 ? alpha * act[i] : r2Amp * yi
           const b = i * DIM
           // self-masked target: the input heard through this cell's own bands
           let mxw = 0

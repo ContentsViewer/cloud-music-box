@@ -143,14 +143,72 @@ Annealing (Kohonen schedule) applies to (C) only: radius 12→3, strength
 coarse alignment until ~45 s, local polish forever after. Resets with the map
 (`r` key / reload).
 
+### (D) Residual second round (selection + recruitment; 2026-08-02)
+
+Target: the user's stated best case — *"a NEW instrument joins while others keep
+playing → a new cluster appears"*. Plain k-WTA scores the raw mixture, so an
+added part's would-be specialists can never outscore the mixture-matchers; the
+selection stage itself has to be given the unexplained part.
+
+Mechanism (`K2_ACTIVE = 48`, `R2_MIN_E = 0.04`, `R2_MIN_COS = 0.02`,
+`R2_GAIN = 1`; the last two live-tunable via `__fbcx.selfTune.r2cos/r2gain`):
+
+1. Round 1 runs exactly as before; its existing `recon`/`alpha`/`resid`
+   computation is reused.
+2. When `resE > R2_MIN_E * inputE`, every non-round-1 cell is scored `W · resid`
+   and up to `K2_ACTIVE` winners above a small cosine floor fire additionally
+   (`stats.nWin2`; they pour heat at their own location on their own ramp).
+3. Round-2 winners **learn toward the residual** with the same shared-residual
+   rule as round 1 (`aeff = r2gain · y2 · sqrt(resE)` instead of `alpha·act`).
+   This is essential: a truly novel sound matches *nobody* at first (best
+   cos(W, resid) measured ≈ 0.03), so selection alone can never bootstrap. A
+   coherent residual picks the same near-match cells hop after hop and learning
+   compounds; an incoherent (noise) residual picks different cells each hop and
+   the L1 cut prunes the thin junk.
+
+**Measured verdict (aged-map synthetic: 220 Hz aged 72 s past anneal, then
+3 kHz added on top; plus real-track sanity):**
+
+- Entry detection is precise and honest: `nWin2` 0 → 33–48 on the very hop the
+  second tone enters, breathing 0–48 through the absorption window. On the real
+  track round 2 is active on ~27 % of hops (avg 5–13, peaks 48 in rich
+  passages), silent on mono textures. Perf cost negligible (tLearn ≈ 2.8 ms).
+- Recruit learning compounds as designed: cos(top recruit, resid) noise 0.04 →
+  0.30 at `r2gain = 1`, → 0.82 sustained at `r2gain = 4`.
+- **A persistent separate district does NOT form, and the reason is
+  structural, not a tuning miss.** Two independent blockers, both measured:
+  1. *Washout*: cooperation (C) pulls every active neighborhood toward the live
+     mixture at ~0.01–0.03/hop — round-2 recruitment at gain 1 (~0.007/hop
+     effective) loses the race, and within seconds the round-1 elite absorbs
+     the new part into their own weights (resFrac back to 0.03–0.08, gate
+     closes, recruitment stops reinforcing).
+  2. *Graduation blocked*: once the elite is mixture-tuned, a pure-B specialist's
+     drive on the mixture (LS orthogonality gives a residual-tracker exactly
+     `sqrt(resE)` ≈ 0.5, and even a true B-specialist ~0.6 of max) never beats
+     the 82nd mixture-matcher. End state measured: input B/A ratio swinging
+     0.42 → 1.27 across tremolo phases changes the round-1 winner set by
+     **zero cells**.
+- What the mechanism therefore *does* deliver: a **transient entry bloom** —
+  extra glow away from the current winners for the ~10–20 s it takes the field
+  to absorb the newcomer — i.e. the *moment* of appearance is visible, the
+  permanent district is not. Note the synthetic steady superposition (both
+  tones always on) is the worst case; real music keeps re-opening the residual
+  at every entry/change, which is why round 2 keeps breathing there.
+
+Persistent per-instrument districts under constant superposition would require
+parts-based competition (winners penalized for redundantly covering the same
+bands — true sparse coding), which means changing (A)/(C)'s "everyone absorbs
+the mixture" dynamics — the load-bearing aesthetic machinery. That trade-off is
+a product decision, not a tuning knob.
+
 ### Support systems
 
 - **Seeding**: on the first audible hop, all 4096 cells are batch-initialized
   from the first real patch + jitter (±0.04). No random init, no growth.
 - **IP homeostasis**: overused cells accumulate `thr` (cap 0.3, gamma 2e-5 —
   minutes-scale rotation). Prevents permanent winner lock-in, slowly.
-- **k-WTA**: `K_ACTIVE = 200` (raised from 82; more firing = more heat
-  dynamics; the author comment records 12 = differentiation-first,
+- **k-WTA**: `K_ACTIVE = 82` (a 200 experiment was tried and reverted — "more
+  cells barely changes it"; the author comment records 12 = differentiation-first,
   82 = monochrome).
 
 ---
@@ -186,10 +244,10 @@ flowchart LR
 | 0.015 | 0 | 0.997 | — | — | zero effect (mask stays broad) |
 | 0.06 | 3 | 0.987 | — | — | direction correct, ~10x too weak |
 | 0.06 | 6 | 0.964 | 2.2 | 0.25 | sharp cannot compensate for missing charge |
-| 0.12 | 3 | 0.892 | 2.8 | 0.27 | mild tint, calm |
+| **0.12** | **3** | **0.892** | **2.8** | **0.27** | **chosen (user): calmest regime with a real effect — controlled A/B vs ETA=0 measured hue spread 1.6 → 3.9 bands (2.4x), pairCos 0.967 → 0.896** |
 | 0.12 | 6 | 0.774 | 2.4 | 0.65 | deeper but narrower colors |
 | 0.18 | 3 | 0.891 | 2.4 | 0.42 | (run-to-run noise ≈ ±0.05 visible here) |
-| **0.25** | **3** | **0.654** | **4.5** | **0.63** | **chosen: deepest tint with widest hue spread at moderate flicker; base nebula intact** |
+| 0.25 | 3 | 0.654 | 4.5 | 0.63 | deepest tint with widest spread; previously chosen, but drifts toward mosaic/white cells at high delta |
 | 0.25 | 6 | 0.215 | 2.3 | 1.27 | over-differentiated, flickery (past the window) |
 
 Method: real track looped from t=0, map reset (`r`) between runs, ~105 s of
@@ -252,11 +310,15 @@ Standing lessons:
 ## 5. Debug surface
 
 - `window.__fbcx`: `G M DIM seeded mature heat W thr usage centroidArr featVec
-  env2 stats audioBus setSeedRng setHemiScale setHemiBeta`.
+  env2 stats drive drive2 selfTune audioBus setSeedRng setHemiScale setHemiBeta
+  setFlat setRound`.
 - `stats`: `mapAge` (audible seconds; annealing clock), `seams`, `resFrac`,
-  `kThr`, stage timings `tInput/tForward/tSelect/tLearn/tField/tParticles`.
+  `kThr`, `nWin2` (round-2 winners this hop; 0 = nothing unexplained), stage
+  timings `tInput/tForward/tSelect/tLearn/tField/tParticles`.
+- `selfTune` (live-tunable): `eta sharp` (§2 (B)) and `r2cos r2gain` (§2 (D)).
 - `r` key: reset map (weights, seeding, annealing clock; cochlear filter state
   intentionally survives).
+- `g` key: flat-lattice debug view; `,` / `.`: hemisphere roundness λ ±0.05.
 - W and mapAge live only in component memory: reload / visualizer switch loses
   the learned map and restarts annealing.
 
