@@ -180,21 +180,32 @@ flowchart LR
 
 ### Tuning state (2026-08-02)
 
-| ETA_SELF | SHARP_SELF | pairCos @ ~100 s (real track) | verdict |
-| --- | --- | --- | --- |
-| 0 | — | ~0.93 | exactly the original |
-| 0.015 | 0 | 0.997 | zero effect (mask stays broad) |
-| 0.06 | 3 | 0.987 | direction correct, ~10x too weak |
-| 0.12–0.3 | 3–6 | *unmeasured* | recommended exploration band |
+| ETA_SELF | SHARP_SELF | pairCos @ ~105 s | hue spread (bands, p5–p95) | hue flicker (bands/s, lit cells) | verdict |
+| --- | --- | --- | --- | --- | --- |
+| 0 | — | ~0.93 | ~1 | — | exactly the original |
+| 0.015 | 0 | 0.997 | — | — | zero effect (mask stays broad) |
+| 0.06 | 3 | 0.987 | — | — | direction correct, ~10x too weak |
+| 0.06 | 6 | 0.964 | 2.2 | 0.25 | sharp cannot compensate for missing charge |
+| 0.12 | 3 | 0.892 | 2.8 | 0.27 | mild tint, calm |
+| 0.12 | 6 | 0.774 | 2.4 | 0.65 | deeper but narrower colors |
+| 0.18 | 3 | 0.891 | 2.4 | 0.42 | (run-to-run noise ≈ ±0.05 visible here) |
+| **0.25** | **3** | **0.654** | **4.5** | **0.63** | **chosen: deepest tint with widest hue spread at moderate flicker; base nebula intact** |
+| 0.25 | 6 | 0.215 | 2.3 | 1.27 | over-differentiated, flickery (past the window) |
 
-Why weak: effective charge rate = `ETA_SELF x ~5% duty ≈ 0.003/hop` vs
-relaxation ≈ 0.004/hop — the balance still sits near the mixture. Raise
-`ETA_SELF` in doublings; if 0.2 is still too subtle, weaken the antagonist one
-notch (`ETA_NB` 0.004 → 0.002) at the cost of drifting further from the
-original. Failure modes: `ETA_SELF` too high → per-hop lurching, flicker even
-in tutti; `SHARP_SELF` too high → confetti-pure colors (standalone experiments
-reached pairCos 0.265 at `SHARP=8` with (A)/(C) removed — maximal separation,
-rejected look).
+Method: real track looped from t=0, map reset (`r`) between runs, ~105 s of
+audible audio each, metrics via `__fbcx` (`selfTune` is live-tunable for this).
+Note `SHARP_SELF` above ~3 *narrows* the hue spread even as pairCos drops:
+extreme sparsity concentrates atoms onto few dominant bands. Depth is driven by
+`ETA_SELF`, and 0.25 sits just past a nonlinear threshold (0.12→0.18 barely
+moved, 0.25 jumped).
+
+The window exists: tint depth is governed by `ETA_SELF` against the always-on
+relaxation (charge is diluted by the ~5% firing duty), and the aesthetic
+failure mode on the far side is `SHARP_SELF`-driven flicker/confetti (the
+standalone build hit pairCos 0.215–0.265 — maximal separation, rejected look).
+If deeper tints are ever needed beyond `ETA_SELF`, the other lever is weakening
+the antagonist one notch (`ETA_NB` 0.004 → 0.002) at the cost of drifting
+further from the original.
 
 Reference measurement (pairwise atom similarity over 300 random pairs):
 
@@ -261,12 +272,66 @@ post-hoc and the mapping is not an exhaustive literature survey.
 | Ingredient here | Lineage | Reference |
 | --- | --- | --- |
 | Parts from non-negative mixtures; multiplicative structure; **zeroed components never return** (the one-way door of §2 (B)) | Non-negative matrix factorization | Lee & Seung, *Learning the parts of objects by non-negative matrix factorization*, Nature 401 (1999); Lee & Seung, *Algorithms for NMF*, NIPS (2001) |
-| Learn toward the **match between input and own weights**; prototype support only narrows (use it or lose it) — the closest single relative of the self-masked target | Adaptive Resonance Theory (ART-1 learns toward `input AND weights`; the self-mask is a graded multiplicative version) | Carpenter & Grossberg, CVGIP 37 (1987); Carpenter, Grossberg & Rosen, *Fuzzy ART*, Neural Networks 4 (1991) |
+| Learn toward the **match between input and own weights**; support only narrows — the closest single relative of the self-masked target (correspondence verified against the primary source, see below) | Adaptive Resonance Theory | Carpenter & Grossberg, CVGIP 37 (1987); Carpenter, Grossberg & Rosen, *Fuzzy ART*, Neural Networks 4 (1991) |
 | Fire-gated "move the winner toward the input"; differentiation via biased diets (temporal gating) | Competitive learning | Rumelhart & Zipser, *Feature discovery by competitive learning*, Cognitive Science 9 (1985) |
 | The lattice, neighborhood cooperation and the annealing schedule of the base implementation | Self-organizing maps | Kohonen, *Self-organized formation of topologically correct feature maps*, Biological Cybernetics 43 (1982) |
 | L1 erosion = soft-thresholding inside the learning step (§2 (B') is the proximal operator of an L1 penalty) | Sparse coding / iterative shrinkage | Olshausen & Field, Nature 381 (1996); Daubechies, Defrise & De Mol, Comm. Pure Appl. Math 57 (2004) |
 | Element-wise `normalize(x ∘ W)` iteration = per-component power method (the rich-get-richer amplifier of seed jitter) | Power iteration (standard linear algebra) | — |
 | Explaining-away / exclusive partition of the input (the rejected `d1b36fd` stack; the tool to reach for if exclusivity is ever needed) | Matching pursuit; Oja's rule for the per-winner update | Mallat & Zhang, IEEE Trans. Signal Processing 41 (1993); Oja, J. Math. Biology 15 (1982) |
+
+### ART correspondence, verified against the 1991 paper
+
+Checked directly against Carpenter, Grossberg & Rosen, *Fuzzy ART*, Neural
+Networks 4(6), 1991 (Boston University copy). The relevant primitives, as
+printed there:
+
+- Learning (their eq. 8): `w_J(new) = beta * (I AND w_J(old)) + (1-beta) * w_J(old)`
+  with fuzzy AND = component-wise min; fast learning is `beta = 1`.
+- Category choice (eq. 2): `T_j = |I AND w_j| / (alpha + |w_j|)`; single
+  winner-take-all node; ties break to the smallest index.
+- Vigilance / reset (eqs. 6-7): resonance iff `|I AND w_J| / |I| >= rho`, else
+  the node is reset and search continues.
+- Stability: "each LTM trace w_ij is **monotone nonincreasing** through time
+  and hence converges to a limit"; abstract: "Learning is stable because all
+  adaptive weights can only decrease in time."
+- "ART 1 learns **prototypes**, rather than exemplars, because the attended
+  feature vector X* [= I matched against the expectation], rather than the
+  input I itself, is learned."
+- Fast-commit slow-recode: `beta = 1` on first commitment, `beta < 1`
+  afterwards, to buffer memory against noise. Complement coding (on/off cells)
+  prevents category proliferation.
+
+Verified alignments with the self-masked rule:
+
+1. **Same functional form of the update.** Their eq. 8 is an EMA toward the
+   *match of input and own weights*; ours is `W <- (1-sStep) W + sStep *
+   normalize(x . W)` — identical structure with `beta <-> sStep` and
+   `min(I, w) <-> normalize(x . W)` as the match operator.
+2. **Learn the match, not the input** — the ART principle quoted above is
+   exactly the self-mask's premise (and why neither degenerates into plain
+   mixture averaging the way input-target rules do).
+3. **One-way support door.** min: where `w = 0`, `I AND w = 0` forever. Ours:
+   where `W_d = 0`, `t_d ∝ x_d W_d = 0` forever. Both prototypes can only
+   narrow their support.
+
+Verified differences (the analogy's limits):
+
+1. **Monotonicity scope.** Fuzzy ART: every individual weight is monotone
+   nonincreasing and learning *converges and stops*. Ours: only the *support*
+   is monotone; surviving components can grow (unit-sphere renormalization),
+   and nothing converges — cooperation (C) deliberately re-broadens atoms.
+   Our transient-tint design *intentionally violates* ART's core stability
+   property; their fast-commit slow-recode is a cousin mechanism but aims to
+   prevent forgetting, ours to cause it.
+2. **min cannot amplify.** `min(I, w)` caps components; our product +
+   renormalization amplifies relative differences (the power-iteration
+   rich-get-richer that turns seed jitter into specialization). That
+   ingredient is absent from ART.
+3. **Selection.** ART: one winner, explicit vigilance/reset search,
+   commitment. Ours: K_ACTIVE=200 simultaneous winners, no vigilance, no
+   reset, no commitment.
+4. No analog of complement coding / proliferation control on our side; ART
+   weights are not norm-constrained, ours live on the unit sphere.
 
 Position statement: the *combination* — unit-sphere EMA toward
 `normalize(x ∘ W_i)` with mean-scaled L1, added next to a shared-residual term

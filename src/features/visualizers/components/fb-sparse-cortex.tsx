@@ -65,7 +65,7 @@ const LOUD_FLOOR = 0.3 // input energy floor (no learning or seeding on silence 
 // --- INTERPRETATION layer parameters ---
 const G = 64 // G x G lattice
 const N = G * G // 4096 cells
-const K_ACTIVE = 200 // sparseness: simultaneous firings (12=differentiation-first vs 82=monochrome; 24=compromise with motion)
+const K_ACTIVE = 82 // sparseness: simultaneous firings (12=differentiation-first vs 82=monochrome; 24=compromise with motion)
 const ETA = 0.06 // learning rate (higher = the map breathes with the music; 0.06=too fluid, 0.02=crystalline)
 // [self-masked term] ADDED to the original update, never replacing it: each firing
 // cell is also pulled toward normalize(x^ * W_i / max W_i) - the input heard
@@ -75,11 +75,20 @@ const ETA = 0.06 // learning rate (higher = the map breathes with the music; 0.0
 // live mixture, so the equilibrium is a TRANSIENT tint: cells catching a distinct
 // instrument take on its hue while it plays, and melt back when it stops.
 // 0 = exactly the original. Raise for deeper, longer-lived instrument tints.
-// Measured: 0.015 with no sharpening = zero effect (pairCos 0.997, i.e. exactly
-// the original) - without the L1 the mask stays broad, x^*mask ~ x^, and the term
-// is just another mixture-follower. The mild L1 below is what gives the mask its
-// narrowing feedback; these two only work as a pair.
-const ETA_SELF = 0.06
+// Grid-searched on the real track (~105 s per run, map reset between runs;
+// pairCos / hue spread / hue flicker per second):
+//   (0.015, 0) 0.997 - zero effect: without the L1 the mask stays broad and the
+//               term is just another mixture-follower; the pair only works together
+//   (0.06, 3)  0.987 - direction correct, ~10x too weak
+//   (0.12, 3)  0.892  spread 2.8  flicker 0.27
+//   (0.12, 6)  0.774  spread 2.4  flicker 0.65
+//   (0.18, 3)  0.891  spread 2.4  flicker 0.42
+//   (0.25, 3)  0.654  spread 4.5  flicker 0.63   <- chosen: deepest tint that
+//               keeps the widest hue spread at moderate flicker; base look intact
+//   (0.25, 6)  0.215  spread 2.3  flicker 1.27  - over-differentiated, flickery
+// Live-tunable at runtime via __fbcx.selfTune (press "r" after changing for a
+// fair fresh-map comparison).
+const ETA_SELF = 0.12
 const SHARP_SELF = 3
 // SOM annealing (Kohonen's textbook recipe): right after initialization, a large
 // neighborhood radius and strong cooperation coarsely align the whole map, then
@@ -111,7 +120,7 @@ const DISP_GAIN = 0.6 // display heat strength (weaker than firing cells' 1.0 = 
 const SAT_FLOOR = 0.65 // minimum saturation (vividness)
 const SPLAT_LAYOUT = 0.92 // clip-space extent of the lattice layout (+/-)
 const SPLAT_POS_OFFSET = 0.07 // keeps the position=timbre map stable (dynamic warping kept subtle)
-const SAT_TONE = 2.0 // spectral concentration (tonality) -> scales saturation and flow speed
+const SAT_TONE = 1.0 // spectral concentration (tonality) -> scales saturation and flow speed
 const ACT_DECAY = 0.985 // activity-memory decay (gas lingering)
 // Reference design scale: all pixel design values (gas sigma, star size) are
 // defined for a Full-HD-height screen and scale with the actual short dimension.
@@ -294,6 +303,7 @@ const BG_FRAG = `
 const DISK_GLSL = `
   uniform float uHemi;
   uniform float uBeta;
+  uniform float uFlat; // 1 = bypass disk+hemisphere, render the raw lattice plane (debug)
   vec2 squareToDisk(vec2 p){
     if (p.x*p.x > p.y*p.y) {
       float phi = 0.78539816 * (p.y / p.x);
@@ -315,7 +325,7 @@ const DISK_GLSL = `
     // uHemi scales only the coordinates (the lens); s/rs stay the pure
     // divergence stretch so the rim brightness compensation is not affected by
     // zoom (uniform zoom conserves per-area light by itself)
-    return vec4(dp * s * L * uHemi, s, rs);
+    return mix(vec4(dp * s * L * uHemi, s, rs), vec4(pos, 1.0, 1.0), uFlat);
   }
 `
 
@@ -533,6 +543,9 @@ export const FbSparseCortex = () => {
   const mature = useMemo(() => new Float32Array(N), [])
   const actMem = useMemo(() => new Float32Array(N), [])
   const selfT = useMemo(() => new Float32Array(DIM), []) // self-masked target scratch
+  // live-tunable copies of ETA_SELF / SHARP_SELF for window exploration
+  // (exposed as __fbcx.selfTune; combine with the "r" reset for fair A/B runs)
+  const selfTune = useMemo(() => ({ eta: ETA_SELF, sharp: SHARP_SELF }), [])
   const stats = useMemo(
     () => ({
       seededCount: 0,
@@ -665,13 +678,6 @@ export const FbSparseCortex = () => {
     inited.current = true
   }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "r") resetRef.current = true
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
 
   // [G1] Half-res render target for the gas pass. Half-float when renderable
   // (renderability is an extension even in WebGL2); the 8-bit fallback clamps
@@ -694,23 +700,38 @@ export const FbSparseCortex = () => {
   // (uSize / uTint would snap back to their initial values)
   const gasUniforms = useMemo(
     // uSize is set by the resize effect
-    () => ({ uAspect: { value: 1 }, uSize: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA } }),
+    () => ({ uAspect: { value: 1 }, uSize: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uFlat: { value: 0 } }),
     []
   )
   const compUniforms = useMemo(() => ({ uTex: { value: gasRT.texture } }), [gasRT])
   const headUniforms = useMemo(
     // uSizeScale is set by the resize effect
-    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uSizeScale: { value: 1 } }),
+    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uSizeScale: { value: 1 }, uFlat: { value: 0 } }),
     []
   )
   const trailUniforms = useMemo(
-    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA } }),
+    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uFlat: { value: 0 } }),
     []
   )
   const bgUniforms = useMemo(
     () => ({ uTint: { value: new THREE.Vector3(0.05, 0.07, 0.1) }, uOpacity: { value: 0.9 } }),
     []
   )
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "r") resetRef.current = true
+      if (e.key === "g") {
+        // debug view: toggle raw lattice plane vs disk+hemisphere projection
+        const v = gasUniforms.uFlat.value ? 0 : 1
+        gasUniforms.uFlat.value = v
+        headUniforms.uFlat.value = v
+        trailUniforms.uFlat.value = v
+        console.log(`[fbcx] projection: ${v ? "flat lattice" : "hemisphere"}`)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [gasUniforms, headUniforms, trailUniforms])
   useEffect(() => {
     // setSize keeps the texture object identity, so the composite uniform stays valid
     const dpr = gl.getPixelRatio()
@@ -730,6 +751,7 @@ export const FbSparseCortex = () => {
   useEffect(() => {
     ;(window as any).__fbcx = {
       G, M, DIM, seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats,
+      selfTune, // live ETA_SELF/SHARP_SELF tuning (window exploration)
       audioBus, // record/replay verification: console can capture and re-emit frames
       setSeedRng: (fn: (() => number) | null) => { seedRngRef.current = fn ?? Math.random },
       // lens (field-of-view) tuning: 1.0 = 90deg vertical FOV, 0.84 = 100deg, 0.70 = 110deg
@@ -744,8 +766,14 @@ export const FbSparseCortex = () => {
         headUniforms.uBeta.value = b
         trailUniforms.uBeta.value = b
       },
+      // debug: 1 = render the raw lattice plane (no disk / hemisphere projection)
+      setFlat: (v: number) => {
+        gasUniforms.uFlat.value = v
+        headUniforms.uFlat.value = v
+        trailUniforms.uFlat.value = v
+      },
     }
-  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, audioBus, gasUniforms, headUniforms, trailUniforms])
+  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, selfTune, audioBus, gasUniforms, headUniforms, trailUniforms])
 
   // [Logic input] Subscribe to the audio bus and stitch 0.5 s window snapshots by
   // file position. Push reception without React state (no re-renders, no interim
@@ -1072,10 +1100,10 @@ export const FbSparseCortex = () => {
             tn += v * v
           }
           const tInv = 1 / (Math.sqrt(tn) + 1e-6)
-          const sStep = ETA_SELF * dtScale
+          const sStep = selfTune.eta * dtScale
           let mwS = 0
           for (let d = 0; d < DIM; d++) mwS += W[b + d]
-          const cutS = (SHARP_SELF * sStep * mwS) / DIM // mask-narrowing feedback
+          const cutS = (selfTune.sharp * sStep * mwS) / DIM // mask-narrowing feedback
           // original shared-residual term + weak per-cell self-masked term
           // (see ETA_SELF); clamp(>=0) ; unit L2
           let nrm = 0
