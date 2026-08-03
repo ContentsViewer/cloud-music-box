@@ -618,8 +618,8 @@ export const FbSparseCortex = () => {
       mapAge: 0, // map age (audio seconds); returns to 0 on reset/reload/Fast Refresh
       lastPos: 0, // processed file position in samples (anchor for cross-run state comparison)
       // Stage timings (EMA ms). Hop stages: tInput/tForward/tSelect/tLearn.
-      // tVisual = updateCellVisual share within the hop (already included in tLearn).
-      // Frame stages: tField/tParticles.
+      // tVisual = the dirty-cell visual flush inside tLearn (seeding-time
+      // updateCellVisual calls are not counted). Frame stages: tField/tParticles.
       tInput: 0,
       tForward: 0,
       tSelect: 0,
@@ -630,7 +630,6 @@ export const FbSparseCortex = () => {
     }),
     []
   )
-  const perfAcc = useMemo(() => ({ visualMs: 0 }), [])
   const seededCountRef = useRef(0)
   const mapAgeRef = useRef(0) // map age = cumulative seconds of audible audio (the annealing clock)
   // Test hook: seeding jitter normally uses Math.random, but verification replays
@@ -668,7 +667,6 @@ export const FbSparseCortex = () => {
   // cells whose W changed (differential update).
   const updateCellVisual = useMemo(
     () => (i: number) => {
-      const tv0 = performance.now()
       const b = i * DIM
       let cnum = 0,
         cden = 1e-9,
@@ -703,9 +701,8 @@ export const FbSparseCortex = () => {
       splatPos[o3 + 1] = baseY + SPLAT_POS_OFFSET * pitchDev
       splatPos[o3 + 2] = 0
       fieldDirtyRef.current = true
-      perfAcc.visualMs += performance.now() - tv0
     },
-    [W, centroidArr, splatElong, cellColor, splatPos, perfAcc]
+    [W, centroidArr, splatElong, cellColor, splatPos]
   )
 
   const initInterp = useMemo(
@@ -968,7 +965,6 @@ export const FbSparseCortex = () => {
         const playhead = winStart + ((performance.now() - st.arrivalMs) / 1000) * sr
         if (st.lastPos + HOP_SAMPLES > playhead) return done
         const tHop0 = performance.now()
-        perfAcc.visualMs = 0
         const idx0 = st.lastPos - winStart
         // --- [INPUT] one hop of filtering + per-band leaky integration ---
         // Band-major with scalar filter state. Per (band, sample) the arithmetic and
@@ -1273,12 +1269,16 @@ export const FbSparseCortex = () => {
         const bj = j * DIM
         for (let d = 0; d < DIM; d++) W[bj + d] = W[bj + d] * P + featVec[d] * q
       }
-      // flush deferred visual updates: exactly one recompute per changed cell
+      // flush deferred visual updates: exactly one recompute per changed cell.
+      // Timed as one block - per-cell now() brackets cost more than the loop
+      // body they measured (0.37 s in a 112 s profile)
+      const tVis0 = performance.now()
       for (let t = 0; t < nDirty; t++) {
         const j = dirtyList[t]
         dirtyFlag[j] = 0
         updateCellVisual(j)
       }
+      stats.tVisual = ema(stats.tVisual, performance.now() - tVis0)
       // Soft-WTA display: independently of learning (the firing cells), pour
       // display heat over the top DISP_K resonating cells along the score
       // gradient. The firing cells are "representatives of the lineage actually
@@ -1296,7 +1296,6 @@ export const FbSparseCortex = () => {
         }
       }
       stats.tLearn = ema(stats.tLearn, performance.now() - tLearn0)
-      stats.tVisual = ema(stats.tVisual, perfAcc.visualMs)
       } // end hop loop
       return done
     } // end processHops
