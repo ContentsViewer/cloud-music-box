@@ -580,6 +580,10 @@ export const FbSparseCortex = () => {
   // updateCellVisual to one call per cell per hop
   const nbP = useMemo(() => { const p = new Float32Array(N); p.fill(1); return p }, [])
   const nbTouched = useMemo(() => new Int32Array(N), [])
+  // gaussian cooperation strength by lattice distance², rebuilt each hop.
+  // 2*NB_RAD_START²+1 entries cover every reachable gd2 (annealT <= 1 keeps
+  // nbR <= NB_RAD_START); Float64 keeps values bit-identical to inline Math.exp
+  const hTab = useMemo(() => new Float64Array(2 * NB_RAD_START * NB_RAD_START + 1), [])
   const dirtyFlag = useMemo(() => new Uint8Array(N), [])
   const dirtyList = useMemo(() => new Int32Array(N), [])
   // set by updateCellVisual; gates centroidSmooth rebuild + gas position/color upload
@@ -1136,6 +1140,7 @@ export const FbSparseCortex = () => {
       let kThr2 = 0
       let invMaxU2 = 0
       let nWin2 = 0
+      let sqResE = 0 // |resid|; set once when the residual gate opens (floor2 + r2Amp share it)
       if (resE > R2_MIN_E * inputE) {
         let max2 = -1e9
         for (let i = 0; i < N; i++) {
@@ -1149,7 +1154,8 @@ export const FbSparseCortex = () => {
           drive2[i] = s
           if (s > max2) max2 = s
         }
-        const floor2 = selfTune.r2cos * Math.sqrt(resE) // |W| ~ 1, so s = cos x |resid|
+        sqResE = Math.sqrt(resE)
+        const floor2 = selfTune.r2cos * sqResE // |W| ~ 1, so s = cos x |resid|
         if (max2 > floor2) {
           drive2Sorted.set(drive2)
           kThr2 = nthLargest(drive2Sorted, N, K2_ACTIVE)
@@ -1166,7 +1172,7 @@ export const FbSparseCortex = () => {
       stats.nWin2 = nWin2
       // recruitment amplitude for round-2 learning: scales with how much energy
       // is actually left unexplained (quiet leak -> tiny steps, real entry -> fast)
-      const r2Amp = nWin2 > 0 ? selfTune.r2gain * Math.sqrt(resE) : 0
+      const r2Amp = nWin2 > 0 ? selfTune.r2gain * sqResE : 0
 
       // SOM annealing: neighborhood radius and cooperation strength converge
       // exponentially from large to small with map age (cumulative seconds of
@@ -1180,6 +1186,18 @@ export const FbSparseCortex = () => {
       // at large radii, thin out distant cells to keep cost at radius-3 levels (gaussian weights still use exact distances)
       const nbStep = Math.max(1, Math.round(nbRad / NB_RAD))
       const inv2r2 = 1 / (2 * nbRad * nbRad)
+      // cooperation strength by lattice distance²: the neighborhood loop below
+      // clamps dx,dy to [-nbR, nbR], so gd2 is an integer <= 2*nbR*nbR — every
+      // lookup key is covered as long as those bounds and this table share nbR.
+      // Replaces ~5k Math.exp calls per hop with <=289 at table build
+      const maxG2 = 2 * nbR * nbR
+      for (let g2 = 0; g2 <= maxG2; g2++) hTab[g2] = etaNb * dtScale * Math.exp(-g2 * inv2r2)
+      // hop-invariant learning coefficients (dtScale is the fixed hop step here)
+      const useDt = USE_ALPHA * dtScale
+      const useKeep = 1 - useDt
+      const gipDt = GAMMA_IP * dtScale
+      const sStep = selfTune.eta * dtScale
+      const sharpStep = selfTune.sharp * sStep
 
       // learning (active cells only) + usage update.
       // Neighborhood cooperation is batched: repeated blends of W[j] toward the same
@@ -1191,8 +1209,8 @@ export const FbSparseCortex = () => {
       for (let i = 0; i < N; i++) {
         const fired1 = seeded[i] && drive[i] >= kThr
         const fired = fired1 || fired2[i] ? 1 : 0
-        usage[i] = (1 - USE_ALPHA * dtScale) * usage[i] + USE_ALPHA * dtScale * fired
-        thr[i] += GAMMA_IP * dtScale * (usage[i] - P_TARGET)
+        usage[i] = useKeep * usage[i] + useDt * fired
+        thr[i] += gipDt * (usage[i] - P_TARGET)
         if (thr[i] > THR_MAX) thr[i] = THR_MAX
         else if (thr[i] < 0) thr[i] = 0
         if (fired) {
@@ -1219,8 +1237,7 @@ export const FbSparseCortex = () => {
             mwS += w
           }
           const qInv = 1 / (Math.sqrt(qn) + 1e-6)
-          const sStep = selfTune.eta * dtScale
-          const cutS = (selfTune.sharp * sStep * mwS) / DIM // mask-narrowing feedback
+          const cutS = (sharpStep * mwS) / DIM // mask-narrowing feedback
           // original shared-residual term + weak per-cell self-masked term
           // (see ETA_SELF); clamp(>=0) ; unit L2
           let nrm = 0
@@ -1251,7 +1268,7 @@ export const FbSparseCortex = () => {
               const j = rowBase + nx
               if (j === i || !seeded[j]) continue
               const gd2 = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy)
-              const h = etaNb * dtScale * Math.exp(-gd2 * inv2r2)
+              const h = hTab[gd2]
               if (nbP[j] === 1) nbTouched[nTouched++] = j
               nbP[j] *= 1 - h
               // skip color updates for distant cells whose change is negligible
