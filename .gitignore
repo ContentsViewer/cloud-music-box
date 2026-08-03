@@ -3,6 +3,8 @@
 .claude
 CLAUDE.md
 
+/temp
+
 # dependencies
 /node_modules
 /.pnp

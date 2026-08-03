@@ -67,6 +67,63 @@ const G = 64 // G x G lattice
 const N = G * G // 4096 cells
 const K_ACTIVE = 82 // sparseness: simultaneous firings (12=differentiation-first vs 82=monochrome; 24=compromise with motion)
 const ETA = 0.06 // learning rate (higher = the map breathes with the music; 0.06=too fluid, 0.02=crystalline)
+// [self-masked term] ADDED to the original update, never replacing it: each firing
+// cell is also pulled toward normalize(x^ * W_i / max W_i) - the input heard
+// through its own bands. Unlike the shared residual (one direction for every
+// fired cell) this direction differs per cell, so co-firing cells can diverge -
+// gently. The ever-present cooperation keeps relaxing everyone back toward the
+// live mixture, so the equilibrium is a TRANSIENT tint: cells catching a distinct
+// instrument take on its hue while it plays, and melt back when it stops.
+// 0 = exactly the original. Raise for deeper, longer-lived instrument tints.
+// Grid-searched on the real track (~105 s per run, map reset between runs;
+// pairCos / hue spread / hue flicker per second):
+//   (0.015, 0) 0.997 - zero effect: without the L1 the mask stays broad and the
+//               term is just another mixture-follower; the pair only works together
+//   (0.06, 3)  0.987 - direction correct, ~10x too weak
+//   (0.12, 3)  0.892  spread 2.8  flicker 0.27
+//   (0.12, 6)  0.774  spread 2.4  flicker 0.65
+//   (0.18, 3)  0.891  spread 2.4  flicker 0.42
+//   (0.25, 3)  0.654  spread 4.5  flicker 0.63   <- chosen: deepest tint that
+//               keeps the widest hue spread at moderate flicker; base look intact
+//   (0.25, 6)  0.215  spread 2.3  flicker 1.27  - over-differentiated, flickery
+// Live-tunable at runtime via __fbcx.selfTune (press "r" after changing for a
+// fair fresh-map comparison).
+const ETA_SELF = 0.12
+const SHARP_SELF = 3
+// [residual second round] The single missing piece for "a NEW instrument joins
+// while others keep playing -> a new cluster appears": plain k-WTA scores the
+// raw mixture, so specialists of an added part can never outscore the
+// mixture-matchers and the added part never opens its own region. After round 1
+// reconstructs and subtracts what it explained (the resid/alpha computation that
+// already exists), a second selection round scores W . resid: whatever round 1
+// did NOT explain - i.e. the newly added part - picks its own winners, which
+// pour heat at their own location. Runs only when meaningful residual energy is
+// left, so the extra winners breathe with the arrangement instead of being a
+// fixed budget. Round-2 winners LEARN toward the residual (same shared-residual
+// rule as round 1, with the residual as their target): a truly novel sound
+// matches nobody at first (best cos with the residual measured ~0.03), so
+// selection alone can never bootstrap - but a coherent residual picks the SAME
+// near-match cells hop after hop, learning compounds, and within a second they
+// are genuine specialists that win round 1 on the raw mixture and open their
+// own district. An incoherent (noise) residual picks different cells each hop,
+// nothing compounds, and the L1 cut prunes the thin junk - the existing
+// self-mask machinery is what makes recruitment selective to real structure.
+const K2_ACTIVE = 48 // max extra winners fitted to the unexplained residual
+// Energy gate kept LOW: cooperation absorbs a newly added instrument into the
+// field within seconds, so the exploitable residual is a brief entry transient
+// plus a small steady leak (measured 0.02-0.05 synthetic, 0.03-0.18 real music;
+// the first 0.12 gate never fired at all).
+const R2_MIN_E = 0.04
+// Cosine floor kept BELOW the measured noise ceiling (cos 0.02-0.05): a novel
+// instrument's first hops score exactly as low as noise - only temporal
+// coherence (compounding, above) separates them, so the floor cannot. The first
+// 0.35 floor demanded 10x the best match that ever occurs and fired once in
+// 132 samples. Live-tunable via __fbcx.selfTune.r2cos.
+const R2_MIN_COS = 0.02
+// Recruitment speed: round-2 learning step is ETA * r2gain * y2 * resE toward
+// the residual (y2 = normalized round-2 ramp). ~1 -> bootstrap in O(10) hops
+// when the residual direction holds. Live-tunable via __fbcx.selfTune.r2gain.
+const R2_GAIN = 1
 // SOM annealing (Kohonen's textbook recipe): right after initialization, a large
 // neighborhood radius and strong cooperation coarsely align the whole map, then
 // both shrink over time to polish locally. A freshly batch-initialized map has
@@ -97,7 +154,7 @@ const DISP_GAIN = 0.6 // display heat strength (weaker than firing cells' 1.0 = 
 const SAT_FLOOR = 0.65 // minimum saturation (vividness)
 const SPLAT_LAYOUT = 0.92 // clip-space extent of the lattice layout (+/-)
 const SPLAT_POS_OFFSET = 0.07 // keeps the position=timbre map stable (dynamic warping kept subtle)
-const SAT_TONE = 2.0 // spectral concentration (tonality) -> scales saturation and flow speed
+const SAT_TONE = 1.0 // spectral concentration (tonality) -> scales saturation and flow speed
 const ACT_DECAY = 0.985 // activity-memory decay (gas lingering)
 // Reference design scale: all pixel design values (gas sigma, star size) are
 // defined for a Full-HD-height screen and scale with the actual short dimension.
@@ -273,35 +330,54 @@ const BG_FRAG = `
     gl_FragColor = vec4(col, uOpacity);
   }
 `
-// [Hemisphere mapping] shared by the three vertex shaders: square lattice -> disk
-// (Shirley-Chow concentric mapping) -> gnomonic projection of the hemisphere the
-// disk orthographically depicts (R = r/sqrt(1-r^2); rim radially toward infinity,
-// center near-identity)
+// [Hemisphere mapping] shared by the three vertex shaders: square lattice ->
+// elliptical-grid disk (Nowell), blended with the flat square by uRound
+// (0 = square, 1 = full disk, between = rounded square) -> gnomonic-style lift
+// R = r/(1-m^2)^beta. The divergence is driven by m = the fraction of the way to
+// the SQUARE boundary (Chebyshev), not by the disk radius: for the previous
+// Shirley mapping the two were identical (its radius was exactly max(|x|,|y|)),
+// and defining it this way keeps "the lattice rim sits at infinity" true at
+// every roundness instead of only at uRound = 1.
 const DISK_GLSL = `
   uniform float uHemi;
   uniform float uBeta;
+  uniform float uRound; // roundness lambda: 0 = flat square, 1 = elliptical disk
+  uniform float uFlat; // 1 = bypass disk+hemisphere, render the raw lattice plane (debug)
   vec2 squareToDisk(vec2 p){
-    if (p.x*p.x > p.y*p.y) {
-      float phi = 0.78539816 * (p.y / p.x);
-      return p.x * vec2(cos(phi), sin(phi));
-    } else if (p.y != 0.0) {
-      float phi = 1.57079633 - 0.78539816 * (p.x / p.y);
-      return p.y * vec2(cos(phi), sin(phi));
-    }
-    return vec2(0.0);
+    // elliptical grid mapping (Nowell): square boundary -> unit circle, smooth,
+    // no creases; blended toward identity by uRound
+    vec2 e = vec2(p.x * sqrt(1.0 - 0.5 * p.y * p.y),
+                  p.y * sqrt(1.0 - 0.5 * p.x * p.x));
+    return mix(p, e, uRound);
   }
   // returns: xy = projected coords, z = tangential stretch s, w = radial stretch rs (>s)
   vec4 diskWarp(vec2 pos){
     float L = ${(SPLAT_LAYOUT + SPLAT_POS_OFFSET).toFixed(4)};
-    vec2 dp = squareToDisk(pos / L);
-    float r2 = dot(dp, dp);
-    float D = max(1.0 - r2, ${HALO_EPS.toFixed(3)});
-    float s = pow(D, -uBeta);              // R = r/(1-r^2)^beta; beta 0.5 = hemisphere
-    float rs = s * (1.0 + 2.0 * uBeta * r2 / D); // dR/dr
+    vec2 ps = pos / L;
+    vec2 dp = squareToDisk(ps);
+    float m = max(abs(ps.x), abs(ps.y)); // fraction to the square boundary
+    float D = max(1.0 - m * m, ${HALO_EPS.toFixed(3)});
+    float s = pow(D, -uBeta);              // R = r/(1-m^2)^beta; beta 0.5 = hemisphere
+    float rs = s * (1.0 + 2.0 * uBeta * m * m / D); // dR/dr
     // uHemi scales only the coordinates (the lens); s/rs stay the pure
     // divergence stretch so the rim brightness compensation is not affected by
     // zoom (uniform zoom conserves per-area light by itself)
-    return vec4(dp * s * L * uHemi, s, rs);
+    return mix(vec4(dp * s * L * uHemi, s, rs), vec4(pos, 1.0, 1.0), uFlat);
+  }
+  // area ratio (Jacobian determinant) of the blended square->disk map. The
+  // elliptical mapping is not equal-area (unlike Shirley): it compresses the
+  // corners, which would brighten them under additive blending. Gas brightness
+  // is multiplied by this so accumulated light stays uniform per screen area.
+  float diskDet(vec2 pos){
+    float L = ${(SPLAT_LAYOUT + SPLAT_POS_OFFSET).toFixed(4)};
+    vec2 ps = pos / L;
+    float a = sqrt(1.0 - 0.5 * ps.y * ps.y);
+    float b = sqrt(1.0 - 0.5 * ps.x * ps.x);
+    float xy = ps.x * ps.y;
+    float g = 1.0 - uRound;
+    float det = (g + uRound * a) * (g + uRound * b)
+              - uRound * uRound * xy * xy / (4.0 * a * b);
+    return mix(clamp(det, 0.05, 1.5), 1.0, uFlat);
   }
 `
 
@@ -338,8 +414,9 @@ const GAS_VERT = `
     vec2 pd = vec2(sd.x * uAspect, sd.y);
     vDir = dot(pd, pd) > 1e-8 ? normalize(pd) : vec2(1.0, 0.0);
     vAniso = tScale / rScale;
-    // Luminance: normalize by sprite area so on-screen falloff = (area dilution)^(HALO_BRIGHT-1)
-    vBright = aBright * pow(max(wp.z * wp.w, 1.0), ${HALO_BRIGHT.toFixed(3)}) / (rScale * tScale);
+    // Luminance: normalize by sprite area so on-screen falloff = (area dilution)^(HALO_BRIGHT-1);
+    // diskDet compensates the (non-equal-area) elliptical mapping's compression
+    vBright = aBright * diskDet(position.xy) * pow(max(wp.z * wp.w, 1.0), ${HALO_BRIGHT.toFixed(3)}) / (rScale * tScale);
     gl_Position = vec4(sd.x, sd.y, 0.0, 1.0);
   }
 `
@@ -503,6 +580,10 @@ export const FbSparseCortex = () => {
   // updateCellVisual to one call per cell per hop
   const nbP = useMemo(() => { const p = new Float32Array(N); p.fill(1); return p }, [])
   const nbTouched = useMemo(() => new Int32Array(N), [])
+  // gaussian cooperation strength by lattice distance², rebuilt each hop.
+  // 2*NB_RAD_START²+1 entries cover every reachable gd2 (annealT <= 1 keeps
+  // nbR <= NB_RAD_START); Float64 keeps values bit-identical to inline Math.exp
+  const hTab = useMemo(() => new Float64Array(2 * NB_RAD_START * NB_RAD_START + 1), [])
   const dirtyFlag = useMemo(() => new Uint8Array(N), [])
   const dirtyList = useMemo(() => new Int32Array(N), [])
   // set by updateCellVisual; gates centroidSmooth rebuild + gas position/color upload
@@ -514,15 +595,26 @@ export const FbSparseCortex = () => {
   const usage = useMemo(() => new Float32Array(N), [])
   const drive = useMemo(() => new Float32Array(N), [])
   const driveSorted = useMemo(() => new Float32Array(N), [])
+  // [residual second round] scores against the unexplained residual + fired set
+  const drive2 = useMemo(() => new Float32Array(N), [])
+  const drive2Sorted = useMemo(() => new Float32Array(N), [])
+  const fired2 = useMemo(() => new Uint8Array(N), [])
   const heat = useMemo(() => new Float32Array(N), [])
   const seeded = useMemo(() => new Uint8Array(N), [])
   const mature = useMemo(() => new Float32Array(N), [])
   const actMem = useMemo(() => new Float32Array(N), [])
+  // live-tunable copies of ETA_SELF / SHARP_SELF / round-2 floors for window
+  // exploration (exposed as __fbcx.selfTune; combine with "r" for fair A/B runs)
+  const selfTune = useMemo(
+    () => ({ eta: ETA_SELF, sharp: SHARP_SELF, r2cos: R2_MIN_COS, r2gain: R2_GAIN }),
+    []
+  )
   const stats = useMemo(
     () => ({
       seededCount: 0,
       inputE: 0,
       kThr: 0,
+      nWin2: 0, // residual second-round winners this hop (0 = nothing unexplained)
       resFrac: 0,
       windows: 0, // number of windows received
       seams: 0, // times the stitching broke (excluding the first window; 0 = perfectly continuous)
@@ -530,8 +622,8 @@ export const FbSparseCortex = () => {
       mapAge: 0, // map age (audio seconds); returns to 0 on reset/reload/Fast Refresh
       lastPos: 0, // processed file position in samples (anchor for cross-run state comparison)
       // Stage timings (EMA ms). Hop stages: tInput/tForward/tSelect/tLearn.
-      // tVisual = updateCellVisual share within the hop (already included in tLearn).
-      // Frame stages: tField/tParticles.
+      // tVisual = the dirty-cell visual flush inside tLearn (seeding-time
+      // updateCellVisual calls are not counted). Frame stages: tField/tParticles.
       tInput: 0,
       tForward: 0,
       tSelect: 0,
@@ -542,7 +634,6 @@ export const FbSparseCortex = () => {
     }),
     []
   )
-  const perfAcc = useMemo(() => ({ visualMs: 0 }), [])
   const seededCountRef = useRef(0)
   const mapAgeRef = useRef(0) // map age = cumulative seconds of audible audio (the annealing clock)
   // Test hook: seeding jitter normally uses Math.random, but verification replays
@@ -580,7 +671,6 @@ export const FbSparseCortex = () => {
   // cells whose W changed (differential update).
   const updateCellVisual = useMemo(
     () => (i: number) => {
-      const tv0 = performance.now()
       const b = i * DIM
       let cnum = 0,
         cden = 1e-9,
@@ -615,9 +705,8 @@ export const FbSparseCortex = () => {
       splatPos[o3 + 1] = baseY + SPLAT_POS_OFFSET * pitchDev
       splatPos[o3 + 2] = 0
       fieldDirtyRef.current = true
-      perfAcc.visualMs += performance.now() - tv0
     },
-    [W, centroidArr, splatElong, cellColor, splatPos, perfAcc]
+    [W, centroidArr, splatElong, cellColor, splatPos]
   )
 
   const initInterp = useMemo(
@@ -650,13 +739,6 @@ export const FbSparseCortex = () => {
     inited.current = true
   }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "r") resetRef.current = true
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
 
   // [G1] Half-res render target for the gas pass. Half-float when renderable
   // (renderability is an extension even in WebGL2); the 8-bit fallback clamps
@@ -679,23 +761,46 @@ export const FbSparseCortex = () => {
   // (uSize / uTint would snap back to their initial values)
   const gasUniforms = useMemo(
     // uSize is set by the resize effect
-    () => ({ uAspect: { value: 1 }, uSize: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA } }),
+    () => ({ uAspect: { value: 1 }, uSize: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uRound: { value: 1 }, uFlat: { value: 0 } }),
     []
   )
   const compUniforms = useMemo(() => ({ uTex: { value: gasRT.texture } }), [gasRT])
   const headUniforms = useMemo(
     // uSizeScale is set by the resize effect
-    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uSizeScale: { value: 1 } }),
+    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uSizeScale: { value: 1 }, uRound: { value: 1 }, uFlat: { value: 0 } }),
     []
   )
   const trailUniforms = useMemo(
-    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA } }),
+    () => ({ uAspect: { value: 1 }, uHemi: { value: HEMI_SCALE }, uBeta: { value: HEMI_BETA }, uRound: { value: 1 }, uFlat: { value: 0 } }),
     []
   )
   const bgUniforms = useMemo(
     () => ({ uTint: { value: new THREE.Vector3(0.05, 0.07, 0.1) }, uOpacity: { value: 0.9 } }),
     []
   )
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "r") resetRef.current = true
+      if (e.key === "g") {
+        // debug view: toggle raw lattice plane vs disk+hemisphere projection
+        const v = gasUniforms.uFlat.value ? 0 : 1
+        gasUniforms.uFlat.value = v
+        headUniforms.uFlat.value = v
+        trailUniforms.uFlat.value = v
+        console.log(`[fbcx] projection: ${v ? "flat lattice" : "hemisphere"}`)
+      }
+      if (e.key === "," || e.key === ".") {
+        // roundness lambda tuning: , = squarer  . = rounder
+        const v = Math.min(1, Math.max(0, gasUniforms.uRound.value + (e.key === "." ? 0.05 : -0.05)))
+        gasUniforms.uRound.value = v
+        headUniforms.uRound.value = v
+        trailUniforms.uRound.value = v
+        console.log(`[fbcx] roundness lambda = ${v.toFixed(2)}`)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [gasUniforms, headUniforms, trailUniforms])
   useEffect(() => {
     // setSize keeps the texture object identity, so the composite uniform stays valid
     const dpr = gl.getPixelRatio()
@@ -715,6 +820,8 @@ export const FbSparseCortex = () => {
   useEffect(() => {
     ;(window as any).__fbcx = {
       G, M, DIM, seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats,
+      drive, drive2, // selection scores (round 1 = mixture, round 2 = residual)
+      selfTune, // live ETA_SELF/SHARP_SELF tuning (window exploration)
       audioBus, // record/replay verification: console can capture and re-emit frames
       setSeedRng: (fn: (() => number) | null) => { seedRngRef.current = fn ?? Math.random },
       // lens (field-of-view) tuning: 1.0 = 90deg vertical FOV, 0.84 = 100deg, 0.70 = 110deg
@@ -729,8 +836,21 @@ export const FbSparseCortex = () => {
         headUniforms.uBeta.value = b
         trailUniforms.uBeta.value = b
       },
+      // debug: 1 = render the raw lattice plane (no disk / hemisphere projection)
+      setFlat: (v: number) => {
+        gasUniforms.uFlat.value = v
+        headUniforms.uFlat.value = v
+        trailUniforms.uFlat.value = v
+      },
+      // roundness lambda: 0 = flat square, 1 = full elliptical disk (also on , / . keys)
+      setRound: (v: number) => {
+        const c = Math.min(1, Math.max(0, v))
+        gasUniforms.uRound.value = c
+        headUniforms.uRound.value = c
+        trailUniforms.uRound.value = c
+      },
     }
-  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, audioBus, gasUniforms, headUniforms, trailUniforms])
+  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, drive, drive2, selfTune, audioBus, gasUniforms, headUniforms, trailUniforms])
 
   // [Logic input] Subscribe to the audio bus and stitch 0.5 s window snapshots by
   // file position. Push reception without React state (no re-renders, no interim
@@ -849,7 +969,6 @@ export const FbSparseCortex = () => {
         const playhead = winStart + ((performance.now() - st.arrivalMs) / 1000) * sr
         if (st.lastPos + HOP_SAMPLES > playhead) return done
         const tHop0 = performance.now()
-        perfAcc.visualMs = 0
         const idx0 = st.lastPos - winStart
         // --- [INPUT] one hop of filtering + per-band leaky integration ---
         // Band-major with scalar filter state. Per (band, sample) the arithmetic and
@@ -1015,6 +1134,46 @@ export const FbSparseCortex = () => {
       }
       stats.resFrac = resE / inputE
 
+      // [residual second round] see the constants block. Score every non-fired
+      // cell against what round 1 left unexplained; add winners above the floors.
+      fired2.fill(0)
+      let kThr2 = 0
+      let invMaxU2 = 0
+      let nWin2 = 0
+      let sqResE = 0 // |resid|; set once when the residual gate opens (floor2 + r2Amp share it)
+      if (resE > R2_MIN_E * inputE) {
+        let max2 = -1e9
+        for (let i = 0; i < N; i++) {
+          if (!seeded[i] || drive[i] >= kThr) {
+            drive2[i] = -1e9 // round-1 winners keep their seat; no double firing
+            continue
+          }
+          const b = i * DIM
+          let s = 0
+          for (let d = 0; d < DIM; d++) s += W[b + d] * resid[d]
+          drive2[i] = s
+          if (s > max2) max2 = s
+        }
+        sqResE = Math.sqrt(resE)
+        const floor2 = selfTune.r2cos * sqResE // |W| ~ 1, so s = cos x |resid|
+        if (max2 > floor2) {
+          drive2Sorted.set(drive2)
+          kThr2 = nthLargest(drive2Sorted, N, K2_ACTIVE)
+          if (kThr2 < floor2) kThr2 = floor2
+          invMaxU2 = 1 / (max2 - kThr2 + 1e-6)
+          for (let i = 0; i < N; i++) {
+            if (drive2[i] >= kThr2) {
+              fired2[i] = 1
+              nWin2++
+            }
+          }
+        }
+      }
+      stats.nWin2 = nWin2
+      // recruitment amplitude for round-2 learning: scales with how much energy
+      // is actually left unexplained (quiet leak -> tiny steps, real entry -> fast)
+      const r2Amp = nWin2 > 0 ? selfTune.r2gain * sqResE : 0
+
       // SOM annealing: neighborhood radius and cooperation strength converge
       // exponentially from large to small with map age (cumulative seconds of
       // audible audio). Early = coarse alignment of the whole map, later = local polish.
@@ -1027,6 +1186,18 @@ export const FbSparseCortex = () => {
       // at large radii, thin out distant cells to keep cost at radius-3 levels (gaussian weights still use exact distances)
       const nbStep = Math.max(1, Math.round(nbRad / NB_RAD))
       const inv2r2 = 1 / (2 * nbRad * nbRad)
+      // cooperation strength by lattice distance²: the neighborhood loop below
+      // clamps dx,dy to [-nbR, nbR], so gd2 is an integer <= 2*nbR*nbR — every
+      // lookup key is covered as long as those bounds and this table share nbR.
+      // Replaces ~5k Math.exp calls per hop with <=289 at table build
+      const maxG2 = 2 * nbR * nbR
+      for (let g2 = 0; g2 <= maxG2; g2++) hTab[g2] = etaNb * dtScale * Math.exp(-g2 * inv2r2)
+      // hop-invariant learning coefficients (dtScale is the fixed hop step here)
+      const useDt = USE_ALPHA * dtScale
+      const useKeep = 1 - useDt
+      const gipDt = GAMMA_IP * dtScale
+      const sStep = selfTune.eta * dtScale
+      const sharpStep = selfTune.sharp * sStep
 
       // learning (active cells only) + usage update.
       // Neighborhood cooperation is batched: repeated blends of W[j] toward the same
@@ -1036,19 +1207,47 @@ export const FbSparseCortex = () => {
       let nTouched = 0
       let nDirty = 0
       for (let i = 0; i < N; i++) {
-        const fired = seeded[i] && drive[i] >= kThr ? 1 : 0
-        usage[i] = (1 - USE_ALPHA * dtScale) * usage[i] + USE_ALPHA * dtScale * fired
-        thr[i] += GAMMA_IP * dtScale * (usage[i] - P_TARGET)
+        const fired1 = seeded[i] && drive[i] >= kThr
+        const fired = fired1 || fired2[i] ? 1 : 0
+        usage[i] = useKeep * usage[i] + useDt * fired
+        thr[i] += gipDt * (usage[i] - P_TARGET)
         if (thr[i] > THR_MAX) thr[i] = THR_MAX
         else if (thr[i] < 0) thr[i] = 0
         if (fired) {
-          const yi = (drive[i] - kThr) * invMaxU // 0..1 (brightness)
-          const aeff = alpha * act[i]
+          // brightness: round-1 winners on the mixture ramp, round-2 winners on
+          // their own residual ramp (their raw drive sits below kThr by design)
+          const yi = fired1 ? (drive[i] - kThr) * invMaxU : (drive2[i] - kThr2) * invMaxU2
+          // round-1 winners absorb the residual scaled by their reconstruction
+          // share; round-2 recruits absorb it scaled by recruitment amplitude
+          // (same shared-residual rule, the residual IS their target - this is
+          // what turns a barely-matching recruit into a specialist of the new part)
+          const aeff = fired1 ? alpha * act[i] : r2Amp * yi
           const b = i * DIM
-          // non-negative sparse dictionary learning: D_i += eta*aeff*e ; clamp(>=0) ; unit L2
+          // self-masked target: the input heard through this cell's own bands.
+          // Design formula: normalize(x^ * W_i / max W_i). The scalars 1/|x| and
+          // 1/maxW are constant across d and cancel inside the normalize (docs
+          // "Notation"), so only the direction featVec*W is needed; its squared
+          // norm qn and the L1-cut mass mwS share one pass.
+          let qn = 0
+          let mwS = 0
+          for (let d = 0; d < DIM; d++) {
+            const w = W[b + d]
+            const q = featVec[d] * w
+            qn += q * q
+            mwS += w
+          }
+          const qInv = 1 / (Math.sqrt(qn) + 1e-6)
+          const cutS = (sharpStep * mwS) / DIM // mask-narrowing feedback
+          // original shared-residual term + weak per-cell self-masked term
+          // (see ETA_SELF); clamp(>=0) ; unit L2
           let nrm = 0
           for (let d = 0; d < DIM; d++) {
-            let wv = W[b + d] + ETA * dtScale * aeff * resid[d]
+            const w = W[b + d]
+            let wv =
+              w +
+              ETA * dtScale * aeff * resid[d] +
+              sStep * (featVec[d] * w * qInv - w) -
+              cutS
             if (wv < 0) wv = 0
             W[b + d] = wv
             nrm += wv * wv
@@ -1069,7 +1268,7 @@ export const FbSparseCortex = () => {
               const j = rowBase + nx
               if (j === i || !seeded[j]) continue
               const gd2 = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy)
-              const h = etaNb * dtScale * Math.exp(-gd2 * inv2r2)
+              const h = hTab[gd2]
               if (nbP[j] === 1) nbTouched[nTouched++] = j
               nbP[j] *= 1 - h
               // skip color updates for distant cells whose change is negligible
@@ -1087,12 +1286,16 @@ export const FbSparseCortex = () => {
         const bj = j * DIM
         for (let d = 0; d < DIM; d++) W[bj + d] = W[bj + d] * P + featVec[d] * q
       }
-      // flush deferred visual updates: exactly one recompute per changed cell
+      // flush deferred visual updates: exactly one recompute per changed cell.
+      // Timed as one block - per-cell now() brackets cost more than the loop
+      // body they measured (0.37 s in a 112 s profile)
+      const tVis0 = performance.now()
       for (let t = 0; t < nDirty; t++) {
         const j = dirtyList[t]
         dirtyFlag[j] = 0
         updateCellVisual(j)
       }
+      stats.tVisual = ema(stats.tVisual, performance.now() - tVis0)
       // Soft-WTA display: independently of learning (the firing cells), pour
       // display heat over the top DISP_K resonating cells along the score
       // gradient. The firing cells are "representatives of the lineage actually
@@ -1110,7 +1313,6 @@ export const FbSparseCortex = () => {
         }
       }
       stats.tLearn = ema(stats.tLearn, performance.now() - tLearn0)
-      stats.tVisual = ema(stats.tVisual, perfAcc.visualMs)
       } // end hop loop
       return done
     } // end processHops
