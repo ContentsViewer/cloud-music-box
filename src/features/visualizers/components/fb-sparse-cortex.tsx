@@ -599,7 +599,6 @@ export const FbSparseCortex = () => {
   const seeded = useMemo(() => new Uint8Array(N), [])
   const mature = useMemo(() => new Float32Array(N), [])
   const actMem = useMemo(() => new Float32Array(N), [])
-  const selfT = useMemo(() => new Float32Array(DIM), []) // self-masked target scratch
   // live-tunable copies of ETA_SELF / SHARP_SELF / round-2 floors for window
   // exploration (exposed as __fbcx.selfTune; combine with "r" for fair A/B runs)
   const selfTune = useMemo(
@@ -1134,7 +1133,6 @@ export const FbSparseCortex = () => {
         resE += resid[d] * resid[d]
       }
       stats.resFrac = resE / inputE
-      const xInv = 1 / (Math.sqrt(inputE) + 1e-9) // x^ scale for the self-masked term
 
       // [residual second round] see the constants block. Score every non-fired
       // cell against what round 1 left unexplained; add winners above the floors.
@@ -1211,29 +1209,31 @@ export const FbSparseCortex = () => {
           // what turns a barely-matching recruit into a specialist of the new part)
           const aeff = fired1 ? alpha * act[i] : r2Amp * yi
           const b = i * DIM
-          // self-masked target: the input heard through this cell's own bands
-          let mxw = 0
-          for (let d = 0; d < DIM; d++) if (W[b + d] > mxw) mxw = W[b + d]
-          const mInv = 1 / (mxw + 1e-9)
-          let tn = 0
-          for (let d = 0; d < DIM; d++) {
-            const v = featVec[d] * xInv * W[b + d] * mInv
-            selfT[d] = v
-            tn += v * v
-          }
-          const tInv = 1 / (Math.sqrt(tn) + 1e-6)
-          const sStep = selfTune.eta * dtScale
+          // self-masked target: the input heard through this cell's own bands.
+          // Design formula: normalize(x^ * W_i / max W_i). The scalars 1/|x| and
+          // 1/maxW are constant across d and cancel inside the normalize (docs
+          // "Notation"), so only the direction featVec*W is needed; its squared
+          // norm qn and the L1-cut mass mwS share one pass.
+          let qn = 0
           let mwS = 0
-          for (let d = 0; d < DIM; d++) mwS += W[b + d]
+          for (let d = 0; d < DIM; d++) {
+            const w = W[b + d]
+            const q = featVec[d] * w
+            qn += q * q
+            mwS += w
+          }
+          const qInv = 1 / (Math.sqrt(qn) + 1e-6)
+          const sStep = selfTune.eta * dtScale
           const cutS = (selfTune.sharp * sStep * mwS) / DIM // mask-narrowing feedback
           // original shared-residual term + weak per-cell self-masked term
           // (see ETA_SELF); clamp(>=0) ; unit L2
           let nrm = 0
           for (let d = 0; d < DIM; d++) {
+            const w = W[b + d]
             let wv =
-              W[b + d] +
+              w +
               ETA * dtScale * aeff * resid[d] +
-              sStep * (selfT[d] * tInv - W[b + d]) -
+              sStep * (featVec[d] * w * qInv - w) -
               cutS
             if (wv < 0) wv = 0
             W[b + d] = wv

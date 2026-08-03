@@ -65,9 +65,11 @@ Notation:
   (code: `featVec[d] * xInv`).
 - Caveat worth remembering: in the self-masked target the `1/|x|` and the
   `1/max(W)` are plain scalars and **cancel inside the final normalize** —
-  the target's direction is exactly `normalize(x ∘ W_i)`. They are kept for
-  conceptual clarity ("the input heard through the own filter, peak-1 mask")
-  and float conditioning, not because they change the result.
+  the target's direction is exactly `normalize(x ∘ W_i)`. Since 2026-08-03 the
+  implementation computes this reduced form directly (the max-scan, the scalar
+  multiplies and the `selfT` scratch were dead computation; fusing the loops
+  recovered ~0.8 ms/hop of the self-mask's measured in-situ cost). The design
+  formula lives on in this note and the code comment.
 
 ```mermaid
 flowchart LR
