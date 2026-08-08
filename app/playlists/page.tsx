@@ -1,6 +1,7 @@
 "use client"
 
 import { AlbumCover } from "@/src/components/album-cover"
+import { CoverCard } from "@/src/components/cover-card"
 import AppTopBar from "@/src/components/app-top-bar"
 import { MarqueeText } from "@/src/components/marquee-text"
 import DownloadingIndicator from "@/src/components/downloading-indicator"
@@ -37,7 +38,6 @@ import {
 } from "@mui/icons-material"
 import {
   Button,
-  ButtonBase,
   Dialog,
   DialogActions,
   DialogContent,
@@ -140,9 +140,11 @@ function useCoverUrl(trackId: string | undefined) {
 const PlaylistCard = React.memo(function PlaylistCard({
   playlist,
   onOpen,
+  appeal = false,
 }: {
   playlist: PlaylistItem
   onOpen: (id: string) => void
+  appeal?: boolean
 }) {
   const coverUrl = useCoverUrl(playlist.coverTrackId)
   const [themeStoreState] = useThemeStore()
@@ -152,25 +154,17 @@ const PlaylistCard = React.memo(function PlaylistCard({
   const count = playlistTrackIds(playlist).length
 
   return (
-    <div
-      css={css({
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      })}
+    <CoverCard
+      id={playlist.id}
+      title={playlist.name}
+      coverUrl={coverUrl}
+      appeal={appeal}
+      onOpen={onOpen}
     >
-      <ButtonBase
-        sx={{ borderRadius: "10%", width: "100%" }}
-        onClick={() => onOpen(playlist.id)}
-      >
-        <AlbumCover
-          sx={{ width: "100%", height: "auto", aspectRatio: "1 / 1" }}
-          coverUrl={coverUrl}
-        />
-      </ButtonBase>
       <Typography
+        variant="body2"
         sx={{
-          mt: 0.5,
+          color: colorOnSurfaceVariant,
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -178,12 +172,9 @@ const PlaylistCard = React.memo(function PlaylistCard({
           textAlign: "center",
         }}
       >
-        {playlist.name}
-      </Typography>
-      <Typography variant="body2" sx={{ color: colorOnSurfaceVariant }}>
         {count} {count === 1 ? "track" : "tracks"}
       </Typography>
-    </div>
+    </CoverCard>
   )
 })
 
@@ -197,6 +188,16 @@ const PlaylistListPage = React.memo(function PlaylistListPage({
   const routerActionsRef = useRef(routerActions)
   routerActionsRef.current = routerActions
   const [themeStoreState] = useThemeStore()
+
+  // The detail page plays with sourceUrl "/playlists#<id>", so the playing
+  // playlist can be recovered from it even after the queue advances.
+  const [playerState] = usePlayerStore()
+  const activePlaylistId = useMemo(() => {
+    const prefix = "/playlists#"
+    const url = playerState.playSourceUrl
+    if (!url?.startsWith(prefix)) return undefined
+    return decodeURIComponent(url.slice(prefix.length))
+  }, [playerState.playSourceUrl])
 
   useEffect(() => {
     onMount?.()
@@ -214,8 +215,8 @@ const PlaylistListPage = React.memo(function PlaylistListPage({
   return (
     <div
       css={css({
-        padding: "24px 48px",
-        "@media (min-width: 600px)": { padding: "32px 48px" },
+        padding: "24px",
+        "@media (min-width: 600px)": { padding: "32px" },
       })}
     >
       {playlistState.playlists.length === 0 ? (
@@ -262,6 +263,7 @@ const PlaylistListPage = React.memo(function PlaylistListPage({
               key={playlist.id}
               playlist={playlist}
               onOpen={onOpen}
+              appeal={playlist.id === activePlaylistId}
             />
           ))}
         </div>

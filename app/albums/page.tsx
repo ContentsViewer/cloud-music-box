@@ -1,5 +1,6 @@
 "use client"
 import { AlbumCover } from "@/src/components/album-cover"
+import { CoverCard } from "@/src/components/cover-card"
 import AppTopBar from "@/src/components/app-top-bar"
 import { MarqueeText } from "@/src/components/marquee-text"
 import { useRouter } from "@/src/stores/router"
@@ -28,7 +29,6 @@ import {
   SxProps,
   Toolbar,
   Typography,
-  ButtonBase,
   Menu,
   MenuItem,
   ListItemIcon,
@@ -50,7 +50,6 @@ const AlbumCard = React.memo(function AlbumCard({
   openAlbum?: (albumId: string) => void
   appeal?: boolean
 }) {
-  const [themeStoreState] = useThemeStore()
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
   useEffect(() => {
     if (!albumItem.cover) return
@@ -59,93 +58,14 @@ const AlbumCard = React.memo(function AlbumCard({
     return () => URL.revokeObjectURL(url)
   }, [albumItem.cover])
 
-  const colorTertiary = hexFromArgb(
-    MaterialDynamicColors.tertiary.getArgb(themeStoreState.scheme)
-  )
-
   return (
-    <Box
-      component="div"
-      sx={{
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-        alignItems: "center",
-      }}
-    >
-      <ButtonBase
-        sx={{
-          borderRadius: "10%",
-          // transition: "transform 1000ms cubic-bezier(0.4, 0, 0.2, 1), opacity 1000ms ease",
-          transition: theme =>
-            theme.transitions.create(["transform", "opacity"], {
-              duration: 1000,
-            }),
-          ...(appeal
-            ? {
-                boxShadow: `0 0 10px 0 ${colorTertiary}`,
-                animation: `appeal 5s ease-in-out infinite alternate`,
-                "@keyframes appeal": {
-                  "0%": {
-                    transform:
-                      "perspective(400px) translateY(-8px) scale(1.05) rotateX(10deg) rotateY(-10deg)",
-                  },
-                  "100%": {
-                    transform:
-                      "perspective(400px) translateY(-8px) scale(1.05) rotateX(10deg) rotateY(10deg)",
-                  },
-                },
-              }
-            : {}),
-        }}
-        onClick={event => {
-          openAlbum(albumItem.name)
-          const elem = event.currentTarget
-          elem.style.animation = "none"
-          // elem.style.transform = "scale(5) rotateY(180deg)"
-          elem.style.opacity = "0"
-          elem.style.zIndex = "100"
-          // Get the initial position and size of the element
-          const rect = elem.getBoundingClientRect()
-
-          // Calculate the translate values
-          const translateX =
-            window.innerWidth / 2 - (rect.left + rect.width / 2)
-          const translateY =
-            window.innerHeight / 2 - (rect.top + rect.height / 2)
-
-          // Calculate the scale value
-          const scale = Math.max(
-            window.innerWidth / rect.width,
-            window.innerHeight / rect.height
-          )
-
-          // Set the transform property
-          elem.style.transform = `perspective(400px) translate(${translateX}px, ${translateY}px) scale(${scale}) rotate3d(0, 1, 0, 135deg)`
-        }}
-      >
-        <AlbumCover
-          sx={{
-            width: "100%",
-            height: "auto",
-            aspectRatio: "1 / 1",
-          }}
-          coverUrl={coverUrl}
-        />
-      </ButtonBase>
-      <Typography
-        sx={{
-          mt: 0.5,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          width: "100%",
-          textAlign: "center",
-        }}
-      >
-        {albumItem.name}
-      </Typography>
-    </Box>
+    <CoverCard
+      id={albumItem.name}
+      title={albumItem.name}
+      coverUrl={coverUrl}
+      appeal={appeal}
+      onOpen={openAlbum}
+    />
   )
 })
 
@@ -251,7 +171,6 @@ const AlbumListPage = React.memo(function AlbumListPage(
           xs: 3,
           sm: 4,
         },
-        px: 6,
         ...props.sx,
       }}
     >
