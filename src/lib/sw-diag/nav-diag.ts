@@ -47,6 +47,14 @@ export interface NavDiagEntry {
   crossBuild?: boolean
   /** registered but this navigation did not engage the SW (also true on hard reloads) */
   bypassSuspect?: boolean
+  /**
+   * Controlled, the SW was engaged (workerStart > 0), yet the document body
+   * arrived over the network (transferSize > 0 — SW cache responses report 0).
+   * The confirmed leak signature: dispatch failed and the browser committed
+   * the parallel (AutoPreload) network response, keeping the client
+   * controlled.
+   */
+  networkCommit?: boolean
   bypassedRequests?: BypassedRequest[]
 }
 
@@ -115,18 +123,24 @@ const requestSwBuildInfo = (
 // AND a real transfer went to the network without the SW — the silent
 // per-request fallback caught in the act. (transferSize > 0 excludes
 // memory-cache replays, which also report workerStart === 0.)
+// Re-persist an already-stored entry after late-arriving data (handshake
+// result, bypassed requests) lands on it.
+const updateStored = (entry: NavDiagEntry) => {
+  const entries = readAll()
+  const i = entries.findIndex(e => e.t === entry.t)
+  if (i >= 0) {
+    entries[i] = entry
+    persist(entries)
+  }
+}
+
 const watchBypassedResources = (entry: NavDiagEntry) => {
   if (typeof PerformanceObserver === "undefined") return
   const bypassed: BypassedRequest[] = []
   const flush = () => {
     if (bypassed.length === 0) return
     entry.bypassedRequests = bypassed.slice(0, MAX_BYPASSED_PER_ENTRY)
-    const entries = readAll()
-    const i = entries.findIndex(e => e.t === entry.t)
-    if (i >= 0) {
-      entries[i] = entry
-      persist(entries)
-    }
+    updateStored(entry)
   }
   try {
     const observer = new PerformanceObserver(list => {
@@ -199,6 +213,28 @@ export const captureNavDiag = async (): Promise<void> => {
       // leave false
     }
 
+    entry.bypassSuspect =
+      entry.hasRegistration &&
+      (!entry.controlled || (nav !== undefined && nav.workerStart === 0))
+    entry.networkCommit =
+      entry.controlled &&
+      nav !== undefined &&
+      nav.workerStart > 0 &&
+      nav.transferSize > 0
+
+    // Persist BEFORE the handshake: a leaked document is often replaced by an
+    // MPA navigation within a second, while the handshake against a
+    // pre-diagnostics SW only resolves at its 3 s timeout — waiting would
+    // lose exactly the records that matter most.
+    const entries = readAll()
+    entries.push(entry)
+    persist(entries)
+    const log =
+      entry.bypassSuspect || entry.networkCommit ? console.warn : console.info
+    log("[nav-diag]", entry)
+
+    if (entry.controlled) watchBypassedResources(entry)
+
     entry.swBuild = controller
       ? await requestSwBuildInfo(controller)
       : "no-controller"
@@ -206,19 +242,10 @@ export const captureNavDiag = async (): Promise<void> => {
       typeof entry.swBuild === "object" &&
       entry.swBuild.appVersion !== undefined &&
       entry.swBuild.appVersion !== entry.appVersion
-    entry.bypassSuspect =
-      entry.hasRegistration &&
-      (!entry.controlled || (nav !== undefined && nav.workerStart === 0))
-
-    const entries = readAll()
-    entries.push(entry)
-    persist(entries)
-    const log = entry.crossBuild || entry.bypassSuspect
-      ? console.warn
-      : console.info
-    log("[nav-diag]", entry)
-
-    if (entry.controlled) watchBypassedResources(entry)
+    updateStored(entry)
+    if (entry.crossBuild) {
+      console.warn("[nav-diag] cross-build state detected:", entry)
+    }
   } catch {
     // Diagnostics must never break startup.
   }
