@@ -303,6 +303,31 @@ const buildRuntimeCaching = (serwist: Serwist): RuntimeCaching[] =>
 // which is why no comment here spells it out).
 const precacheManifest = self.__SW_MANIFEST
 
+// --- Build-info handshake (observation only) --------------------------------
+// The page asks its controller which build it is (nav-diag sends
+// GET_BUILD_INFO with a MessageChannel port at startup). A mismatch against
+// the page's own version reveals a cross-build state — the update-window
+// leak — regardless of which browser path let it happen. The manifest
+// revision (per-build nanoid) distinguishes deploys even when the package
+// version did not change.
+const MANIFEST_REVISION = (() => {
+  for (const entry of precacheManifest ?? []) {
+    if (typeof entry !== "string" && entry.url === "404.html") {
+      return entry.revision ?? undefined
+    }
+  }
+  return undefined
+})()
+
+self.addEventListener("message", event => {
+  if (event.data && event.data.type === "GET_BUILD_INFO") {
+    event.ports[0]?.postMessage({
+      appVersion: process.env.APP_VERSION,
+      manifestRevision: MANIFEST_REVISION,
+    })
+  }
+})
+
 const serwist = new Serwist({
   precacheEntries: precacheManifest,
   precacheOptions: {
