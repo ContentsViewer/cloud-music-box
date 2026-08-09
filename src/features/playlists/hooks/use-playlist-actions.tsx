@@ -90,7 +90,9 @@ export function usePlaylistActions(options?: {
         for (const track of tracks) {
           await playlistActions.keepTrack(playlist.id, track.id)
         }
-        enqueueSnackbar(`Added to ${playlist.name}`, { variant: "success" })
+        // default variant: MD3 snackbars are a neutral inverse surface —
+        // the app uses only "error" and default
+        enqueueSnackbar(`Added to ${playlist.name}`)
       } catch (error) {
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })

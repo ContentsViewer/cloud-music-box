@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePlayerStore, AudioTrack } from "../stores/player-store"
 import { enqueueSnackbar } from "notistack"
-import * as mm from "music-metadata-browser"
+import { useArtworkUrl } from "@/src/features/files"
 import assert from "assert"
 import { useAudioBus } from "@/src/stores/audio-bus-provider"
 import { createAudioAnalyser } from "@/src/lib/audio/audio-analyser"
@@ -16,30 +16,21 @@ const msSetPlaybackState = (state: "playing" | "paused") => {
   ms.playbackState = state
 }
 
-const msSetPlayingTrack = (track: AudioTrack) => {
-  console.log("msSetPlayingTrack", track.file.name)
-
+// Artwork URLs come from the shared per-image cache and are never revoked
+// here — other consumers (list rows, the player card) may hold the same URL.
+const msSetTrackMetadata = (track: AudioTrack, artworkUrl?: string) => {
   const ms = window.navigator.mediaSession
   if (!ms) return
 
-  if (ms.metadata && ms.metadata.artwork.length > 0) {
-    URL.revokeObjectURL(ms.metadata.artwork[0].src)
-  }
-
-  const cover = mm.selectCover(track.file.metadata?.common.picture)
-  const artwork = []
-  if (cover) {
-    const coverUrl = URL.createObjectURL(
-      new Blob([cover.data], { type: cover.format })
-    )
-    artwork.push({ src: coverUrl, sizes: "512x512", type: cover.format })
-  } else {
-    artwork.push({
-      src: "./track-cover-512x512.png",
-      sizes: "512x512",
-      type: "image/png",
-    })
-  }
+  const artwork: MediaImage[] = artworkUrl
+    ? [{ src: artworkUrl, sizes: "512x512" }]
+    : [
+        {
+          src: "./track-cover-512x512.png",
+          sizes: "512x512",
+          type: "image/png",
+        },
+      ]
 
   ms.metadata = new MediaMetadata({
     title: track.file.metadata?.common.title || track.file.name,
@@ -47,6 +38,15 @@ const msSetPlayingTrack = (track: AudioTrack) => {
     album: track.file.metadata?.common.album,
     artwork: artwork,
   })
+}
+
+const msSetPlayingTrack = (track: AudioTrack, artworkUrl?: string) => {
+  console.log("msSetPlayingTrack", track.file.name)
+
+  const ms = window.navigator.mediaSession
+  if (!ms) return
+
+  msSetTrackMetadata(track, artworkUrl)
   ms.playbackState = "playing"
 }
 
@@ -54,6 +54,11 @@ export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore()
 
   const audioBus = useAudioBus()
+
+  // Shared per-image URL for the active track's artwork (Media Session).
+  const artworkUrl = useArtworkUrl(playerState.activeTrack?.file.artworkHash)
+  const artworkUrlRef = useRef(artworkUrl)
+  artworkUrlRef.current = artworkUrl
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const sourceRef = useRef<HTMLSourceElement>(null)
@@ -175,7 +180,7 @@ export const AudioPlayer = () => {
 
       console.log("Setting source", src, source.type)
       audio.load()
-      msSetPlayingTrack(activeTrack)
+      msSetPlayingTrack(activeTrack, artworkUrlRef.current)
     }
 
     audio
@@ -217,6 +222,18 @@ export const AudioPlayer = () => {
     playerState.isPlaying,
     playerState.activeTrack,
   ])
+
+  useEffect(() => {
+    // The shared artwork URL resolves asynchronously, usually after
+    // msSetPlayingTrack already ran for this track — refresh the Media Session
+    // metadata (only) once it arrives.
+    if (!artworkUrl) return
+    const track = playerState.activeTrack
+    if (!track) return
+    if (window.navigator.mediaSession?.metadata === null) return
+    msSetTrackMetadata(track, artworkUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artworkUrl])
 
   useEffect(() => {
     const ms = window.navigator.mediaSession

@@ -139,6 +139,11 @@ export const useThemeStore = () => {
         // )
         dispatch({ type: "setTheme", payload: { scheme, sourceColor } })
       },
+      /** For colors already extracted once and cached (e.g. per-artwork). */
+      applyThemeFromSourceColor: (sourceColor: number) => {
+        const scheme = createScheme(sourceColor)
+        dispatch({ type: "setTheme", payload: { scheme, sourceColor } })
+      },
       resetSourceColor: () => {
         const scheme = createScheme(defaultSourceColor)
         dispatch({

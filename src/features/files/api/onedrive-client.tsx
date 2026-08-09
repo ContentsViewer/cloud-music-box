@@ -21,7 +21,7 @@ export interface OneDriveClient extends BaseDriveClient {
   connect(): Promise<void>
 }
 
-const DB_KEY_ACCOUNT_INFO = "onedrive.accountInfo"
+export const DB_KEY_ACCOUNT_INFO = "onedrive.accountInfo"
 
 export async function createOneDriveClient(): Promise<OneDriveClient> {
   console.log("createOneDriveClient")

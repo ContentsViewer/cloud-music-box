@@ -16,6 +16,9 @@ export const TrackCover = React.forwardRef(function TrackCover(
     <Avatar
       ref={ref as React.RefObject<HTMLDivElement>}
       src={props.coverUrl}
+      // Lazy: rows outside the viewport don't decode their cover at all, which
+      // bounds decoded-bitmap memory in long lists.
+      imgProps={{ loading: "lazy", decoding: "async" }}
       variant="rounded"
       sx={{
         width: 48,

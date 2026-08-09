@@ -24,6 +24,14 @@ import {
 import { BaseDriveClient } from "../api/base-drive-client"
 import { createOneDriveClient } from "../api/onedrive-client"
 import { createGoogleDriveClient } from "../api/google-drive-client"
+import { ArtworkRecord, sha256Hex } from "@/src/lib/artworks/artworks"
+import { extractColorFromImage } from "@/src/lib/theming/color-from-image"
+import {
+  LocalFileRecord,
+  mergeAlbumRecord,
+  mergeFileEntry,
+} from "@/src/lib/export/merge"
+import { ExportedAlbum, ExportedFileEntry } from "@/src/lib/export/schema"
 
 export const FILE_DB_NAME = "file-db"
 
@@ -37,7 +45,14 @@ export const FILE_DB_NAME = "file-db"
  * unguarded `createObjectStore("files")` would throw ConstraintError and abort
  * the whole upgrade, leaving the app permanently unconfigured.
  */
-export const FILE_DB_VERSION = 2
+export const FILE_DB_VERSION = 3
+
+/**
+ * Set once the one-time move of embedded pictures into the `artworks` store has
+ * completed. Purely an optimization to skip the (idempotent) startup sweep —
+ * losing the flag only costs one harmless re-scan.
+ */
+const ARTWORKS_MIGRATED_KEY = "artworks.migrated"
 
 interface SyncTask {
   fileId: string
@@ -48,8 +63,12 @@ interface SyncTask {
 export interface AlbumItem {
   name: string
   fileIds: string[]
-  cover?: Blob
+  /** SHA-256 key into the `artworks` store (replaced the old `cover?: Blob`). */
+  coverHash?: string
 }
+
+/** Shape of pre-v3 records, only ever seen by the startup migration. */
+type LegacyAlbumItem = AlbumItem & { cover?: Blob }
 
 type DriveStatus = "not-configured" | "no-account" | "online" | "offline"
 
@@ -65,6 +84,13 @@ interface FileStoreStateProps {
 
   blobsStorageMaxBytes?: number
   blobsStorageUsageBytes?: number
+
+  /**
+   * Non-null while the one-time artwork migration is running at startup.
+   * `configured` stays false for the whole window, so the modal this drives is
+   * the only thing the user can interact with.
+   */
+  migrationProgress: { done: number; total: number } | null
 }
 
 interface BlobsMetaRecord {
@@ -81,6 +107,7 @@ export const FileStoreStateContext = createContext<FileStoreStateProps>({
   syncingTrackFiles: {},
   syncQueue: [],
   driveStatus: "not-configured",
+  migrationProgress: null,
 })
 
 type FileStoreAction =
@@ -109,6 +136,10 @@ type FileStoreAction =
     }
   | { type: "setBlobsStorageMaxBytes"; payload: number }
   | { type: "setBlobsStorageUsageBytes"; payload: number }
+  | {
+      type: "setMigrationProgress"
+      payload: { done: number; total: number } | null
+    }
 
 export const FileStoreDispatchContext = createContext<
   React.Dispatch<FileStoreAction>
@@ -155,7 +186,10 @@ export const useFileStore = () => {
         const currentFolder = (await getFileItemFromIdb(
           refState.current.fileDb,
           id
-        )) as FolderItem
+        )) as FolderItem | undefined
+        // No local record for this folder yet (e.g. a jump to an imported
+        // track's parent) — nothing cached to list; the remote path fills in.
+        if (!currentFolder) return undefined
 
         const childrenIds = currentFolder.childrenIds
         let children: BaseFileItem[] | undefined
@@ -351,6 +385,234 @@ export const useFileStore = () => {
         )
 
         return albumIds
+      },
+      getArtwork: async (hash: string): Promise<ArtworkRecord | undefined> => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        if (!refState.current.fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        return getArtworkFromIdb(refState.current.fileDb, hash)
+      },
+      /**
+       * Theme source color for an artwork, computed at most once per image:
+       * cached on the ArtworkRecord and returned from there ever after (the
+       * color is a pure function of the image bytes the hash addresses).
+       */
+      getArtworkThemeColor: async (
+        hash: string
+      ): Promise<number | undefined> => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        const fileDb = refState.current.fileDb
+        if (!fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        const artwork = await getArtworkFromIdb(fileDb, hash)
+        if (!artwork) return undefined
+        if (artwork.themeSourceColor !== undefined) {
+          return artwork.themeSourceColor
+        }
+        const color = await extractColorFromImage(artwork.blob)
+        // Re-read before writing back: another consumer may have raced us, and
+        // the record may have gained fields in the meantime.
+        const latest = (await getArtworkFromIdb(fileDb, hash)) ?? artwork
+        const updated: ArtworkRecord = { ...latest, themeSourceColor: color }
+        await idbRequest(
+          fileDb
+            .transaction("artworks", "readwrite")
+            .objectStore("artworks")
+            .put(updated, hash)
+        )
+        return color
+      },
+      /** Everything the export file needs from this store, read in one shot.
+       *  Records are picture-free post-v3, so getAll stays lightweight; the
+       *  artwork blobs come back as disk-backed handles, not loaded bytes. */
+      readLibrarySnapshot: async (): Promise<{
+        tracks: AudioTrackFileItem[]
+        folders: FolderItem[]
+        albums: AlbumItem[]
+        artworks: Array<{ hash: string; blob: Blob }>
+      }> => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        const fileDb = refState.current.fileDb
+        if (!fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        const all = await idbRequest<BaseFileItem[]>(
+          fileDb.transaction("files").objectStore("files").getAll()
+        )
+        const tracks = all.filter(
+          item => item.type === "audio-track"
+        ) as AudioTrackFileItem[]
+        const folders = all.filter(
+          item => item.type === "folder"
+        ) as FolderItem[]
+        const albums = await idbRequest<AlbumItem[]>(
+          fileDb.transaction("albums").objectStore("albums").getAll()
+        )
+        const artworks = await new Promise<
+          Array<{ hash: string; blob: Blob }>
+        >((resolve, reject) => {
+          const out: Array<{ hash: string; blob: Blob }> = []
+          const req = fileDb
+            .transaction("artworks")
+            .objectStore("artworks")
+            .openCursor()
+          req.onsuccess = () => {
+            const cursor = req.result
+            if (!cursor) {
+              resolve(out)
+              return
+            }
+            const record = cursor.value as ArtworkRecord
+            out.push({ hash: String(cursor.key), blob: record.blob })
+            cursor.continue()
+          }
+          req.onerror = () => reject(req.error)
+        })
+        return { tracks, folders, albums, artworks }
+      },
+
+      /**
+       * Batch import with the pure merge rules: artworks first (so hash
+       * references resolve), then file-tree entries (folders + tracks in one
+       * chunked loop, get→merge→put chained inside each tx), then albums.
+       * Local data is never downgraded.
+       */
+      importLibraryData: async (
+        data: {
+          files: ExportedFileEntry[]
+          albums: ExportedAlbum[]
+          artworks: Array<{ hash: string; blob: Blob }>
+        },
+        onProgress?: (done: number, total: number) => void
+      ): Promise<{
+        tracksAdded: number
+        tracksMerged: number
+        foldersAdded: number
+        foldersMerged: number
+        entriesSkipped: number
+        albumsAdded: number
+        albumsMerged: number
+        artworksAdded: number
+      }> => {
+        if (!refState.current.configured) {
+          throw new Error("File store not configured")
+        }
+        const fileDb = refState.current.fileDb
+        if (!fileDb) {
+          throw new Error("File database not initialized")
+        }
+
+        const counts = {
+          tracksAdded: 0,
+          tracksMerged: 0,
+          foldersAdded: 0,
+          foldersMerged: 0,
+          entriesSkipped: 0,
+          albumsAdded: 0,
+          albumsMerged: 0,
+          artworksAdded: 0,
+        }
+        const total =
+          data.artworks.length + data.files.length + data.albums.length
+        let done = 0
+
+        for (const { hash, blob } of data.artworks) {
+          const existing = await getArtworkFromIdb(fileDb, hash)
+          if (!existing) {
+            // CAS integrity: the key must be the SHA-256 of the bytes.
+            // A record failing this came from a damaged/tampered file.
+            const actual = await sha256Hex(
+              new Uint8Array(await blob.arrayBuffer())
+            )
+            if (actual === hash) {
+              const record: ArtworkRecord = { blob }
+              await idbRequest(
+                fileDb
+                  .transaction("artworks", "readwrite")
+                  .objectStore("artworks")
+                  .put(record, hash)
+              )
+              counts.artworksAdded++
+            } else {
+              console.warn("Skipping artwork with mismatched hash", hash)
+            }
+          }
+          done++
+          onProgress?.(done, total)
+        }
+
+        const CHUNK = 200
+        for (let i = 0; i < data.files.length; i += CHUNK) {
+          const chunk = data.files.slice(i, i + CHUNK)
+          await new Promise<void>((resolve, reject) => {
+            const tx = fileDb.transaction("files", "readwrite")
+            const store = tx.objectStore("files")
+            for (const imported of chunk) {
+              const getReq = store.get(imported.id)
+              getReq.onsuccess = () => {
+                const local = getReq.result as LocalFileRecord | undefined
+                // Dispatches by entry type; cross-type id collisions and
+                // unknown node kinds come back as "skipped".
+                const { record, outcome } = mergeFileEntry(local, imported)
+                if (outcome === "skipped") {
+                  counts.entriesSkipped++
+                  return
+                }
+                const isFolder = imported.type === "folder"
+                if (outcome === "added") {
+                  if (isFolder) counts.foldersAdded++
+                  else counts.tracksAdded++
+                } else if (outcome === "merged") {
+                  if (isFolder) counts.foldersMerged++
+                  else counts.tracksMerged++
+                }
+                if (
+                  record &&
+                  (outcome === "added" || outcome === "merged")
+                ) {
+                  store.put(record)
+                }
+              }
+            }
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => reject(tx.error)
+            tx.onabort = () => reject(tx.error ?? new Error("aborted"))
+          })
+          done += chunk.length
+          onProgress?.(done, total)
+        }
+
+        for (const imported of data.albums) {
+          const local = (await getAlbumItemFromIdb(fileDb, imported.name)) as
+            | AlbumItem
+            | undefined
+          const { record, outcome } = mergeAlbumRecord(local, imported)
+          if (outcome === "added" || outcome === "merged") {
+            await idbRequest(
+              fileDb
+                .transaction("albums", "readwrite")
+                .objectStore("albums")
+                .put(record, imported.name)
+            )
+          }
+          if (outcome === "added") counts.albumsAdded++
+          else if (outcome === "merged") counts.albumsMerged++
+          done++
+          onProgress?.(done, total)
+        }
+
+        return counts
       },
       setBlobsStorageMaxBytes: (bytes: number) => {
         dispatch({ type: "setBlobsStorageMaxBytes", payload: bytes })
@@ -563,6 +825,144 @@ function getAlbumItemFromIdb(db: IDBDatabase, id: string): Promise<AlbumItem> {
   })
 }
 
+function getArtworkFromIdb(
+  db: IDBDatabase,
+  hash: string
+): Promise<ArtworkRecord | undefined> {
+  return idbRequest<ArtworkRecord | undefined>(
+    db.transaction("artworks").objectStore("artworks").get(hash)
+  )
+}
+
+/**
+ * The persisted copy of a parse result: embedded pictures live once in the
+ * `artworks` store and `native` (raw per-format tag dictionaries) is read by
+ * nothing, so neither is written to IndexedDB. The in-memory object of the
+ * playing track keeps the full parse.
+ */
+function stripMetadataForPersistence(
+  metadata: mm.IAudioMetadata
+): mm.IAudioMetadata {
+  return {
+    ...metadata,
+    native: {},
+    common: { ...metadata.common, picture: undefined },
+  }
+}
+
+/**
+ * Content-addresses the selected embedded picture: SHA-256 of the ORIGINAL
+ * bytes is the key (stable across devices), the untouched bytes are the value.
+ * Returns the hash, or undefined when the metadata carries no picture.
+ */
+async function storeEmbeddedArtwork(
+  db: IDBDatabase,
+  metadata: mm.IAudioMetadata
+): Promise<string | undefined> {
+  const cover = mm.selectCover(metadata.common.picture)
+  if (!cover) return undefined
+  const bytes =
+    cover.data instanceof Uint8Array ? cover.data : new Uint8Array(cover.data)
+  const hash = await sha256Hex(bytes)
+  const existing = await getArtworkFromIdb(db, hash)
+  if (!existing) {
+    const record: ArtworkRecord = {
+      blob: new Blob([bytes], { type: cover.format }),
+    }
+    await idbRequest(
+      db.transaction("artworks", "readwrite").objectStore("artworks").put(record, hash)
+    )
+  }
+  return hash
+}
+
+/**
+ * One-time move of embedded pictures out of `files`/`albums` records into the
+ * content-addressed `artworks` store (v3). Idempotent: the contract is the
+ * observable fact "does this record still carry picture bytes", so an
+ * interrupted run resumes where it stopped on the next launch. Records are
+ * fetched one at a time (never getAll — that would load every image at once,
+ * the very failure mode this migration removes), with a few in flight so
+ * native SHA-256 overlaps IndexedDB IO.
+ */
+async function migrateToContentAddressedArtworks(
+  db: IDBDatabase,
+  onProgress: (done: number, total: number) => void
+) {
+  const fileKeys = await idbRequest<IDBValidKey[]>(
+    db.transaction("files").objectStore("files").getAllKeys()
+  )
+  const albumKeys = await idbRequest<IDBValidKey[]>(
+    db.transaction("albums").objectStore("albums").getAllKeys()
+  )
+
+  const migrateFileRecord = async (key: IDBValidKey) => {
+    const item = await idbRequest<BaseFileItem | undefined>(
+      db.transaction("files").objectStore("files").get(key)
+    )
+    if (!item || item.type !== "audio-track") return
+    const track = item as AudioTrackFileItem
+    const metadata = track.metadata
+    if (!metadata) return
+    const hasPicture = !!metadata.common.picture?.length
+    const hasNative = Object.keys(metadata.native ?? {}).length > 0
+    if (!hasPicture && !hasNative) return
+
+    if (hasPicture) {
+      const hash = await storeEmbeddedArtwork(db, metadata)
+      if (hash && track.artworkHash === undefined) track.artworkHash = hash
+    }
+    track.metadata = stripMetadataForPersistence(metadata)
+    await idbRequest(
+      db.transaction("files", "readwrite").objectStore("files").put(track)
+    )
+  }
+
+  const migrateAlbumRecord = async (key: IDBValidKey) => {
+    const album = await idbRequest<LegacyAlbumItem | undefined>(
+      db.transaction("albums").objectStore("albums").get(key)
+    )
+    if (!album || album.cover === undefined) return
+    const bytes = new Uint8Array(await album.cover.arrayBuffer())
+    const hash = await sha256Hex(bytes)
+    const existing = await getArtworkFromIdb(db, hash)
+    if (!existing) {
+      const record: ArtworkRecord = { blob: album.cover }
+      await idbRequest(
+        db.transaction("artworks", "readwrite").objectStore("artworks").put(record, hash)
+      )
+    }
+    if (album.coverHash === undefined) album.coverHash = hash
+    delete album.cover
+    await idbRequest(
+      db.transaction("albums", "readwrite").objectStore("albums").put(album, key)
+    )
+  }
+
+  const tasks: Array<() => Promise<void>> = [
+    ...fileKeys.map(key => () => migrateFileRecord(key)),
+    ...albumKeys.map(key => () => migrateAlbumRecord(key)),
+  ]
+  const total = tasks.length
+  let done = 0
+  onProgress(done, total)
+
+  const CONCURRENCY = 4
+  let next = 0
+  const workers = Array.from(
+    { length: Math.min(CONCURRENCY, tasks.length) },
+    async () => {
+      while (next < tasks.length) {
+        const task = tasks[next++]
+        await task()
+        done++
+        onProgress(done, total)
+      }
+    }
+  )
+  await Promise.all(workers)
+}
+
 async function mergeAndSyncFileItem(
   fileItem: BaseFileItem,
   db: IDBDatabase
@@ -691,6 +1091,9 @@ const reducer = (
     case "setBlobsStorageUsageBytes": {
       return { ...state, blobsStorageUsageBytes: action.payload }
     }
+    case "setMigrationProgress": {
+      return { ...state, migrationProgress: action.payload }
+    }
     default:
       throw new Error("Invalid action")
   }
@@ -709,6 +1112,7 @@ export const FileStoreProvider = ({
     syncingTrackFiles: {},
     syncQueue: [],
     driveStatus: "not-configured",
+    migrationProgress: null,
   })
 
   const syncPromiseRef = useRef<Promise<void>>(Promise.resolve())
@@ -778,6 +1182,10 @@ export const FileStoreProvider = ({
             if (!names.contains("playlist-model")) {
               db.createObjectStore("playlist-model")
             }
+            // v3: content-addressed artwork blobs (key = SHA-256 of the bytes)
+            if (!names.contains("artworks")) {
+              db.createObjectStore("artworks")
+            }
           }
         })
         // Another tab wants to upgrade: release the connection so it is not
@@ -791,8 +1199,32 @@ export const FileStoreProvider = ({
             { variant: "error", persist: true }
           )
         }
+        // One-time v3 data migration. It runs while the db handle is still
+        // local to init() and `configured` is false — every store action
+        // double-guards on those, so no user-triggered DB operation can
+        // interleave with it. The localStorage flag only skips the (idempotent)
+        // sweep; losing it costs one harmless re-scan.
+        if (localStorage.getItem(ARTWORKS_MIGRATED_KEY) === null) {
+          try {
+            let lastDispatched = -1
+            await migrateToContentAddressedArtworks(fileDb, (done, total) => {
+              if (total === 0) return
+              // Dispatching every record would re-render per record; every ~1%
+              // (plus the final tick) is plenty for a progress bar.
+              const step = Math.max(1, Math.floor(total / 100))
+              if (done !== total && done - lastDispatched < step) return
+              lastDispatched = done
+              dispatch({
+                type: "setMigrationProgress",
+                payload: { done, total },
+              })
+            })
+            localStorage.setItem(ARTWORKS_MIGRATED_KEY, "1")
+          } finally {
+            dispatch({ type: "setMigrationProgress", payload: null })
+          }
+        }
         dispatch({ type: "setFileDb", payload: fileDb })
-        // enqueueSnackbar("File Database Connected", { variant: "success" })
       } catch (error) {
         console.error(error)
         enqueueSnackbar(`${error}`, { variant: "error" })
@@ -1025,18 +1457,27 @@ export const FileStoreProvider = ({
               return null
             })
             .then(() => getFileItemFromIdb(fileDb, fileId))
-            .then(item => {
+            .then(async item => {
               if (!item) throw new Error("Item not found")
               if (item.type !== "audio-track")
                 throw new Error("Item is not a track")
               assert(blobsStorageUsageBytesRef.current !== undefined)
 
               trackFile = item as AudioTrackFileItem
+              // The in-memory object keeps the full parse (the player reads it
+              // right away); the persisted copy carries artworkHash instead of
+              // the picture bytes.
               trackFile.metadata = metadata
+              const artworkHash = await storeEmbeddedArtwork(fileDb, metadata)
+              if (artworkHash) trackFile.artworkHash = artworkHash
+              const persistedTrack: AudioTrackFileItem = {
+                ...trackFile,
+                metadata: stripMetadataForPersistence(metadata),
+              }
               fileDb
                 .transaction("files", "readwrite")
                 .objectStore("files")
-                .put(trackFile)
+                .put(persistedTrack)
 
               if (blobsStorageUsageBytesRef.current > 0) {
                 fileDb
@@ -1058,16 +1499,10 @@ export const FileStoreProvider = ({
                   albumItem = {
                     name: albumName,
                     fileIds: [fileId],
-                    cover: undefined,
                   }
                 }
-                if (albumItem.cover === undefined) {
-                  const cover = mm.selectCover(metadata.common.picture)
-                  if (cover) {
-                    albumItem.cover = new Blob([cover.data], {
-                      type: cover.format,
-                    })
-                  }
+                if (albumItem.coverHash === undefined && artworkHash) {
+                  albumItem.coverHash = artworkHash
                 }
                 fileDb
                   .transaction("albums", "readwrite")

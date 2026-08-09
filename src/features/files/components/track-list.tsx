@@ -18,6 +18,7 @@ import {
   hexFromArgb,
 } from "@material/material-color-utilities"
 import { MoreVert } from "@mui/icons-material"
+import { enqueueSnackbar } from "notistack"
 import { useRouter } from "@/src/stores/router"
 import { AudioTrackFileItem } from "../api/base-drive-client"
 import { SerializedStyles } from "@emotion/react"
@@ -170,8 +171,16 @@ const TrackListInner = React.memo(function TrackListInner({
       >
         <MenuItem
           onClick={() => {
+            closeMenu()
             const parentId = refMenuTrack.current?.parentId
-            if (!parentId) return
+            if (!parentId) {
+              // Imported tracks can lack a parent until the folder is known
+              // here — say so instead of silently doing nothing.
+              enqueueSnackbar(
+                "This track's folder isn't known on this device yet."
+              )
+              return
+            }
             routerActions.goFile(parentId)
           }}
         >

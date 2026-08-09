@@ -4,7 +4,7 @@ import { CoverCard } from "@/src/components/cover-card"
 import AppTopBar from "@/src/components/app-top-bar"
 import { MarqueeText } from "@/src/components/marquee-text"
 import { useRouter } from "@/src/stores/router"
-import { AlbumItem, useFileStore } from "@/src/features/files"
+import { AlbumItem, useArtworkUrl, useFileStore } from "@/src/features/files"
 import { useThemeStore } from "@/src/stores/theme-store"
 import { TrackList } from "@/src/features/files"
 import { Theme } from "@emotion/react"
@@ -50,13 +50,7 @@ const AlbumCard = React.memo(function AlbumCard({
   openAlbum?: (albumId: string) => void
   appeal?: boolean
 }) {
-  const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
-  useEffect(() => {
-    if (!albumItem.cover) return
-    const url = URL.createObjectURL(albumItem.cover)
-    setCoverUrl(url)
-    return () => URL.revokeObjectURL(url)
-  }, [albumItem.cover])
+  const coverUrl = useArtworkUrl(albumItem.coverHash)
 
   return (
     <CoverCard
@@ -195,7 +189,7 @@ const AlbumPage = React.memo(function AlbumPage({
   const [playerState, playerActions] = usePlayerStore()
   const [routerState, routerActions] = useRouter()
 
-  const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
+  const coverUrl = useArtworkUrl(albumItem?.coverHash)
   const [tracks, setTracks] = useState<AudioTrackFileItem[] | undefined>([])
 
   const routerActionsRef = useRef(routerActions)
@@ -224,13 +218,6 @@ const AlbumPage = React.memo(function AlbumPage({
     }
     getTracks()
   }, [albumItem?.fileIds])
-
-  useEffect(() => {
-    if (!albumItem?.cover) return
-    const url = URL.createObjectURL(albumItem.cover)
-    setCoverUrl(url)
-    return () => URL.revokeObjectURL(url)
-  }, [albumItem?.cover])
 
   return (
     <Box
@@ -314,12 +301,15 @@ const AlbumPage = React.memo(function AlbumPage({
             </IconButton>
             <IconButton
               color="inherit"
+              title="Open this album's folder in Files"
+              // Any track with a known parent will do — imported records can
+              // lack one until their folder is known on this device.
+              disabled={!tracks?.some(track => track.parentId !== undefined)}
               onClick={() => {
-                if (tracks === undefined) return
-                if (tracks.length === 0) return
-                const folderId = tracks[0].parentId
+                const folderId = tracks?.find(
+                  track => track.parentId !== undefined
+                )?.parentId
                 if (folderId === undefined) return
-
                 routerActions.goFile(folderId)
               }}
             >

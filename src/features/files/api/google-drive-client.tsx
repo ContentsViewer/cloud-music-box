@@ -59,7 +59,7 @@ export interface GoogleDriveClient extends BaseDriveClient {
   checkFolderAccess(folderId: string): Promise<{ hasAccess: boolean; folderName?: string }>
 }
 
-const DB_KEY_USER_INFO = "googleDrive.userInfo"
+export const DB_KEY_USER_INFO = "googleDrive.userInfo"
 const DB_KEY_ACCESS_TOKEN = "googleDrive.accessToken"
 const DB_KEY_REFRESH_TOKEN = "googleDrive.refreshToken"
 const DB_KEY_TOKEN_EXPIRES = "googleDrive.tokenExpires"

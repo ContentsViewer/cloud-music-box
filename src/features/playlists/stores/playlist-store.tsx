@@ -10,7 +10,16 @@ import {
 } from "react"
 import { useFileStore } from "@/src/features/files"
 import { idbRequest } from "@/src/lib/idb/request"
-import { TRACK_FEATURE_VERSION } from "@/src/lib/audio/track-feature-accumulator"
+import {
+  TRACK_FEATURE_DIM,
+  TRACK_FEATURE_VERSION,
+} from "@/src/lib/audio/track-feature-accumulator"
+import {
+  mergePlaylistTruth,
+  mergeTrackFeature,
+  PlaylistTruth,
+  TrackFeatureLike,
+} from "@/src/lib/export/merge"
 import {
   FeatureSpaceModel,
   fitFeatureSpace,
@@ -453,6 +462,139 @@ export const usePlaylistStore = () => {
             .get(trackId)
         )
       },
+
+      /** Everything the export file needs from this store, read in one shot. */
+      readPlaylistSnapshot: async (): Promise<{
+        playlists: PlaylistItem[]
+        trackFeatures: TrackFeatureRecord[]
+      }> => {
+        const db = requireDb()
+        const playlists = await idbRequest<PlaylistItem[]>(
+          db.transaction("playlists").objectStore("playlists").getAll()
+        )
+        const trackFeatures = await idbRequest<TrackFeatureRecord[]>(
+          db
+            .transaction("track-features")
+            .objectStore("track-features")
+            .getAll()
+        )
+        return { playlists, trackFeatures }
+      },
+
+      /**
+       * Batch import: writes every accepted feature record, merges playlist
+       * truth, then rebuilds ONCE — explicit refit, standardize, recompute all
+       * playlists (docs/architecture.md forbids looping the incremental path).
+       */
+      importPlaylistData: (
+        features: TrackFeatureLike[],
+        importedPlaylists: PlaylistTruth[],
+        onProgress?: (done: number, total: number) => void
+      ) =>
+        enqueue(async () => {
+          const db = requireDb()
+          const counts = {
+            featuresAdded: 0,
+            featuresMerged: 0,
+            featuresSkipped: 0,
+            playlistsAdded: 0,
+            playlistsMerged: 0,
+          }
+          const total = features.length + importedPlaylists.length
+          let done = 0
+
+          // Feature records in chunked transactions: each chunk is one
+          // readwrite tx (get → merge → put chained inside), then the loop
+          // yields so progress can paint.
+          const CHUNK = 200
+          for (let i = 0; i < features.length; i += CHUNK) {
+            const chunk = features.slice(i, i + CHUNK)
+            await new Promise<void>((resolve, reject) => {
+              const tx = db.transaction("track-features", "readwrite")
+              const store = tx.objectStore("track-features")
+              for (const imported of chunk) {
+                const getReq = store.get(imported.id)
+                getReq.onsuccess = () => {
+                  const local = getReq.result as TrackFeatureRecord | undefined
+                  const { record, outcome } = mergeTrackFeature(
+                    local,
+                    imported,
+                    TRACK_FEATURE_VERSION,
+                    TRACK_FEATURE_DIM
+                  )
+                  if (outcome === "skipped") counts.featuresSkipped++
+                  else if (outcome === "added" || outcome === "merged") {
+                    if (outcome === "added") counts.featuresAdded++
+                    else counts.featuresMerged++
+                    if (record) store.put(record)
+                  }
+                }
+              }
+              tx.oncomplete = () => resolve()
+              tx.onerror = () => reject(tx.error)
+              tx.onabort = () => reject(tx.error ?? new Error("aborted"))
+            })
+            done += chunk.length
+            onProgress?.(done, total)
+          }
+
+          // Merge playlist truth. Same id → merged by the pure rule; new id →
+          // added verbatim (never via createPlaylist, which would mint an id).
+          const byId = new Map(
+            internals.playlists.current.map(p => [p.id, p])
+          )
+          let nextList: PlaylistItem[] = [...internals.playlists.current]
+          for (const imported of importedPlaylists) {
+            const local = byId.get(imported.id)
+            const { record, outcome } = mergePlaylistTruth(local, imported)
+            if (outcome === "added") {
+              counts.playlistsAdded++
+              nextList.push({
+                ...record,
+                provisionalIds: [],
+                provisionalDistances: undefined,
+                prototype: new Float32Array(0),
+                axisWeights: new Float32Array(0),
+                radius: 0,
+                featureVersion: TRACK_FEATURE_VERSION,
+              })
+            } else if (outcome === "merged") {
+              counts.playlistsMerged++
+              nextList = nextList.map(p =>
+                p.id === record.id ? { ...p, ...record } : p
+              )
+            }
+            done++
+            onProgress?.(done, total)
+          }
+          nextList.sort((a, b) => a.createdAt - b.createdAt)
+
+          // ONE batch rebuild. The refit is explicit: imported vectors can
+          // shift the distribution without tripping the growth heuristic.
+          internals.corpus.current = null
+          internals.standardized.current = null
+          const corpus = await loadCorpus()
+          const fitted = fitFeatureSpace(
+            corpus.map(c => c.vector),
+            TRACK_FEATURE_VERSION,
+            Date.now()
+          )
+          if (fitted) {
+            db.transaction("playlist-model", "readwrite")
+              .objectStore("playlist-model")
+              .put(fitted, MODEL_KEY)
+            internals.model.current = fitted
+            internals.standardized.current = null
+          }
+          const space = await ensureSpace()
+          if (space) {
+            rebuildAll(nextList, space.space, space.model)
+          } else {
+            persist(nextList)
+            commit(nextList)
+          }
+          return counts
+        }),
 
       /** Called once per track, when playback moves on to the next one */
       recordTrackFeatures: (

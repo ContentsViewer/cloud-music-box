@@ -2,14 +2,24 @@
 
 import { AudioPlayer } from "@/src/features/player"
 import { PlayerCard } from "@/src/features/player"
-import { FileStoreProvider } from "@/src/features/files"
+import { FileStoreProvider, useFileStore } from "@/src/features/files"
 import { PlayerStoreProvider, usePlayerStore } from "@/src/features/player"
 import { DynamicBackground } from "@/src/features/visualizers"
 import {
   PlaylistStoreProvider,
   TrackFeatureRecorder,
 } from "@/src/features/playlists"
-import { Box, Fade, Button, styled } from "@mui/material"
+import {
+  Box,
+  Fade,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  LinearProgress,
+  styled,
+} from "@mui/material"
 import {
   MaterialDesignContent,
   SnackbarKey,
@@ -21,7 +31,6 @@ import { NetworkMonitorProvider } from "@/src/stores/network-monitor"
 import { RouterProvider } from "@/src/stores/router"
 import { useEffect, useRef, useState } from "react"
 import { useThemeStore } from "@/src/stores/theme-store"
-import * as mm from "music-metadata-browser"
 import { AudioBusProvider } from "@/src/stores/audio-bus-provider"
 import { css } from "@emotion/css"
 import { registerServiceWorker } from "./register-sw"
@@ -85,24 +94,73 @@ const InverseColorButton = styled(Button)(() => {
 const ThemeChanger = () => {
   const [playerState] = usePlayerStore()
   const [, themeStoreActions] = useThemeStore()
+  const [, fileStoreActions] = useFileStore()
+  const refFileStoreActions = useRef(fileStoreActions)
+  refFileStoreActions.current = fileStoreActions
 
   useEffect(() => {
     if (!playerState.activeTrack) return
     if (playerState.isActiveTrackLoading) return
 
-    const cover = mm.selectCover(
-      playerState.activeTrack.file.metadata?.common.picture
-    )
-
-    if (cover) {
-      const blob = new Blob([cover.data], { type: cover.format })
-      themeStoreActions.applyThemeFromImage(blob)
-    } else {
+    const hash = playerState.activeTrack.file.artworkHash
+    if (!hash) {
       themeStoreActions.resetSourceColor()
+      return
+    }
+
+    // The color is cached per artwork hash, so consecutive tracks of the same
+    // album resolve without re-running the extraction worker.
+    let canceled = false
+    refFileStoreActions.current
+      .getArtworkThemeColor(hash)
+      .then(color => {
+        if (canceled) return
+        if (color !== undefined) {
+          themeStoreActions.applyThemeFromSourceColor(color)
+        } else {
+          themeStoreActions.resetSourceColor()
+        }
+      })
+      .catch(error => {
+        console.error(error)
+      })
+    return () => {
+      canceled = true
     }
   }, [playerState.activeTrack, playerState.isActiveTrackLoading])
 
   return null
+}
+
+// Blocks the app while the one-time artwork migration rewrites the library at
+// startup (file-store keeps `configured` false for the whole window, so pages
+// are idle behind this anyway). No onClose on purpose: it cannot be dismissed.
+const MigrationDialog = () => {
+  const [fileStoreState] = useFileStore()
+  const progress = fileStoreState.migrationProgress
+
+  return (
+    <Dialog open={progress !== null}>
+      <DialogTitle>Updating library database…</DialogTitle>
+      <DialogContent>
+        <DialogContentText sx={{ mb: 2 }}>
+          Optimizing how album artwork is stored. This runs once after the
+          update; if it is interrupted, it resumes on the next launch.
+        </DialogContentText>
+        <LinearProgress
+          variant="determinate"
+          value={
+            progress
+              ? (progress.done / Math.max(1, progress.total)) * 100
+              : 0
+          }
+        />
+        <DialogContentText sx={{ mt: 1, textAlign: "right" }}>
+          {progress ? `${progress.done} / ${progress.total}` : ""}
+        </DialogContentText>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 // The playlists feature does not import the player (only player → files is an
@@ -145,6 +203,7 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
       }}
     >
       <ThemeChanger />
+      <MigrationDialog />
       <PlaylistTrackRecorder />
       <DynamicBackground />
       <AudioPlayer />

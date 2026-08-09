@@ -20,7 +20,15 @@ export interface FolderItem extends BaseFileItem {
 export interface AudioTrackFileItem extends BaseFileItem {
   type: "audio-track"
   mimeType: string
+  /**
+   * Persisted records carry this WITHOUT `common.picture` / `native` — embedded
+   * artwork lives once in the `artworks` store (see AudioTrackFileItem.artworkHash).
+   * Only the in-memory object of the currently downloaded track holds the full
+   * parse result.
+   */
   metadata?: mm.IAudioMetadata
+  /** SHA-256 of the embedded cover bytes; key into the `artworks` store. */
+  artworkHash?: string
 }
 
 export const AUDIO_FORMAT_MAPPING: { [key: string]: { mimeType: string } } = {
