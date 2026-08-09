@@ -1,4 +1,4 @@
-import type { RuntimeCaching } from "serwist"
+import type { RuntimeCaching, SerwistPlugin } from "serwist"
 import {
   CacheFirst,
   ExpirationPlugin,
@@ -24,11 +24,126 @@ declare const self: ServiceWorkerGlobalScope
 // precache manifest of the SW that controls the page, never from the network:
 // mixing builds (old HTML with new RSC payload or vice versa) makes the Next.js
 // App Router fall back to a hard navigation on every route change. Updates
-// reach users only through the SW update cycle (install -> snackbar -> reload).
+// apply when the user accepts the "A New Version is Available." snackbar
+// (Reload -> SKIP_WAITING), or automatically at the next launch after the last
+// client closes: the platform activates the waiting worker at zero clients and
+// its activate cleanup purges the previous build — that part cannot be
+// deferred. The guarantee is per session: the running build never changes
+// while a window stays open.
 //
 // Navigations need no custom code: the built-in precache route resolves
 // `/files` to the precached `files.html` (cleanURLs) and `/` to `index.html`
 // (directoryIndex). RSC requests are the one exception, handled below.
+
+// --- Update-window diagnostics (observation only — serving is unchanged) ---
+//
+// Five deployments in a row showed the controlling (old) SW serving the *new*
+// build during the update install window: precache reads for entries that
+// provably exist came back empty, and the production fallbacks
+// (PrecacheStrategy's fallbackToNetwork, the RSC handler's fetch) silently
+// substituted network content. Serwist's route matching and URL->key mapping
+// are deterministic and verified correct, so the failing layer is the
+// browser's own cache read — which never reproduced synthetically (~70k reads
+// under install bursts on 15 GB origins). This layer records real failures
+// with the context needed to identify the trigger: which handler missed,
+// whether an install was in flight, the SW process age, and whether the entry
+// reappears shortly after (transient vs persistent). Countermeasures are
+// deliberately deferred until that data exists.
+
+const SW_STARTED_AT = Date.now()
+const DIAG_CACHE = "sw-diag"
+const DIAG_MAX_ENTRIES = 256
+const DIAG_PRUNE_BATCH = 64
+const REPROBE_DELAYS_MS = [100, 500, 2000]
+
+const diagLog = (kind: string, url: string, incident?: string) => {
+  const record = {
+    kind,
+    url,
+    t: Date.now(),
+    swAgeMs: Date.now() - SW_STARTED_AT,
+    installing: !!self.registration.installing,
+    waiting: !!self.registration.waiting,
+    incident,
+  }
+  console.warn("[sw-diag]", kind, url, record)
+  void (async () => {
+    try {
+      const cache = await caches.open(DIAG_CACHE)
+      const key = `/diag/${String(record.t).padStart(15, "0")}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`
+      await cache.put(new Request(key), new Response(JSON.stringify(record)))
+      const keys = await cache.keys()
+      if (keys.length > DIAG_MAX_ENTRIES) {
+        // Keys embed a zero-padded timestamp, so URL order is chronological.
+        const oldest = keys
+          .map(k => k.url)
+          .sort()
+          .slice(0, DIAG_PRUNE_BATCH)
+        for (const url of oldest) {
+          await cache.delete(url)
+        }
+      }
+    } catch {
+      // Diagnostics must never break serving.
+    }
+  })()
+}
+
+// After a read came back empty, watch the same key from the side: if it
+// reappears the miss was transient (a serving-side retry would have rescued
+// it); if it stays empty the entry was really gone. Runs detached — the
+// response the user gets is never delayed by this.
+const reprobe = (
+  cacheName: string,
+  request: Request,
+  matchOptions: CacheQueryOptions | undefined,
+  incident: string
+) => {
+  const t0 = Date.now()
+  void (async () => {
+    try {
+      for (const delay of REPROBE_DELAYS_MS) {
+        await new Promise(resolve => setTimeout(resolve, delay))
+        const cache = await caches.open(cacheName)
+        const hit = await cache.match(request, matchOptions)
+        diagLog(
+          `${hit ? "reprobe-hit" : "reprobe-null"}@${Date.now() - t0}ms`,
+          request.url,
+          incident
+        )
+      }
+    } catch {
+      // Observation only.
+    }
+  })()
+}
+
+const newIncidentId = () => Math.random().toString(36).slice(2, 10)
+
+// Runs inside every precache read (StrategyHandler.cacheMatch). The event
+// filter keeps install-time read-checks (expected misses for changed entries)
+// out of the log. `request` is the revisioned cache key at this point, so the
+// reprobe can match it directly. Returning cachedResponse unchanged keeps
+// serving identical: misses still fall through to fallbackToNetwork.
+const precacheReadObserverPlugin: SerwistPlugin = {
+  cachedResponseWillBeUsed: async ({
+    cacheName,
+    request,
+    matchOptions,
+    cachedResponse,
+    event,
+  }) => {
+    if (!cachedResponse && event && event.type === "fetch") {
+      const incident = newIncidentId()
+      diagLog("precache-read-null", request.url, incident)
+      reprobe(cacheName, request, matchOptions, incident)
+    }
+    return cachedResponse
+  },
+}
+// ---------------------------------------------------------------------------
 
 // RSC payload requests (`/route.txt?_rsc=...`) never match the precache route
 // as-is: the request carries a per-navigation `_rsc` query while the cache key
@@ -38,14 +153,31 @@ declare const self: ServiceWorkerGlobalScope
 const createRscHandler = (serwist: Serwist) => {
   return async ({ request }: { request: Request }): Promise<Response> => {
     const url = new URL(request.url)
+    const precacheKey = serwist.getPrecacheKeyForUrl(url.pathname)
+    if (!precacheKey) {
+      // Genuinely outside this build's manifest (a new un-precached route):
+      // deterministic, not a cache failure. Let the network answer; a failure
+      // here surfaces to the App Router, which falls back to a full
+      // navigation handled by the precache route.
+      diagLog("rsc-manifest-miss", request.url)
+      return fetch(request)
+    }
     const precached = await serwist.matchPrecache(url.pathname)
     if (precached) {
       return precached
     }
-    // Not part of this build's manifest (new un-precached route or evicted
-    // entry): let the network answer. A failure here surfaces to the App
-    // Router, which falls back to a full navigation handled by the precache
-    // route.
+    // The manifest maps this URL to a cache key but the read came back empty
+    // — the same failure mode precacheReadObserverPlugin records for
+    // navigations. Serve the network as before (Next's buildId check turns a
+    // cross-build payload into a full navigation), but leave the evidence.
+    const incident = newIncidentId()
+    diagLog("rsc-read-null", request.url, incident)
+    reprobe(
+      serwist.precacheStrategy.cacheName,
+      new Request(precacheKey),
+      serwist.precacheStrategy.matchOptions,
+      incident
+    )
     return fetch(request)
   }
 }
@@ -175,6 +307,9 @@ const serwist = new Serwist({
   precacheEntries: precacheManifest,
   precacheOptions: {
     cacheName: "serwist-precache",
+    // Observation only (see diagnostics section above): records precache
+    // read misses with context, never alters what is served.
+    plugins: [precacheReadObserverPlugin],
     // Static export: every route's HTML is a pure function of the pathname —
     // query strings are read only by client JS. The OAuth/Picker returns land
     // on /redirect/google-drive?code=…&picked_file_ids=…, and with the
@@ -189,9 +324,10 @@ const serwist = new Serwist({
     // non-precached URLs, which would kill the whole dev SW (no manifest).
     ...(precacheManifest ? { navigateFallback: "404.html" } : {}),
   },
-  // skipWaiting/clientsClaim stay disabled: updates apply when the user
-  // accepts the "A New Version is Available." snackbar, and the precache
-  // keeps serving one consistent build until then.
+  // skipWaiting/clientsClaim stay disabled: activation waits for the
+  // snackbar's Reload (SKIP_WAITING) or for the last client to close — the
+  // platform's zero-client activation, which cannot be deferred. Within a
+  // session the precache keeps serving one consistent build.
   // Navigation preload is an optimization for network-first navigation
   // handlers; navigations are served from the precache here, so it would
   // only fire a wasted network request per navigation.

@@ -768,6 +768,51 @@ config) and the pitch-colored CSS backdrop (`PitchBackdrop`, a memo leaf).
   webpack splitChunks disabled (fewer files to precache), `three` transpiled.
 - OAuth redirect pages parse tokens client-side (`app/redirect/*`).
 
+### Update contract (standard PWA model)
+
+The build a session runs on is pinned by the controlling SW's precache and
+never changes while a window stays open. A new deploy installs in the
+background and applies either **immediately** when the user presses the
+"A New Version is Available." snackbar's Reload (`SKIP_WAITING` →
+`controllerchange` → reload), or **automatically at the next launch** after
+the last client closes — the platform activates the waiting worker at zero
+clients and its activate cleanup purges the previous build's precache
+entries. That zero-client activation is Web-platform behavior and cannot be
+deferred; "old build until explicit Reload" holds only within a session.
+
+### Update-window read failures (under investigation, instrumented)
+
+Real-profile forensics recorded five deployments (2026-07-29 … 08-09) where,
+during the install write burst of the *new* SW, precache reads in the *old*
+controlling SW came back empty for entries that provably existed, and the
+production fallbacks (`PrecacheStrategy`'s `fallbackToNetwork`, the RSC
+handler's `fetch`) silently substituted the network's new build — mixing
+builds mid-session. On 08-09 two consecutive reads (`playlists.txt` RSC +
+`playlists.html` navigation) failed within one second: a systemic failure
+window, not a per-read coin flip. The failing layer is the browser's own
+`caches.match` (Serwist route matching and Next.js 14.2 `.txt`/buildId
+handling verified correct at source level); it never reproduced synthetically
+(~70k reads under throttled install bursts on 15 GB origins).
+
+`app/sw.ts` therefore carries an **observation-only diagnostics layer** (no
+serving change): every precache read miss on a fetch event is logged to the
+console (`[sw-diag]`) and to a `sw-diag` cache (max 256 entries,
+self-pruning), with layer attribution (`precache-read-null`, `rsc-read-null`,
+`rsc-manifest-miss`), install/waiting state of the registration, SW process
+age, and detached re-probes of the same key at +100 ms/+500 ms/+2 s
+(`reprobe-hit@…`/`reprobe-null@…`) to tell transient from persistent misses.
+Countermeasures (serving retry, install concurrency, register delay) are
+deliberately deferred until a real deploy window produces this data.
+
+Post-mortem snippet (DevTools console on the production origin):
+
+```js
+const c = await caches.open("sw-diag");
+const out = [];
+for (const k of await c.keys()) out.push(await (await c.match(k)).json());
+console.table(out.sort((a, b) => a.t - b.t));
+```
+
 ## Known issues / accepted trade-offs
 
 - Full-track `decodeAudioData` holds the whole track as PCM in memory (large for
