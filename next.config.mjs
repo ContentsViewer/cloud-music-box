@@ -39,7 +39,12 @@ export default withSerwist({
   output: "export",
   transpilePackages: ['three'],
   env: {
-    APP_VERSION: process.env.npm_package_version
+    APP_VERSION: process.env.npm_package_version,
+    // The same per-build nanoid that revisions the SW precache manifest,
+    // inlined into the page bundle too: page and service worker can compare
+    // deploy identity exactly (build-consistency handshake), independent of
+    // whether package.json's version was bumped.
+    APP_BUILD_ID: revision
   },
   compiler: {
     emotion: true

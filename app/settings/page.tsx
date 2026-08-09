@@ -55,12 +55,11 @@ import {
 } from "@/src/features/playlists"
 import { HowToInstallDialog } from "@/src/components/install-promo"
 import { DataSettingsArea } from "./data-settings"
+import { readNavDiag, NavDiagEntry } from "@/src/lib/sw-diag/nav-diag"
 import {
   getControllerBuildInfo,
-  readNavDiag,
-  NavDiagEntry,
   SwBuildInfo,
-} from "@/src/lib/sw-diag/nav-diag"
+} from "@/src/lib/sw-update/consistency"
 
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
@@ -869,7 +868,17 @@ function DiagnosticsSettingsArea() {
             }}
           />
         </ListItem>
-        {navEntries.map(entry => {
+      </List>
+      <Paper
+        variant="outlined"
+        css={css({
+          maxHeight: 280,
+          overflowY: "auto",
+          borderRadius: "12px",
+        })}
+      >
+        <List dense>
+          {navEntries.map(entry => {
           const flagged =
             entry.crossBuild || entry.bypassSuspect || entry.networkCommit
           const flags = [
@@ -913,27 +922,28 @@ function DiagnosticsSettingsArea() {
             </ListItem>
           )
         })}
-        <ListItem>
-          <ListItemText
-            primary={`SW read failures recorded: ${swDiag.count}`}
-            secondary={
-              swDiag.recent.length > 0
-                ? JSON.stringify(swDiag.recent)
-                : "none"
-            }
-            primaryTypographyProps={{ sx: { fontSize: 12 } }}
-            secondaryTypographyProps={{
-              sx: {
-                fontSize: 12,
-                color:
-                  swDiag.count > 0 ? colorError : colorOnSurfaceVariant,
-                overflowWrap: "anywhere",
-              },
-            }}
-          />
-        </ListItem>
-      </List>
-      <Button onClick={copyAll} sx={{ alignSelf: "flex-start" }}>
+          <ListItem>
+            <ListItemText
+              primary={`SW read failures recorded: ${swDiag.count}`}
+              secondary={
+                swDiag.recent.length > 0
+                  ? JSON.stringify(swDiag.recent)
+                  : "none"
+              }
+              primaryTypographyProps={{ sx: { fontSize: 12 } }}
+              secondaryTypographyProps={{
+                sx: {
+                  fontSize: 12,
+                  color:
+                    swDiag.count > 0 ? colorError : colorOnSurfaceVariant,
+                  overflowWrap: "anywhere",
+                },
+              }}
+            />
+          </ListItem>
+        </List>
+      </Paper>
+      <Button onClick={copyAll} sx={{ alignSelf: "flex-start", mt: 1 }}>
         Copy diagnostics
       </Button>
     </div>
