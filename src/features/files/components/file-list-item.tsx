@@ -22,8 +22,8 @@ import {
 import { useNetworkMonitor } from "@/src/stores/network-monitor"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useFileStore } from "../stores/file-store"
+import { useArtworkUrl } from "../hooks/use-artwork-url"
 import { enqueueSnackbar } from "notistack"
-import * as mm from "music-metadata-browser"
 import React from "react"
 import { TrackCover } from "@/src/components/track-cover"
 import { useThemeStore } from "@/src/stores/theme-store"
@@ -173,18 +173,19 @@ export const FileListItemAudioTrack = React.memo(
     const [updatedFile, setUpdatedFile] = useState<AudioTrackFileItem>(file)
 
     const [fileState, setFileState] = useState<{
-      coverUrl: string | undefined
       hasBlob: boolean
       currentFile: AudioTrackFileItem
     }>({
-      coverUrl: undefined,
       hasBlob: false,
       currentFile: file,
     })
 
+    // Shared per-image URL: every row showing the same cover gets the same
+    // object URL, so the browser decodes each unique image once.
+    const coverUrl = useArtworkUrl(updatedFile.artworkHash)
+
     useEffect(() => {
       const newFileState = {
-        coverUrl: undefined,
         hasBlob: false,
         currentFile: updatedFile,
       } as typeof fileState
@@ -193,26 +194,12 @@ export const FileListItemAudioTrack = React.memo(
         .hasTrackBlobInLocal(updatedFile.id)
         .then(hasBlob => {
           newFileState.hasBlob = hasBlob || false
-          const cover = mm.selectCover(updatedFile.metadata?.common.picture)
-          if (cover) {
-            const url = URL.createObjectURL(
-              new Blob([cover.data], { type: cover.format })
-            )
-            newFileState.coverUrl = url
-          }
-
           setFileState(newFileState)
         })
         .catch(error => {
           console.error(error)
           enqueueSnackbar(`${error}`, { variant: "error" })
         })
-
-      return () => {
-        if (newFileState.coverUrl) {
-          URL.revokeObjectURL(newFileState.coverUrl)
-        }
-      }
     }, [updatedFile])
 
     const isSyncingLast = useRef(false)
@@ -255,7 +242,7 @@ export const FileListItemAudioTrack = React.memo(
           name={title}
           icon={
             <ListItemAvatar>
-              <TrackCover coverUrl={fileState.coverUrl} />
+              <TrackCover coverUrl={coverUrl} />
             </ListItemAvatar>
           }
           fileStatus={fileStatus}
@@ -266,7 +253,7 @@ export const FileListItemAudioTrack = React.memo(
           onClickMenu={onClickMenu}
         />
       )
-    }, [isSyncing, selected, onClick, networkMonitor.isOnline, fileState, onClickMenu])
+    }, [isSyncing, selected, onClick, networkMonitor.isOnline, fileState, coverUrl, onClickMenu])
 
     return item
   }

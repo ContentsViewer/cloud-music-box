@@ -260,10 +260,11 @@ flowchart TD
   Mount --> NM["NetworkMonitor effect<br/>isOnline = navigator.onLine<br/>(first render: false)"]
   Mount --> Init["FileStore init effect<br/>(StrictMode-guarded via ref)"]
 
-  Init --> Open["indexedDB.open('file-db', 2)"]
-  Open -- "onupgradeneeded" --> Create["create missing object stores<br/>(each guarded by objectStoreNames.contains):<br/>files / blobs / albums / blobs-meta /<br/>track-features / playlists / playlist-model"]
-  Create --> LSread
-  Open -- "success" --> LSread["read localStorage:<br/>rootFolderId, blobsStorageMaxBytes<br/>(else storage.estimate × 0.7),<br/>blobsStorageUsageBytes"]
+  Init --> Open["indexedDB.open('file-db', 3)"]
+  Open -- "onupgradeneeded" --> Create["create missing object stores<br/>(each guarded by objectStoreNames.contains):<br/>files / blobs / albums / blobs-meta /<br/>track-features / playlists / playlist-model /<br/>artworks"]
+  Create --> Migrate
+  Open -- "success" --> Migrate["one-time artwork migration<br/>(modal progress; idempotent, resumes;<br/>runs BEFORE setFileDb/configured)"]
+  Migrate --> LSread["read localStorage:<br/>rootFolderId, blobsStorageMaxBytes<br/>(else storage.estimate × 0.7),<br/>blobsStorageUsageBytes"]
   Open -- "error" --> Fail["snackbar only;<br/>configured stays false ⚠"]
   Open -- "blocked by another tab" --> Blocked["persistent snackbar:<br/>close the other tabs"]
   Open -. "pending delete:<br/>no event at all" .-> Hang["waits forever ⚠"]
@@ -296,13 +297,21 @@ flowchart TD
 
 Notes / hazards (all verified in code):
 
-- **The upgrade handler must stay idempotent.** `FILE_DB_VERSION` is 2 and every
+- **The upgrade handler must stay idempotent.** `FILE_DB_VERSION` is 3 and every
   `createObjectStore` sits behind an `objectStoreNames.contains` guard, because a
   v1 database (opened originally with no version argument) re-enters the handler
-  on its way to v2. An unguarded `createObjectStore("files")` there throws
-  `ConstraintError`, aborts the whole upgrade, and leaves the app permanently
-  unconfigured. Adding a store means bumping the version and adding one more
-  guarded branch — never reordering or removing the existing ones.
+  on its way to the current version. An unguarded `createObjectStore("files")`
+  there throws `ConstraintError`, aborts the whole upgrade, and leaves the app
+  permanently unconfigured. Adding a store means bumping the version and adding
+  one more guarded branch — never reordering or removing the existing ones.
+- **The v3 artwork migration runs inside `init()`, before `setFileDb` is
+  dispatched** — every store action double-guards on `configured` + `fileDb`,
+  so no user-triggered DB operation can interleave with it. It walks records
+  one at a time by cursor keys (never `getAll` — that would load every embedded
+  image at once), commits each record in its own short transaction (interrupt →
+  resume next launch), and is idempotent: the contract is "does the record
+  still carry picture/native bytes". The `artworks.migrated` localStorage flag
+  only skips the sweep; losing it costs one harmless re-scan.
 - **`onblocked` is handled** (persistent snackbar asking the user to close other
   tabs) but there is still **no timeout**: a pending `deleteDatabase` queues the
   open with *no event at all* — `init()` never settles and `configured` never
@@ -615,6 +624,103 @@ refit every 20 tracks, each O(D·N log N) — O(N² log N · D / 20) overall, mi
 of blocked main thread at N=5000. A batch path writes every record, rebuilds the
 corpus, refits once, and rebuilds every playlist once. The split above is what
 makes that a small addition rather than a rewrite.
+
+## Artwork storage (content-addressed) and library export/import
+
+### Artworks CAS (v3)
+
+Embedded cover art lives ONCE in the `artworks` store: key = **SHA-256 of the
+original picture bytes**, value = `ArtworkRecord { blob, themeSourceColor?,
+width?, height? }` (`src/lib/artworks/artworks.ts`). Track records carry
+`artworkHash`, album records carry `coverHash`; **`metadata.common.picture` and
+`metadata.native` are never persisted** (stripped at the IDB put boundary — the
+in-memory object of the playing track keeps the full parse). Two rules keep
+this correct:
+
+- **Hash the source bytes, never a re-encoded derivative.** Canvas encoders are
+  not deterministic across browsers; hashing a thumbnail would give the same
+  image different keys on different devices and break import dedup.
+- **Consumers share one object URL per unique image** (`useArtworkUrl`,
+  `src/features/files/hooks/use-artwork-url.ts`): the browser's decoded-bitmap
+  cache is keyed by URL, so N list rows with the same cover decode once. URLs
+  are deduplicated and never revoked (bounded by distinct covers per session).
+  This is what fixed the Files-list decode-memory crash (measured: 145 track
+  records carrying 88 MB of duplicated pictures → 16 unique images, 6.9 MB).
+
+`themeSourceColor` is a cached derivative (pure function of the bytes),
+computed by the theming worker on first use via
+`fileStoreActions.getArtworkThemeColor` — consecutive tracks of one album hit
+the cache instead of re-extracting.
+
+Orphaned artworks (nothing references the hash) are tolerated: the app has no
+per-file delete flow, and a future mark-and-sweep can ride Clear Local Data.
+
+### Library export/import (`src/lib/export/`, Settings → Data)
+
+One gzipped JSON envelope (`schema.ts`, `format: "cloud-music-box-export"`,
+validated by discriminator, not extension). `playlist-model` is a pure
+derivative and never travels.
+
+**Envelope structure** (source of truth: `schema.ts`):
+
+```jsonc
+{
+  "format": "cloud-music-box-export",
+  "formatVersion": 1,          // bumped ONLY for incompatible whole-file changes
+  "appVersion": "…",           // informational
+  "exportedAt": 0,
+  "provider": "onedrive|google-drive",
+  "accountKey": "…",           // OneDrive homeAccountId / Google OIDC sub
+  "accountLabel": "…",         // OneDrive UPN; absent for Google
+  "counts": { "tracks", "folders", "albums", "playlists", "trackFeatures", "artworks" },
+
+  // Mirrors the IDB `files` store: ONE heterogeneous array of tree nodes,
+  // discriminated by `type` — the same shape the data has at rest.
+  "files": [
+    { "type": "folder",      "id", "name", "parentId?", "childrenIds": ["…"] },
+    { "type": "audio-track", "id", "name", "parentId?", "mimeType",
+      "artworkHash?", "metadata?": { "format": { "duration" },
+        "common": { "title","artist","artists","album","track","disk" } } }
+  ],
+  "albums":        [ { "name", "fileIds": ["…"], "coverHash?" } ],
+  "playlists":     [ /* truth only: id, name, seedIds, confirmedIds,
+                        rejectedIds, coverTrackId?, createdAt, updatedAt */ ],
+  "trackFeatures": [ { "id", "version", "vector": "<base64 Float32 LE>",
+                       "coverageSeconds", "durationSeconds", "updatedAt" } ],
+  "artworks":      [ { "hash", "mime", "data": "<base64 original bytes>" } ]
+}
+```
+
+- **Folder selection rule**: only ancestors of exported tracks travel, and each
+  folder's `childrenIds` is filtered to ids that are themselves in the export —
+  the file can never reference something it does not contain. For Google picker
+  mode this restores the entire Files tree (picker groups are primary data —
+  `getFile` is unsupported there, so the tree is otherwise unrecoverable); for
+  OneDrive it is a partial cache that remote browsing refreshes.
+- **`parentId` is stored verbatim on import** — it is a cloud id, and pointing
+  at a folder that is not cached yet is a normal state of the lazy tree cache.
+  The files page resolves unknown folders remotely (OneDrive) or reports them
+  (Google), instead of the importer stripping the reference.
+- **Forward compatibility**: importers skip (and count) `files` entries whose
+  `type` they do not recognize, so new node kinds can be added without bumping
+  `formatVersion`.
+
+- **Account match is a hard gate**: `provider` + `accountKey` (OneDrive
+  homeAccountId / Google `sub`, `account-identity.ts`) must equal the current
+  instance's — file ids only resolve for the account that exported them.
+- **Merge rules are pure functions** (`merge.ts`, unit-tested): local metadata
+  is inviolable, larger `coverageSeconds` wins, playlist conflicts resolve to
+  the newer `updatedAt` side, `seedIds ⊆ confirmedIds` is preserved, artworks
+  are verified (`hash(bytes) == key`) before insert.
+- **`importPlaylistData` is the second consumer of the batch rebuild path**:
+  write all feature records, refit the space once (explicitly — imported
+  vectors can shift the distribution below the growth heuristic), rebuild
+  every playlist once. Never loop `recordTrackFeatures`.
+- Serialization is chunked (`envelopeToJsonBlob`): stringify a few hundred
+  records at a time into Blob parts — a single `JSON.stringify` of a
+  tens-of-MB document would block the main thread for hundreds of ms. The one
+  accepted synchronous cost is `JSON.parse` on import (~0.1–0.5 s behind the
+  modal progress dialog).
 
 ## Visualizers feature
 

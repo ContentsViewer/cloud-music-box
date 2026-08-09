@@ -88,9 +88,19 @@ export default function OneDrivePage() {
       if (!folderId) {
         return
       }
-      const currentFile = await fileStoreActions.getFileById(folderId)
+      let currentFile: BaseFileItem
+      try {
+        // Resolves from IDB, falling back to a remote fetch for folders not
+        // cached yet (e.g. a jump from an imported track); throws when that
+        // fails too (offline, deleted remotely, …).
+        currentFile = await fileStoreActions.getFileById(folderId)
+      } catch (error) {
+        if (isCancelled) return
+        console.error(error)
+        enqueueSnackbar(`${error}`, { variant: "error" })
+        return
+      }
       if (isCancelled) return
-      if (!currentFile) return
       setCurrentFile(currentFile)
 
       try {

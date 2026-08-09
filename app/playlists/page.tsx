@@ -10,6 +10,7 @@ import { useThemeStore } from "@/src/stores/theme-store"
 import {
   AudioTrackFileItem,
   TrackList,
+  useArtworkUrl,
   useFileStore,
 } from "@/src/features/files"
 import { usePlayerStore } from "@/src/features/player"
@@ -54,7 +55,6 @@ import {
   Typography,
 } from "@mui/material"
 import { css } from "@emotion/react"
-import * as mm from "music-metadata-browser"
 import { enqueueSnackbar } from "notistack"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -103,26 +103,21 @@ function useCoverUrl(trackId: string | undefined) {
   const [fileStoreState, fileStoreActions] = useFileStore()
   const refActions = useRef(fileStoreActions)
   refActions.current = fileStoreActions
-  const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
+  const [artworkHash, setArtworkHash] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     if (!trackId || !fileStoreState.configured) {
-      setCoverUrl(undefined)
+      setArtworkHash(undefined)
       return
     }
     let canceled = false
-    let url: string | undefined
     const load = async () => {
       try {
         const file = (await refActions.current.getFileById(
           trackId
         )) as AudioTrackFileItem
-        const cover = mm.selectCover(file?.metadata?.common.picture)
-        if (canceled || !cover) return
-        url = URL.createObjectURL(
-          new Blob([cover.data], { type: cover.format })
-        )
-        setCoverUrl(url)
+        if (canceled) return
+        setArtworkHash(file?.artworkHash)
       } catch {
         // A cover is optional; a missing file just means no art
       }
@@ -130,11 +125,10 @@ function useCoverUrl(trackId: string | undefined) {
     load()
     return () => {
       canceled = true
-      if (url) URL.revokeObjectURL(url)
     }
   }, [trackId, fileStoreState.configured])
 
-  return coverUrl
+  return useArtworkUrl(artworkHash)
 }
 
 const PlaylistCard = React.memo(function PlaylistCard({

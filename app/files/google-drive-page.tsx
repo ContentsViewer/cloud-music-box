@@ -159,9 +159,22 @@ export default function GoogleDrivePage() {
       if (!folderId) {
         return
       }
-      const currentFile = await fileStoreActions.getFileById(folderId)
+      let currentFile: BaseFileItem
+      try {
+        currentFile = await fileStoreActions.getFileById(folderId)
+      } catch (error) {
+        if (isCancelled) return
+        console.error(error)
+        // Picker mode has no remote getFile: a folder that is not in the
+        // local library cannot be resolved at all. Say that, not the raw
+        // developer error.
+        enqueueSnackbar(
+          "This folder isn't in your library on this device. Files picked via the Google Picker appear here after picking them.",
+          { variant: "error" }
+        )
+        return
+      }
       if (isCancelled) return
-      if (!currentFile) return
       setCurrentFile(currentFile)
 
       try {

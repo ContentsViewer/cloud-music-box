@@ -54,6 +54,7 @@ import {
   usePlaylistStore,
 } from "@/src/features/playlists"
 import { HowToInstallDialog } from "@/src/components/install-promo"
+import { DataSettingsArea } from "./data-settings"
 
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
@@ -805,6 +806,7 @@ export default function Page() {
           <ScreenSettingsArea />
           <PlaylistSettingsArea />
           <VisualizerSettingsArea />
+          <DataSettingsArea />
           <ResetSettingsArea />
           <AppSettingsArea />
           <Typography variant="h6" sx={{ mt: 2 }}>

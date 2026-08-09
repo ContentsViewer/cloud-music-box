@@ -18,6 +18,9 @@ export const AlbumCover = (props: {
     <Fade in>
       <Avatar
         src={props.coverUrl}
+        // Lazy: covers outside the viewport don't decode, which bounds
+        // decoded-bitmap memory in long grids.
+        imgProps={{ loading: "lazy", decoding: "async" }}
         variant="rounded"
         sx={{
           width: 48,

@@ -37,7 +37,7 @@ import {
   useState,
   useCallback,
 } from "react"
-import * as mm from "music-metadata-browser"
+import { useArtworkUrl } from "@/src/features/files"
 import { MarqueeText } from "@/src/components/marquee-text"
 import { useRouter } from "@/src/stores/router"
 import { TrackCover } from "@/src/components/track-cover"
@@ -628,29 +628,11 @@ const PlayerCardInner = memo(function PlayerCardInner({
 }: PlayerCardInnerProps) {
   const [themeStoreState] = useThemeStore()
 
-  const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined)
+  // Shared per-image URL (never revoked — list rows may hold the same URL)
+  const coverUrl = useArtworkUrl(activeTrack?.file.artworkHash)
 
   const cardRef = useRef<HTMLDivElement>(null)
   const coverOnExpandRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (coverUrl) {
-      URL.revokeObjectURL(coverUrl)
-    }
-
-    const cover = mm.selectCover(activeTrack?.file.metadata?.common.picture)
-    let url: string | undefined
-    if (cover) {
-      url = URL.createObjectURL(new Blob([cover.data], { type: cover.format }))
-    }
-    setCoverUrl(url)
-
-    return () => {
-      if (coverUrl) {
-        URL.revokeObjectURL(coverUrl)
-      }
-    }
-  }, [activeTrack?.file.metadata?.common.picture])
 
   const title =
     activeTrack?.file.metadata?.common.title ||

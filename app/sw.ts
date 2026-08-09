@@ -175,6 +175,14 @@ const serwist = new Serwist({
   precacheEntries: precacheManifest,
   precacheOptions: {
     cacheName: "serwist-precache",
+    // Static export: every route's HTML is a pure function of the pathname —
+    // query strings are read only by client JS. The OAuth/Picker returns land
+    // on /redirect/google-drive?code=…&picked_file_ids=…, and with the
+    // default ignore list (utm_/fbclid only) any query-carrying navigation
+    // misses the precache and falls through to navigateFallback: the 404
+    // page. Ignoring all parameters makes the SW resolve URLs exactly like
+    // the static file server does.
+    ignoreURLParametersMatching: [/.*/],
     // Navigations to URLs outside the manifest (deep link typos etc.) get the
     // prerendered 404 page instead of hanging on the network. Bound only when
     // a manifest exists: createHandlerBoundToURL throws at construction for
