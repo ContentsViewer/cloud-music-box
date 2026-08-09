@@ -14,15 +14,17 @@
 //    timing shows they went to the network without the SW
 //    (workerStart === 0 with real transfer) while the page is controlled
 //
-// Everything is observation only: no request is altered or retried. Records
-// go to a localStorage ring buffer so they survive the session and can be
-// inspected on-device (Settings -> Diagnostics), which matters on iOS where
-// no debugger is available.
+// Everything is observation only: no request is altered or retried, and
+// nothing in the production update flow reads these records — the build
+// consistency verdict is produced by src/lib/sw-update/consistency.ts and
+// merely handed in here for the log. Records go to a localStorage ring
+// buffer so they survive the session and can be inspected on-device
+// (Settings -> Diagnostics), which matters on iOS where no debugger is
+// available.
 
-export interface SwBuildInfo {
-  appVersion?: string
-  manifestRevision?: string
-}
+import type { BuildConsistency, SwBuildInfo } from "../sw-update/consistency"
+
+export type { SwBuildInfo }
 
 export interface BypassedRequest {
   url: string
@@ -61,7 +63,6 @@ export interface NavDiagEntry {
 const STORAGE_KEY = "swNavDiag"
 const MAX_ENTRIES = 30
 const MAX_BYPASSED_PER_ENTRY = 20
-const HANDSHAKE_TIMEOUT_MS = 3000
 const RESOURCE_WATCH_MS = 30000
 
 const readAll = (): NavDiagEntry[] => {
@@ -86,37 +87,21 @@ const persist = (entries: NavDiagEntry[]) => {
 
 export const readNavDiag = (): NavDiagEntry[] => readAll()
 
-/** On-demand handshake for the diagnostics view. */
-export const getControllerBuildInfo = async (): Promise<
-  SwBuildInfo | "timeout" | "no-controller"
-> => {
-  if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
-    return "no-controller"
-  }
-  const controller = navigator.serviceWorker.controller
-  if (!controller) return "no-controller"
-  return requestSwBuildInfo(controller)
-}
-
 const round1 = (n: number) => Math.round(n * 10) / 10
 
-const requestSwBuildInfo = (
-  controller: ServiceWorker
-): Promise<SwBuildInfo | "timeout"> =>
-  new Promise(resolve => {
-    const channel = new MessageChannel()
-    const timer = setTimeout(() => resolve("timeout"), HANDSHAKE_TIMEOUT_MS)
-    channel.port1.onmessage = e => {
-      clearTimeout(timer)
-      resolve(e.data as SwBuildInfo)
-    }
-    try {
-      controller.postMessage({ type: "GET_BUILD_INFO" }, [channel.port2])
-    } catch {
-      clearTimeout(timer)
-      resolve("timeout")
-    }
-  })
+const toRecordedBuild = (
+  consistency: BuildConsistency
+): NavDiagEntry["swBuild"] => {
+  switch (consistency.state) {
+    case "consistent":
+    case "mixed":
+      return consistency.sw
+    case "no-controller":
+      return "no-controller"
+    case "unknown":
+      return "timeout"
+  }
+}
 
 // Watch app-shell subresources for the first RESOURCE_WATCH_MS of the
 // session: a same-origin .txt / _next/static entry with workerStart === 0
@@ -183,9 +168,14 @@ const watchBypassedResources = (entry: NavDiagEntry) => {
 /**
  * Capture one launch record. Call once per page load, BEFORE the service
  * worker registration call, so the controller state reflects what this
- * navigation actually committed with.
+ * navigation actually committed with. The consistency verdict comes from the
+ * production check (sw-update/consistency) as a promise: the record is
+ * persisted immediately — a leaked document is often replaced by an MPA
+ * navigation within a second — and patched when the verdict resolves.
  */
-export const captureNavDiag = async (): Promise<void> => {
+export const captureNavDiag = async (
+  consistency: Promise<BuildConsistency>
+): Promise<void> => {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) return
   try {
     const controller = navigator.serviceWorker.controller
@@ -222,10 +212,6 @@ export const captureNavDiag = async (): Promise<void> => {
       nav.workerStart > 0 &&
       nav.transferSize > 0
 
-    // Persist BEFORE the handshake: a leaked document is often replaced by an
-    // MPA navigation within a second, while the handshake against a
-    // pre-diagnostics SW only resolves at its 3 s timeout — waiting would
-    // lose exactly the records that matter most.
     const entries = readAll()
     entries.push(entry)
     persist(entries)
@@ -235,13 +221,9 @@ export const captureNavDiag = async (): Promise<void> => {
 
     if (entry.controlled) watchBypassedResources(entry)
 
-    entry.swBuild = controller
-      ? await requestSwBuildInfo(controller)
-      : "no-controller"
-    entry.crossBuild =
-      typeof entry.swBuild === "object" &&
-      entry.swBuild.appVersion !== undefined &&
-      entry.swBuild.appVersion !== entry.appVersion
+    const verdict = await consistency
+    entry.swBuild = toRecordedBuild(verdict)
+    entry.crossBuild = verdict.state === "mixed"
     updateStored(entry)
     if (entry.crossBuild) {
       console.warn("[nav-diag] cross-build state detected:", entry)

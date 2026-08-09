@@ -21,6 +21,7 @@ import {
   styled,
 } from "@mui/material"
 import {
+  CustomContentProps,
   MaterialDesignContent,
   SnackbarKey,
   SnackbarProvider,
@@ -29,12 +30,28 @@ import {
 } from "notistack"
 import { NetworkMonitorProvider } from "@/src/stores/network-monitor"
 import { RouterProvider } from "@/src/stores/router"
-import { useEffect, useRef, useState } from "react"
+import {
+  forwardRef,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { useThemeStore } from "@/src/stores/theme-store"
 import { AudioBusProvider } from "@/src/stores/audio-bus-provider"
 import { css } from "@emotion/css"
 import { registerServiceWorker } from "./register-sw"
 import { captureNavDiag } from "@/src/lib/sw-diag/nav-diag"
+import {
+  checkBuildConsistency,
+  consumeVersionChange,
+} from "@/src/lib/sw-update/consistency"
+import {
+  getUpdatePromptState,
+  startMixedUpdatePrompt,
+  subscribeUpdatePrompt,
+  MixedPromptHandle,
+} from "@/src/lib/sw-update/prompt-state"
 // Side-effect import: beforeinstallprompt fires once per page load on
 // whatever route the user landed on; the module-scope listener must be
 // registered app-wide or the event is lost until the next full reload.
@@ -91,6 +108,92 @@ const InverseColorButton = styled(Button)(() => {
     color: hexFromArgb(colorPrimaryInverse),
   }
 })
+
+// The mixed-update prompt is a notistack custom variant so one persistent
+// snackbar can morph in place across its phases (installing -> ready /
+// paused) instead of being re-enqueued.
+declare module "notistack" {
+  interface VariantOverrides {
+    updateProgress: true
+  }
+}
+
+// Content of the mixed-update snackbar. Shown when the running page and the
+// controlling service worker carry different builds (a browser cold-start
+// optimization committed a freshly deployed document over an older worker —
+// docs/architecture.md "Update-window leak"). Reads the phase store so the
+// text, the real install progress, and the Reload action update live.
+const UpdateProgressContent = forwardRef<HTMLDivElement, CustomContentProps>(
+  function UpdateProgressContent(props, ref) {
+    const [themeState] = useThemeStore()
+    const state = useSyncExternalStore(
+      subscribeUpdatePrompt,
+      getUpdatePromptState,
+      () => null
+    )
+    const surface = hexFromArgb(
+      MaterialDynamicColors.inverseSurface.getArgb(themeState.scheme)
+    )
+    const onSurface = hexFromArgb(
+      MaterialDynamicColors.inverseOnSurface.getArgb(themeState.scheme)
+    )
+
+    const phase = state?.phase ?? "installing"
+    const text =
+      phase === "ready"
+        ? "Update installed — reload to finish."
+        : phase === "paused"
+          ? "Update paused — reload to retry."
+          : "Installing update…"
+    const progressValue =
+      state?.progress && state.progress.total > 0
+        ? Math.min(100, (state.progress.done / state.progress.total) * 100)
+        : undefined
+
+    return (
+      <div
+        ref={ref}
+        role="alert"
+        className={css`
+          background-color: ${surface};
+          color: ${onSurface};
+          border-radius: 4px;
+          padding: 8px 8px 8px 16px;
+          min-width: 288px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          box-shadow:
+            0px 3px 5px -1px rgba(0, 0, 0, 0.2),
+            0px 6px 10px 0px rgba(0, 0, 0, 0.14);
+        `}
+      >
+        <div
+          className={css`
+            flex: 1;
+            padding: 6px 0;
+          `}
+        >
+          {text}
+          {phase === "installing" && (
+            <LinearProgress
+              variant={
+                progressValue !== undefined ? "determinate" : "indeterminate"
+              }
+              value={progressValue}
+              sx={{ mt: 1 }}
+            />
+          )}
+        </div>
+        {(phase === "ready" || phase === "paused") && (
+          <InverseColorButton onClick={() => state?.reload?.()}>
+            Reload
+          </InverseColorButton>
+        )}
+      </div>
+    )
+  }
+)
 
 const ThemeChanger = () => {
   const [playerState] = usePlayerStore()
@@ -201,6 +304,7 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
         success: StyledMaterialDesignContent,
         error: StyledMaterialDesignContent,
         default: StyledMaterialDesignContent,
+        updateProgress: UpdateProgressContent,
       }}
     >
       <ThemeChanger />
@@ -254,29 +358,70 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    // Launch forensics (see src/lib/sw-diag/nav-diag.ts). Must run before
-    // registerServiceWorker so the recorded controller state reflects what
-    // this navigation committed with.
-    void captureNavDiag()
+    // Build-consistency check (production logic, sw-update/consistency) runs
+    // first so its verdict can drive both the launch forensics record and the
+    // choice of update prompt. It must start before registerServiceWorker so
+    // the observed controller state reflects what this navigation actually
+    // committed with.
+    const consistencyP = checkBuildConsistency()
+    void captureNavDiag(consistencyP)
+
+    // Mixed session (page and controlling SW carry different builds): show
+    // the phase snackbar immediately — installing with real progress, then a
+    // user-driven Reload once the new worker is waiting. Never auto-reload.
+    let mixedPrompt: MixedPromptHandle | undefined
+    const ensureMixedPrompt = () => {
+      if (!mixedPrompt) {
+        mixedPrompt = startMixedUpdatePrompt()
+        enqueueSnackbar("Installing update…", {
+          variant: "updateProgress",
+          persist: true,
+        })
+      }
+      return mixedPrompt
+    }
+
+    void consistencyP.then(consistency => {
+      if (consistency.state === "mixed") {
+        ensureMixedPrompt()
+        return
+      }
+      // Consistent boot: announce a completed update exactly once, whichever
+      // path applied it (manual reload, zero-client activation, or recovery
+      // from a mixed session).
+      const newVersion = consumeVersionChange()
+      if (newVersion) {
+        enqueueSnackbar(`Updated to version ${newVersion}`)
+      }
+    })
+
     registerServiceWorker({
       onNeedRefresh: updateSW => {
-        const action = (snackbarId: SnackbarKey) => {
-          return (
-            <>
-              <InverseColorButton
-                onClick={() => {
-                  updateSW()
-                  closeSnackbar(snackbarId)
-                }}
-              >
-                Reload
-              </InverseColorButton>
-            </>
-          )
-        }
-        enqueueSnackbar("A New Version is Available.", {
-          action,
-          persist: true,
+        void consistencyP.then(consistency => {
+          if (consistency.state === "mixed") {
+            // The freshly installed worker matches the page the user is
+            // already looking at — surface the Reload in the phase snackbar.
+            ensureMixedPrompt().ready(updateSW)
+            return
+          }
+          const action = (snackbarId: SnackbarKey) => {
+            return (
+              <>
+                <InverseColorButton
+                  onClick={() => {
+                    updateSW()
+                    closeSnackbar(snackbarId)
+                  }}
+                >
+                  Reload
+                </InverseColorButton>
+              </>
+            )
+          }
+          enqueueSnackbar("A New Version is Available.", {
+            action,
+            persist: true,
+          })
         })
       },
     })

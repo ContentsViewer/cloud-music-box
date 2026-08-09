@@ -303,13 +303,14 @@ const buildRuntimeCaching = (serwist: Serwist): RuntimeCaching[] =>
 // which is why no comment here spells it out).
 const precacheManifest = self.__SW_MANIFEST
 
-// --- Build-info handshake (observation only) --------------------------------
-// The page asks its controller which build it is (nav-diag sends
-// GET_BUILD_INFO with a MessageChannel port at startup). A mismatch against
-// the page's own version reveals a cross-build state — the update-window
-// leak — regardless of which browser path let it happen. The manifest
-// revision (per-build nanoid) distinguishes deploys even when the package
-// version did not change.
+// --- Build-info handshake (production API: version negotiation) ------------
+// The page asks this worker which build it carries (GET_BUILD_INFO with a
+// MessageChannel port at startup). The manifest revision is the per-deploy
+// nanoid that next.config.mjs also inlines into the page bundle as
+// APP_BUILD_ID, so the two sides can compare deploy identity exactly. A
+// mismatch means the browser committed a network document from a different
+// deploy than the controlling worker — the mixed-session state the update
+// prompt reacts to. sw-diag records the same result, but only as an observer.
 const MANIFEST_REVISION = (() => {
   for (const entry of precacheManifest ?? []) {
     if (typeof entry !== "string" && entry.url === "404.html") {
@@ -328,13 +329,66 @@ self.addEventListener("message", event => {
   }
 })
 
+// --- Navigation routing declaration (prevention) ----------------------------
+// Chrome/Edge 140+ cold-start optimizations (the ServiceWorkerAutoPreload
+// family) can commit a navigation's parallel network response without running
+// the fetch handler, which breaks the per-session build pinning this worker
+// provides (see docs/architecture.md, "Update-window leak"). The Static
+// Routing API is the standards-track surface for exactly this negotiation:
+// declaring `mode: "navigate" -> "fetch-event"` pins navigations to the
+// handler. Chromium 123+ only; Safari/Firefox lack the API and skip
+// harmlessly via the feature check.
+self.addEventListener("install", event => {
+  const installEvent = event as ExtendableEvent & {
+    addRoutes?: (rules: unknown) => Promise<void>
+  }
+  if (typeof installEvent.addRoutes === "function") {
+    try {
+      installEvent
+        .addRoutes([{ condition: { mode: "navigate" }, source: "fetch-event" }])
+        .catch(() => {
+          // A rejected declaration must never break install; routing then
+          // simply stays as it was.
+        })
+    } catch {
+      // Same: declaration is best-effort.
+    }
+  }
+})
+
+// --- Install progress broadcast (production UI: mixed-update prompt) --------
+// handlerDidComplete fires once per manifest entry processed during install
+// (cache-verified skips and downloads alike), so counting them yields true
+// progress with no timers or polling. Pages subscribe via BroadcastChannel;
+// the channel keeps no history, so a late or reloaded subscriber simply picks
+// up from the next entry.
+let installProgressDone = 0
+let installProgressChannel: BroadcastChannel | undefined
+const installProgressPlugin: SerwistPlugin = {
+  handlerDidComplete: async ({ event }) => {
+    if (event.type !== "install") return
+    installProgressDone += 1
+    try {
+      installProgressChannel ??= new BroadcastChannel("sw-install-progress")
+      installProgressChannel.postMessage({
+        done: installProgressDone,
+        total: precacheManifest?.length ?? 0,
+      })
+    } catch {
+      // Progress is best-effort.
+    }
+  },
+}
+
 const serwist = new Serwist({
   precacheEntries: precacheManifest,
   precacheOptions: {
     cacheName: "serwist-precache",
-    // Observation only (see diagnostics section above): records precache
-    // read misses with context, never alters what is served.
-    plugins: [precacheReadObserverPlugin],
+    // precacheReadObserverPlugin: observation only (see diagnostics section
+    // above) — records precache read misses with context, never alters what
+    // is served. installProgressPlugin: broadcasts install progress for the
+    // mixed-update prompt.
+    plugins: [precacheReadObserverPlugin, installProgressPlugin],
     // Static export: every route's HTML is a pure function of the pathname —
     // query strings are read only by client JS. The OAuth/Picker returns land
     // on /redirect/google-drive?code=…&picked_file_ids=…, and with the

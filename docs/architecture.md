@@ -843,8 +843,56 @@ Repro/triage procedure: deploy → cold launch (PC restart is the strongest
 trigger) → open Settings → Diagnostics. `CROSS-BUILD` row = leak confirmed;
 "bypassed req" rows = silent-network path; Next's console fallback message =
 ERR_FAILED path; `edge://serviceworker-internals` shows worker start/stop
-errors live. Countermeasures stay deferred until these detectors have
-characterized real incidents (Stage 2).
+errors live.
+
+### Mixed-session handling (Stage 2)
+
+The operating model, verified at source level and live: **every request is
+version-neutral** (documents are plain paths; RSC is path + `.txt` + a
+header-hash `_rsc` param — there is no vocabulary to address a build), so
+whoever answers a document navigation decides which build runs, and a landed
+document is generation-complete (its chunks and RSC resolve within the same
+precache). Each navigation independently either reaches the fetch handler
+(**A** — generation-consistent serve, including recovery back to the old
+build) or gets committed from the network (**B** — mixed session; observed
+sticky while the worker is cold, with A/B flips within one session).
+
+Countermeasures, layered:
+
+- **Prevention (Chromium 123+ only)**: the SW's install declares
+  `addRoutes({condition: {mode: "navigate"}, source: "fetch-event"})` — the
+  Static Routing API is the standards surface that pins navigations to the
+  handler (Chromium skips its race machinery when a matched route's source is
+  `fetch-event`). Feature-detected; Safari/Firefox unaffected. Takes effect
+  one deploy after shipping (the *old* worker must carry the declaration).
+- **Build-consistency handshake (production logic,
+  `src/lib/sw-update/consistency.ts`)**: the page compares its inlined
+  `APP_BUILD_ID` (the same per-deploy nanoid that revisions the SW manifest,
+  exported via `next.config.mjs` `env`) against the controller's
+  `GET_BUILD_INFO` answer. Deterministic, timing-free; the sw-diag modules
+  only *record* this verdict (dependency never points production → diag).
+- **Mixed-update prompt (no auto-reload)**: on a mixed boot a persistent
+  snackbar (notistack custom variant `updateProgress`) morphs in place:
+  "Installing update…" with real install progress (the SW's
+  `installProgressPlugin` counts `handlerDidComplete` per manifest entry and
+  broadcasts `{done,total}` on `BroadcastChannel("sw-install-progress")`) →
+  "Update installed — reload to finish." with a Reload button (the classic
+  SKIP_WAITING path; pressing it reloads **all** open tabs, as the update
+  flow always has) → or, if the install has not finished after 60 s,
+  "Update paused — reload to retry." (plain reload; doubles as an escape
+  hatch since a re-navigation often lands branch A). Per-document and
+  stateless: a reload during the window re-detects and resumes progress from
+  the next broadcast.
+- **Completion notice**: on *consistent* boots only, a version change against
+  localStorage `lastRunAppVersion` shows "Updated to version X" once —
+  whichever path applied the update. Mixed boots deliberately neither show
+  nor store, so recovery to the *old* build is not misreported as an update.
+
+Residual risk (unmeasured): near-offline × branch B can fail the document
+fetch and show the browser error page even though the precache is complete;
+a reload usually lands branch A. Prevention removes the branch on Chromium.
+Diagnostics data stays bounded by design: nav ring buffer 30 entries,
+`sw-diag` cache pruned at 256, Settings reads only recent items.
 
 ## Known issues / accepted trade-offs
 
