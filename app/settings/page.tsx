@@ -764,6 +764,12 @@ function DiagnosticsSettingsArea() {
 
   useEffect(() => {
     setNavEntries(readNavDiag().slice().reverse())
+    // The current launch's own record lands asynchronously (immediate write +
+    // handshake follow-up, worst case ~3 s) — re-read once after that window.
+    const reread = setTimeout(
+      () => setNavEntries(readNavDiag().slice().reverse()),
+      4500
+    )
     getControllerBuildInfo().then(setSwBuild)
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker
@@ -788,6 +794,7 @@ function DiagnosticsSettingsArea() {
         }
       })()
     }
+    return () => clearTimeout(reread)
   }, [])
 
   const appVersion = process.env.APP_VERSION
@@ -807,9 +814,20 @@ function DiagnosticsSettingsArea() {
 
   const copyAll = async () => {
     try {
+      // Fresh read at copy time: the mounted state can predate the current
+      // launch's own record (it is written asynchronously after mount).
+      const freshEntries = readNavDiag().slice().reverse()
+      setNavEntries(freshEntries)
       await navigator.clipboard.writeText(
         JSON.stringify(
-          { t: Date.now(), appVersion, swBuild, swWaiting, navEntries, swDiag },
+          {
+            t: Date.now(),
+            appVersion,
+            swBuild,
+            swWaiting,
+            navEntries: freshEntries,
+            swDiag,
+          },
           null,
           2
         )
@@ -852,10 +870,15 @@ function DiagnosticsSettingsArea() {
           />
         </ListItem>
         {navEntries.map(entry => {
-          const flagged = entry.crossBuild || entry.bypassSuspect
+          const flagged =
+            entry.crossBuild || entry.bypassSuspect || entry.networkCommit
           const flags = [
             entry.crossBuild ? "CROSS-BUILD" : null,
+            entry.networkCommit ? "NETWORK-COMMIT" : null,
             entry.bypassSuspect ? "BYPASS?" : null,
+            entry.controlled && entry.swBuild === "timeout"
+              ? "NO-HANDSHAKE"
+              : null,
             entry.bypassedRequests?.length
               ? `${entry.bypassedRequests.length} bypassed req`
               : null,

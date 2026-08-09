@@ -823,7 +823,13 @@ copyable to clipboard — works on iOS where no debugger exists):
    before SW registration): Navigation Timing (`workerStart` — 0 while
    controlled ⇒ the navigation did not engage the SW; note hard reloads also
    look like this, check `navType`), controller state, localStorage ring
-   buffer `swNavDiag` (last 30 launches).
+   buffer `swNavDiag` (last 30 launches). The record is persisted
+   immediately and the handshake result patched in afterwards — leaked
+   documents are often replaced by an MPA navigation within a second.
+   `networkCommit` (controlled + `workerStart > 0` + `transferSize > 0`) is
+   the confirmed leak signature observed live on 2026-08-09: dispatch was
+   attempted, yet the network (AutoPreload) response was committed while the
+   client stayed controlled — SW cache responses report `transferSize 0`.
 3. **Build handshake** (mechanism-agnostic primary): the page asks its
    controller `GET_BUILD_INFO` (MessageChannel; the SW answers with its
    `APP_VERSION` + per-deploy manifest revision). Page/SW mismatch =
