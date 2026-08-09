@@ -780,38 +780,65 @@ clients and its activate cleanup purges the previous build's precache
 entries. That zero-client activation is Web-platform behavior and cannot be
 deferred; "old build until explicit Reload" holds only within a session.
 
-### Update-window read failures (under investigation, instrumented)
+### Update-window leak (root cause identified; page-side detectors deployed)
 
-Real-profile forensics recorded five deployments (2026-07-29 … 08-09) where,
-during the install write burst of the *new* SW, precache reads in the *old*
-controlling SW came back empty for entries that provably existed, and the
-production fallbacks (`PrecacheStrategy`'s `fallbackToNetwork`, the RSC
-handler's `fetch`) silently substituted the network's new build — mixing
-builds mid-session. On 08-09 two consecutive reads (`playlists.txt` RSC +
-`playlists.html` navigation) failed within one second: a systemic failure
-window, not a per-read coin flip. The failing layer is the browser's own
-`caches.match` (Serwist route matching and Next.js 14.2 `.txt`/buildId
-handling verified correct at source level); it never reproduced synthetically
-(~70k reads under throttled install bursts on 15 GB origins).
+Seven deployments (2026-07-29 … 08-09) showed the *new* build running at a
+cold launch before the user ever pressed Reload. Forensics ruled out, in
+order: Next.js logic (14.2 `.txt`/buildId handling verified at source),
+Serwist logic, and finally SW-internal precache read misses — the Stage-1
+in-SW diagnostics (below) stayed silent through a real leak while cache
+writes demonstrably worked. The entry point is **outside the SW**: the
+browser hands individual requests to the network when the controlling worker
+cannot be reached at that instant. Verified in Chromium source:
 
-`app/sw.ts` therefore carries an **observation-only diagnostics layer** (no
-serving change): every precache read miss on a fetch event is logged to the
-console (`[sw-diag]`) and to a `sw-diag` cache (max 256 entries,
-self-pruning), with layer attribution (`precache-read-null`, `rsc-read-null`,
-`rsc-manifest-miss`), install/waiting state of the registration, SW process
-age, and detached re-probes of the same key at +100 ms/+500 ms/+2 s
-(`reprobe-hit@…`/`reprobe-null@…`) to tell transient from persistent misses.
-Countermeasures (serving retry, install concurrency, register delay) are
-deliberately deferred until a real deploy window produces this data.
+- Navigations normally **wait** for SW startup (60 s installed-worker
+  timeout) — offline launches work. Only on dispatch failure does the main
+  resource do a "last resort" network load plus `NotifyControllerLost()`
+  (document commits uncontrolled). `service_worker_main_resource_loader.cc`
+- Subresources (RSC `.txt`) retry **once** after a worker-connection drop;
+  terminal non-SW outcomes are ① silent network fallback when the connector
+  reports `kNoController`, ② `net::ERR_FAILED` (which Next turns into an MPA
+  navigation, logging "Failed to fetch RSC payload … Falling back to browser
+  navigation"). `service_worker_subresource_loader.cc`,
+  `controller_service_worker_connector.cc`
+- RaceNetworkRequest applies only with the (unused) Static Routing API;
+  ServiceWorkerAutoPreload (default-on since Chrome 140) respects the fetch
+  handler's result — neither commits network content over a healthy handler.
 
-Post-mortem snippet (DevTools console on the production origin):
+A cross-build leak therefore needs a cold-start instant where the worker is
+unreachable (boot-time process churn); one leaked RSC then escalates via
+Next's buildId check into an MPA navigation and a full new-build takeover.
+The last open question — what exactly nulls/breaks the controller connection
+at cold boot — is answered by the on-device detectors below, not by more
+post-hoc forensics.
 
-```js
-const c = await caches.open("sw-diag");
-const out = [];
-for (const k of await c.keys()) out.push(await (await c.match(k)).json());
-console.table(out.sort((a, b) => a.t - b.t));
-```
+**Detectors** (all observation-only, results in **Settings → Diagnostics**,
+copyable to clipboard — works on iOS where no debugger exists):
+
+1. **In-SW read diagnostics** (`app/sw.ts`, Stage 1): precache read misses on
+   fetch events → console `[sw-diag]` + `sw-diag` cache (max 256,
+   self-pruning) with layer attribution and +100 ms/+500 ms/+2 s re-probes.
+   Guards the "SW was running but cache read failed" class.
+2. **Launch record** (`src/lib/sw-diag/nav-diag.ts`, called from app-layout
+   before SW registration): Navigation Timing (`workerStart` — 0 while
+   controlled ⇒ the navigation did not engage the SW; note hard reloads also
+   look like this, check `navType`), controller state, localStorage ring
+   buffer `swNavDiag` (last 30 launches).
+3. **Build handshake** (mechanism-agnostic primary): the page asks its
+   controller `GET_BUILD_INFO` (MessageChannel; the SW answers with its
+   `APP_VERSION` + per-deploy manifest revision). Page/SW mismatch =
+   cross-build state = the leak, whichever path caused it.
+4. **Bypassed-request watch**: for 30 s after launch, same-origin `.txt` /
+   `_next/static/` resource-timing entries with `workerStart === 0` and a
+   real transfer are recorded — the silent per-request network fallback
+   caught in the act (`transferSize > 0` excludes memory-cache replays).
+
+Repro/triage procedure: deploy → cold launch (PC restart is the strongest
+trigger) → open Settings → Diagnostics. `CROSS-BUILD` row = leak confirmed;
+"bypassed req" rows = silent-network path; Next's console fallback message =
+ERR_FAILED path; `edge://serviceworker-internals` shows worker start/stop
+errors live. Countermeasures stay deferred until these detectors have
+characterized real incidents (Stage 2).
 
 ## Known issues / accepted trade-offs
 

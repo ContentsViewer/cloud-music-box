@@ -34,6 +34,7 @@ import { useThemeStore } from "@/src/stores/theme-store"
 import { AudioBusProvider } from "@/src/stores/audio-bus-provider"
 import { css } from "@emotion/css"
 import { registerServiceWorker } from "./register-sw"
+import { captureNavDiag } from "@/src/lib/sw-diag/nav-diag"
 // Side-effect import: beforeinstallprompt fires once per page load on
 // whatever route the user landed on; the module-scope listener must be
 // registered app-wide or the event is lost until the next full reload.
@@ -253,6 +254,10 @@ const AppMain = ({ children }: { children: React.ReactNode }) => {
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
+    // Launch forensics (see src/lib/sw-diag/nav-diag.ts). Must run before
+    // registerServiceWorker so the recorded controller state reflects what
+    // this navigation committed with.
+    void captureNavDiag()
     registerServiceWorker({
       onNeedRefresh: updateSW => {
         const action = (snackbarId: SnackbarKey) => {

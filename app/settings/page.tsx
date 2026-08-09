@@ -55,6 +55,12 @@ import {
 } from "@/src/features/playlists"
 import { HowToInstallDialog } from "@/src/components/install-promo"
 import { DataSettingsArea } from "./data-settings"
+import {
+  getControllerBuildInfo,
+  readNavDiag,
+  NavDiagEntry,
+  SwBuildInfo,
+} from "@/src/lib/sw-diag/nav-diag"
 
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
@@ -733,6 +739,184 @@ function AppSettingsArea() {
   )
 }
 
+// Read-only view of the update-window leak detectors (nav-diag ring buffer,
+// SW build handshake, Stage-1 sw-diag cache). Exists so incidents can be
+// inspected and copied on-device — including iOS, where no debugger is
+// available. See docs/architecture.md "Service worker / static export".
+function DiagnosticsSettingsArea() {
+  const [themeStoreState] = useThemeStore()
+  const [navEntries, setNavEntries] = useState<NavDiagEntry[]>([])
+  const [swBuild, setSwBuild] = useState<
+    SwBuildInfo | "timeout" | "no-controller" | null
+  >(null)
+  const [swWaiting, setSwWaiting] = useState(false)
+  const [swDiag, setSwDiag] = useState<{ count: number; recent: unknown[] }>({
+    count: 0,
+    recent: [],
+  })
+
+  const colorError = hexFromArgb(
+    MaterialDynamicColors.error.getArgb(themeStoreState.scheme)
+  )
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+
+  useEffect(() => {
+    setNavEntries(readNavDiag().slice().reverse())
+    getControllerBuildInfo().then(setSwBuild)
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .getRegistration()
+        .then(reg => setSwWaiting(!!reg?.waiting))
+        .catch(() => {})
+    }
+    if ("caches" in window) {
+      ;(async () => {
+        try {
+          if (!(await caches.has("sw-diag"))) return
+          const cache = await caches.open("sw-diag")
+          const keys = await cache.keys()
+          const recent: unknown[] = []
+          for (const key of keys.slice(-5)) {
+            const res = await cache.match(key)
+            if (res) recent.push(await res.json())
+          }
+          setSwDiag({ count: keys.length, recent })
+        } catch {
+          // read-only diagnostics
+        }
+      })()
+    }
+  }, [])
+
+  const appVersion = process.env.APP_VERSION
+  const swVersionText =
+    swBuild === null
+      ? "…"
+      : swBuild === "no-controller"
+        ? "no controller"
+        : swBuild === "timeout"
+          ? "no answer (pre-diagnostics SW?)"
+          : `${swBuild.appVersion ?? "?"} (${swBuild.manifestRevision ?? "?"})`
+  const crossBuildNow =
+    typeof swBuild === "object" &&
+    swBuild !== null &&
+    swBuild.appVersion !== undefined &&
+    swBuild.appVersion !== appVersion
+
+  const copyAll = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify(
+          { t: Date.now(), appVersion, swBuild, swWaiting, navEntries, swDiag },
+          null,
+          2
+        )
+      )
+      enqueueSnackbar("Diagnostics copied to clipboard")
+    } catch {
+      enqueueSnackbar("Could not copy diagnostics", { variant: "error" })
+    }
+  }
+
+  const mono = css({
+    fontFamily: "monospace",
+    fontSize: 12,
+    overflowWrap: "anywhere",
+  })
+
+  return (
+    <div
+      css={css({
+        display: "flex",
+        flexDirection: "column",
+        marginTop: "16px",
+      })}
+    >
+      <Typography variant="h6">Diagnostics</Typography>
+      <List dense>
+        <ListItem>
+          <ListItemText
+            primary={`App build: ${appVersion ?? "?"} / SW build: ${swVersionText}`}
+            secondary={
+              crossBuildNow
+                ? "MISMATCH — page and service worker carry different builds"
+                : swWaiting
+                  ? "Update installed, waiting for reload"
+                  : "Consistent"
+            }
+            secondaryTypographyProps={{
+              sx: { color: crossBuildNow ? colorError : colorOnSurfaceVariant },
+            }}
+          />
+        </ListItem>
+        {navEntries.map(entry => {
+          const flagged = entry.crossBuild || entry.bypassSuspect
+          const flags = [
+            entry.crossBuild ? "CROSS-BUILD" : null,
+            entry.bypassSuspect ? "BYPASS?" : null,
+            entry.bypassedRequests?.length
+              ? `${entry.bypassedRequests.length} bypassed req`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" ")
+          return (
+            <ListItem key={entry.t} css={mono}>
+              <ListItemText
+                primary={`${new Date(entry.t).toLocaleString()}  v${entry.appVersion ?? "?"}  ${entry.path}`}
+                secondary={
+                  `${entry.navType ?? "?"}  controlled=${entry.controlled}  ` +
+                  `workerStart=${entry.workerStart ?? "?"}  ` +
+                  `sw=${
+                    typeof entry.swBuild === "object"
+                      ? (entry.swBuild.appVersion ?? "?")
+                      : (entry.swBuild ?? "?")
+                  }` +
+                  (flags ? `  [${flags}]` : "") +
+                  (entry.bypassedRequests?.length
+                    ? ` ${entry.bypassedRequests.map(r => r.url).join(" ")}`
+                    : "")
+                }
+                primaryTypographyProps={{ sx: { fontSize: 12 } }}
+                secondaryTypographyProps={{
+                  sx: {
+                    fontSize: 12,
+                    color: flagged ? colorError : colorOnSurfaceVariant,
+                  },
+                }}
+              />
+            </ListItem>
+          )
+        })}
+        <ListItem>
+          <ListItemText
+            primary={`SW read failures recorded: ${swDiag.count}`}
+            secondary={
+              swDiag.recent.length > 0
+                ? JSON.stringify(swDiag.recent)
+                : "none"
+            }
+            primaryTypographyProps={{ sx: { fontSize: 12 } }}
+            secondaryTypographyProps={{
+              sx: {
+                fontSize: 12,
+                color:
+                  swDiag.count > 0 ? colorError : colorOnSurfaceVariant,
+                overflowWrap: "anywhere",
+              },
+            }}
+          />
+        </ListItem>
+      </List>
+      <Button onClick={copyAll} sx={{ alignSelf: "flex-start" }}>
+        Copy diagnostics
+      </Button>
+    </div>
+  )
+}
+
 export default function Page() {
   const [routerState, routerActions] = useRouter()
   const [themeStoreState] = useThemeStore()
@@ -809,6 +993,7 @@ export default function Page() {
           <DataSettingsArea />
           <ResetSettingsArea />
           <AppSettingsArea />
+          <DiagnosticsSettingsArea />
           <Typography variant="h6" sx={{ mt: 2 }}>
             About
           </Typography>
