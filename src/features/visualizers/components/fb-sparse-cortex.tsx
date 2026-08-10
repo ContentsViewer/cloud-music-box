@@ -907,69 +907,104 @@ export const FbSparseCortex = () => {
     if (bgMatRef.current) bgMatRef.current.uniforms.uTint.value = colors.low
   }, [colors])
 
-  useFrame((_state, deltaTime) => {
-    if (resetRef.current) {
-      initInterp()
-      resetRef.current = false
+  // ============================================================
+  // [Logic] file-position-based, hop-driven processing.
+  //   Results are a function of audio data only (fps/wall-clock independent = deterministic).
+  //   Execution piggybacks on frames, but per-frame consumption is capped.
+  // Created ONCE (not per frame): the former per-frame closures (processHops/
+  // trySwap) and per-hop closure (seedFrom) were steady young-generation
+  // garbage; V8's periodic memory-reducing GC deoptimizes this hot function and
+  // the interpreted re-run is the visible stutter, so the frame loop must not
+  // feed that GC. The window cursor that used to live in per-call locals sits
+  // in `win`, allocated once; every read/write keeps its original order.
+  // ============================================================
+  const processHops = useMemo(() => {
+    const win = {
+      frame: null as AudioFrame | null,
+      s0: new Float32Array(0) as Float32Array,
+      s1: new Float32Array(0) as Float32Array,
+      sr: 0,
+      winStart: 0,
+      winEnd: 0,
     }
-    // View-side time scale (for heat decay, flow, particles). Logic uses the fixed hop step below
-    const dtScale = Math.min(4, Math.max(0.25, deltaTime * 60))
-    // ============================================================
-    // [Logic] file-position-based, hop-driven processing.
-    //   Results are a function of audio data only (fps/wall-clock independent = deterministic).
-    //   Execution piggybacks on frames, but per-frame consumption is capped.
-    // ============================================================
-    const processHops = (maxHops: number): number => {
+    // Window swap: if the processing position falls inside pending, switch
+    // seamlessly. Only when out of range (old window exhausted / seek / track
+    // change / long stall) jump to the window head = a true seam
+    const trySwap = (): boolean => {
+      const st = streamRef.current
+      const p = st.pending
+      if (!p || p === win.frame) return false
+      const pStart = Math.round(p.timeSeconds * p.sampleRate)
+      const pEnd = pStart + p.samples0.length
+      if (st.lastPos < pStart || st.lastPos >= pEnd) {
+        stats.seams++ // continuity actually broke
+        st.lastPos = pStart
+      }
+      st.frame = p
+      st.arrivalMs = st.pendingArrivalMs
+      st.pending = null
+      win.frame = p
+      win.s0 = p.samples0
+      win.s1 = p.samples1
+      win.sr = p.sampleRate
+      win.winStart = pStart
+      win.winEnd = pEnd
+      return true
+    }
+    // Data-derived seeding: first the central patch, then unseeded BMU
+    // neighbors, always from real features. Hoisted out of the hop loop
+    // (it used to be re-created every hop); `bmu` arrives as an argument.
+    const seedFrom = (j: number, useBmu: boolean, bmu: number) => {
+      const bj = j * DIM
+      const bb = bmu * DIM
+      let nrm = 0
+      for (let d = 0; d < DIM; d++) {
+        const base = useBmu
+          ? SEED_MIX * featVec[d] + (1 - SEED_MIX) * W[bb + d]
+          : featVec[d]
+        const v = Math.max(0, base + (seedRngRef.current() * 2 - 1) * SEED_JITTER)
+        W[bj + d] = v
+        nrm += v * v
+      }
+      const inv = 1 / (Math.sqrt(nrm) + 1e-6)
+      for (let d = 0; d < DIM; d++) W[bj + d] *= inv
+      seeded[j] = 1
+      mature[j] = 0
+      thr[j] = 0
+      usage[j] = P_TARGET
+      seededCountRef.current++
+      updateCellVisual(j)
+    }
+    return (maxHops: number): number => {
       const st = streamRef.current
       if (!st.frame || st.frame.samples0.length === 0) return 0
       let done = 0
-      let frame = st.frame
-      let s0 = frame.samples0
-      let s1 = frame.samples1
-      let sr = frame.sampleRate
-      let winStart = Math.round(frame.timeSeconds * sr)
-      let winEnd = winStart + s0.length
-      // Window swap: if the processing position falls inside pending, switch
-      // seamlessly. Only when out of range (old window exhausted / seek / track
-      // change / long stall) jump to the window head = a true seam
-      const trySwap = (): boolean => {
-        const p = st.pending
-        if (!p || p === frame) return false
-        const pStart = Math.round(p.timeSeconds * p.sampleRate)
-        const pEnd = pStart + p.samples0.length
-        if (st.lastPos < pStart || st.lastPos >= pEnd) {
-          stats.seams++ // continuity actually broke
-          st.lastPos = pStart
-        }
-        st.frame = p
-        st.arrivalMs = st.pendingArrivalMs
-        st.pending = null
-        frame = p
-        s0 = p.samples0
-        s1 = p.samples1
-        sr = p.sampleRate
-        winStart = pStart
-        winEnd = pEnd
-        return true
-      }
+      win.frame = st.frame
+      win.s0 = win.frame.samples0
+      win.s1 = win.frame.samples1
+      win.sr = win.frame.sampleRate
+      win.winStart = Math.round(win.frame.timeSeconds * win.sr)
+      win.winEnd = win.winStart + win.s0.length
       const { b0, b2, a1, a2, envA } = coeffs
-      // Logic's time step is always 1 hop = 20 ms (constant); shadows the outer View dtScale
+      // Logic's time step is always 1 hop = 20 ms (constant), independent of the View dtScale
       const dtScale = HOP_SEC * 60
       for (let hopN = 0; hopN < maxHops; hopN++) {
         // swap once the processing position reaches pending's head (normal path = seamless)
-        if (st.pending && st.pending !== frame) {
+        if (st.pending && st.pending !== win.frame) {
           const pStart = Math.round(st.pending.timeSeconds * st.pending.sampleRate)
           if (st.lastPos >= pStart) trySwap()
         }
-        if (st.lastPos + HOP_SAMPLES > winEnd) {
+        if (st.lastPos + HOP_SAMPLES > win.winEnd) {
           if (!trySwap()) return done // old window exhausted and the next has not arrived
-          if (st.lastPos + HOP_SAMPLES > winEnd) return done
+          if (st.lastPos + HOP_SAMPLES > win.winEnd) return done
         }
         // never overtake the playhead estimate (window head + time since arrival) = keeps the visuals from running ahead
-        const playhead = winStart + ((performance.now() - st.arrivalMs) / 1000) * sr
+        const playhead = win.winStart + ((performance.now() - st.arrivalMs) / 1000) * win.sr
         if (st.lastPos + HOP_SAMPLES > playhead) return done
         const tHop0 = performance.now()
-        const idx0 = st.lastPos - winStart
+        const idx0 = st.lastPos - win.winStart
+        const s0 = win.s0
+        const s1 = win.s1
         // --- [INPUT] one hop of filtering + per-band leaky integration ---
         // Band-major with scalar filter state. Per (band, sample) the arithmetic and
         // its order match the old sample-major loop; Math.fround emulates the f32
@@ -1016,11 +1051,13 @@ export const FbSparseCortex = () => {
           hist[slot + m] = Math.max(0, hist[slot + m] - SHARP * meanL)
           hist[slot + M + m] = Math.max(0, hist[slot + M + m] - SHARP * meanR)
         }
-        // x = history concatenated oldest->newest (the slot just written is the newest)
+        // x = history concatenated oldest->newest (the slot just written is the newest).
+        // Explicit element copy: set(subarray(...)) allocated 6 view objects per hop
         const head = histHeadRef.current
         for (let k = 0; k < T_HIST; k++) {
           const src = ((head + 1 + k) % T_HIST) * SLICE
-          featVec.set(hist.subarray(src, src + SLICE), k * SLICE)
+          const dst = k * SLICE
+          for (let d = 0; d < SLICE; d++) featVec[dst + d] = hist[src + d]
         }
         histHeadRef.current = (head + 1) % T_HIST
         let inputE = 0
@@ -1063,39 +1100,16 @@ export const FbSparseCortex = () => {
           bmu = i
         }
       }
-      // Data-derived seeding (growth): first the central patch, then unseeded BMU neighbors, always from real features
-      {
-        const seedFrom = (j: number, useBmu: boolean) => {
-          const bj = j * DIM
-          const bb = bmu * DIM
-          let nrm = 0
-          for (let d = 0; d < DIM; d++) {
-            const base = useBmu
-              ? SEED_MIX * featVec[d] + (1 - SEED_MIX) * W[bb + d]
-              : featVec[d]
-            const v = Math.max(0, base + (seedRngRef.current() * 2 - 1) * SEED_JITTER)
-            W[bj + d] = v
-            nrm += v * v
-          }
-          const inv = 1 / (Math.sqrt(nrm) + 1e-6)
-          for (let d = 0; d < DIM; d++) W[bj + d] *= inv
-          seeded[j] = 1
-          mature[j] = 0
-          thr[j] = 0
-          usage[j] = P_TARGET
-          seededCountRef.current++
-          updateCellVisual(j)
-        }
-        if (bmu < 0) {
-          // First time only: batch-initialize every cell with "first real input +
-          // tiny jitter" (classic SOM style). Growth from the center (frontier
-          // seeding) was abolished - the whole field joins competition and
-          // learning from the start, so clusters (timbre districts) form evenly
-          // distributed across the entire field. The jitter breaks symmetry, and
-          // k-WTA + neighborhood cooperation + IP drive differentiation all over
-          // the field.
-          for (let j = 0; j < N; j++) seedFrom(j, false)
-        }
+      // Data-derived seeding (growth): seedFrom lives in the factory above (no per-hop closure)
+      if (bmu < 0) {
+        // First time only: batch-initialize every cell with "first real input +
+        // tiny jitter" (classic SOM style). Growth from the center (frontier
+        // seeding) was abolished - the whole field joins competition and
+        // learning from the start, so clusters (timbre districts) form evenly
+        // distributed across the entire field. The jitter breaks symmetry, and
+        // k-WTA + neighborhood cooperation + IP drive differentiation all over
+        // the field.
+        for (let j = 0; j < N; j++) seedFrom(j, false, bmu)
       }
       const tSel0 = performance.now()
       stats.tForward = ema(stats.tForward, tSel0 - tFwd0)
@@ -1316,6 +1330,16 @@ export const FbSparseCortex = () => {
       } // end hop loop
       return done
     } // end processHops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coeffs, stats, selfTune, updateCellVisual, x1, x2, y1, y2, env2, hist, featVec, nzIdx, nzVal, recon, resid, act, W, thr, usage, drive, driveSorted, drive2, drive2Sorted, fired2, seeded, mature, heat, hTab, nbP, nbTouched, dirtyFlag, dirtyList])
+
+  useFrame((_state, deltaTime) => {
+    if (resetRef.current) {
+      initInterp()
+      resetRef.current = false
+    }
+    // View-side time scale (for heat decay, flow, particles). Logic uses the fixed 20 ms hop step inside processHops
+    const dtScale = Math.min(4, Math.max(0.25, deltaTime * 60))
     // Pacing is handled by the "never overtake the playhead" gate (inside
     // processHops). Catch-up when behind is capped by MAX_HOPS_FRAME.
     processHops(MAX_HOPS_FRAME)

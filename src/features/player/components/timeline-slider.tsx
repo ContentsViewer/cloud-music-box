@@ -1,6 +1,7 @@
 "use client"
 
 import { Slider, Typography, alpha } from "@mui/material"
+import type { SxProps, Theme } from "@mui/material/styles"
 import { usePlayerStore } from "../stores/player-store"
 import { useAudioBus } from "@/src/stores/audio-bus-provider"
 import { useThemeStore } from "@/src/stores/theme-store"
@@ -38,36 +39,41 @@ const containerStyle = css({
   flexDirection: "column",
 })
 
+// Hoisted: this component re-renders at ~4 Hz while playing; a fresh sx object
+// per render forced MUI/emotion to re-resolve styles every tick (steady GC food)
+const timeSliderSx: SxProps<Theme> = {
+  height: 8,
+  "& .MuiSlider-thumb": {
+    width: 4,
+    height: 16,
+    borderRadius: 1,
+    "&.Mui-active": {
+      boxShadow: theme =>
+        `0px 0px 0px 6px ${alpha(theme.palette.primary.main, 0.16)}`,
+    },
+  },
+  "& .MuiSlider-track": {
+    height: 8,
+  },
+  "& .MuiSlider-rail": {
+    height: 8,
+  },
+}
+
+const timeDisplayStyle = css({
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginTop: -16,
+})
+
 interface TimeSliderProps {
   value: number
 }
 
 const TimeSlider = memo(({ value }: TimeSliderProps) => {
-  return (
-    <Slider
-      sx={{
-        height: 8,
-        "& .MuiSlider-thumb": {
-          width: 4,
-          height: 16,
-          borderRadius: 1,
-          "&.Mui-active": {
-            boxShadow: theme =>
-              `0px 0px 0px 6px ${alpha(theme.palette.primary.main, 0.16)}`,
-          },
-        },
-        "& .MuiSlider-track": {
-          height: 8,
-        },
-        "& .MuiSlider-rail": {
-          height: 8,
-        },
-      }}
-      size="small"
-      value={value}
-      max={1000}
-    />
-  )
+  return <Slider sx={timeSliderSx} size="small" value={value} max={1000} />
+
 })
 
 TimeSlider.displayName = "TimeSlider"
@@ -81,14 +87,7 @@ interface TimeDisplayProps {
 const TimeDisplay = memo(
   ({ currentTime, duration, color }: TimeDisplayProps) => {
     return (
-      <div
-        css={css({
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginTop: -16,
-        })}
-      >
+      <div css={timeDisplayStyle}>
         <Typography variant="caption" color={color}>
           {formatTime(currentTime)}
         </Typography>
