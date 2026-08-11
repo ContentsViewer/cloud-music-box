@@ -643,13 +643,36 @@ this correct:
 - **Consumers share one object URL per unique image** (`useArtworkUrl`,
   `src/features/files/hooks/use-artwork-url.ts`): the browser's decoded-bitmap
   cache is keyed by URL, so N list rows with the same cover decode once. URLs
-  are deduplicated and never revoked (bounded by distinct covers per session).
-  This is what fixed the Files-list decode-memory crash (measured: 145 track
-  records carrying 88 MB of duplicated pictures → 16 unique images, 6.9 MB).
+  are deduplicated and never revoked in the normal course (bounded by distinct
+  covers per session). This is what fixed the Files-list decode-memory crash
+  (measured: 145 track records carrying 88 MB of duplicated pictures → 16
+  unique images, 6.9 MB).
+- **`artworks` records are write-once after creation.** Ingestion and import
+  both guard with "insert only if absent"; derived metadata lives in
+  `artworks-meta` (v4). Rewriting a record that carries a displayed blob may
+  orphan the blob file backing a live object URL — the pre-v3 "covers vanish
+  during downloads" bug was exactly this class (album records carried the
+  cover blob and were rewritten per downloaded track).
+
+**Verify-on-subscribe (iOS self-heal).** iOS jettisons WebKit's network
+process under memory pressure; that process owns the blob URL registry, so
+every `blob:` registration can silently die while the page (and IndexedDB)
+live on — WebKit bug 188880 documents the coupling; the page gets no event.
+`useArtworkUrl` therefore guarantees one invariant: **a URL handed to a
+subscriber has been verified readable at (or after) subscription time** — a
+header-only `fetch` probe on the cached URL (body cancelled = registry lookup
+only, converged per hash with a 10 s TTL), and on failure a re-mint from
+IndexedDB that wakes every subscriber of that hash (bounded: 3 re-mints per
+hash per page). Detection, re-issue and distribution all live in the hook
+module; consumers, MediaSession (audio-player subscribes via the same hook)
+and components are untouched. Re-issue events land in a localStorage ring
+shown under Settings → Diagnostics ("Artwork URL re-issues").
 
 `themeSourceColor` is a cached derivative (pure function of the bytes),
 computed by the theming worker on first use via
-`fileStoreActions.getArtworkThemeColor` — consecutive tracks of one album hit
+`fileStoreActions.getArtworkThemeColor` and stored in `artworks-meta`
+(legacy pre-v4 records may carry it inline; it is read as a fallback and
+copied forward, never written back) — consecutive tracks of one album hit
 the cache instead of re-extracting.
 
 Orphaned artworks (nothing references the hash) are tolerated: the app has no

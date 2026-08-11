@@ -4,6 +4,7 @@ import { CoverCard } from "@/src/components/cover-card"
 import AppTopBar from "@/src/components/app-top-bar"
 import { MarqueeText } from "@/src/components/marquee-text"
 import { useRouter } from "@/src/stores/router"
+import { enqueueSnackbar } from "notistack"
 import { AlbumItem, useArtworkUrl, useFileStore } from "@/src/features/files"
 import { useThemeStore } from "@/src/stores/theme-store"
 import { TrackList } from "@/src/features/files"
@@ -137,23 +138,40 @@ const AlbumListPage = React.memo(function AlbumListPage(
   useEffect(() => {
     if (!fileStoreState.configured) return
     let isCanceled = false
+    let retryTimer: number | undefined
 
-    const getAlbums = async () => {
-      const albumIds = await fileStoreActions.getAlbumIds()
-      if (isCanceled) return
-      const albums = await Promise.all(
-        albumIds.map(async albumId => {
-          return await fileStoreActions.getAlbumById(albumId)
-        })
-      )
-      if (isCanceled) return
-      setAlbums(albums)
+    // This list refetches on every remount (the page unmounts while an album
+    // is open), so an unhandled rejection here would leave the grid empty
+    // until the next navigation — retry once, then surface the error.
+    const getAlbums = async (attempt: number) => {
+      try {
+        const albumIds = await fileStoreActions.getAlbumIds()
+        if (isCanceled) return
+        const albums = await Promise.all(
+          albumIds.map(async albumId => {
+            return await fileStoreActions.getAlbumById(albumId)
+          })
+        )
+        if (isCanceled) return
+        setAlbums(albums)
+      } catch (error) {
+        console.error(error)
+        if (isCanceled) return
+        if (attempt === 0) {
+          retryTimer = window.setTimeout(() => {
+            if (!isCanceled) getAlbums(1)
+          }, 1000)
+        } else {
+          enqueueSnackbar(`${error}`, { variant: "error" })
+        }
+      }
     }
 
-    getAlbums()
+    getAlbums(0)
 
     return () => {
       isCanceled = true
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
     }
   }, [fileStoreState.configured])
 

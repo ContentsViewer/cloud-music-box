@@ -57,6 +57,10 @@ import { HowToInstallDialog } from "@/src/components/install-promo"
 import { DataSettingsArea } from "./data-settings"
 import { readNavDiag, NavDiagEntry } from "@/src/lib/sw-diag/nav-diag"
 import {
+  readArtworkUrlDiag,
+  ArtworkUrlDiagEntry,
+} from "@/src/features/files"
+import {
   getControllerBuildInfo,
   SwBuildInfo,
 } from "@/src/lib/sw-update/consistency"
@@ -753,6 +757,7 @@ function DiagnosticsSettingsArea() {
     count: 0,
     recent: [],
   })
+  const [artworkDiag, setArtworkDiag] = useState<ArtworkUrlDiagEntry[]>([])
 
   const colorError = hexFromArgb(
     MaterialDynamicColors.error.getArgb(themeStoreState.scheme)
@@ -763,6 +768,7 @@ function DiagnosticsSettingsArea() {
 
   useEffect(() => {
     setNavEntries(readNavDiag().slice().reverse())
+    setArtworkDiag(readArtworkUrlDiag().slice().reverse())
     // The current launch's own record lands asynchronously (immediate write +
     // handshake follow-up, worst case ~3 s) — re-read once after that window.
     const reread = setTimeout(
@@ -817,6 +823,8 @@ function DiagnosticsSettingsArea() {
       // launch's own record (it is written asynchronously after mount).
       const freshEntries = readNavDiag().slice().reverse()
       setNavEntries(freshEntries)
+      const freshArtworkDiag = readArtworkUrlDiag().slice().reverse()
+      setArtworkDiag(freshArtworkDiag)
       await navigator.clipboard.writeText(
         JSON.stringify(
           {
@@ -826,6 +834,7 @@ function DiagnosticsSettingsArea() {
             swWaiting,
             navEntries: freshEntries,
             swDiag,
+            artworkUrlReissues: freshArtworkDiag,
           },
           null,
           2
@@ -936,6 +945,30 @@ function DiagnosticsSettingsArea() {
                   fontSize: 12,
                   color:
                     swDiag.count > 0 ? colorError : colorOnSurfaceVariant,
+                  overflowWrap: "anywhere",
+                },
+              }}
+            />
+          </ListItem>
+          <ListItem>
+            <ListItemText
+              primary={`Artwork URL re-issues: ${artworkDiag.length}`}
+              secondary={
+                artworkDiag.length > 0
+                  ? artworkDiag
+                      .map(
+                        e =>
+                          `${new Date(e.t).toLocaleString()} ${e.hash}#${e.attempt}`
+                      )
+                      .join("  ")
+                  : "none (no dead blob URLs detected)"
+              }
+              primaryTypographyProps={{ sx: { fontSize: 12 } }}
+              secondaryTypographyProps={{
+                sx: {
+                  fontSize: 12,
+                  color:
+                    artworkDiag.length > 0 ? colorError : colorOnSurfaceVariant,
                   overflowWrap: "anywhere",
                 },
               }}
