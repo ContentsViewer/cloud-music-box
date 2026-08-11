@@ -45,7 +45,7 @@ export const FILE_DB_NAME = "file-db"
  * unguarded `createObjectStore("files")` would throw ConstraintError and abort
  * the whole upgrade, leaving the app permanently unconfigured.
  */
-export const FILE_DB_VERSION = 3
+export const FILE_DB_VERSION = 4
 
 /**
  * Set once the one-time move of embedded pictures into the `artworks` store has
@@ -397,9 +397,15 @@ export const useFileStore = () => {
         return getArtworkFromIdb(refState.current.fileDb, hash)
       },
       /**
-       * Theme source color for an artwork, computed at most once per image:
-       * cached on the ArtworkRecord and returned from there ever after (the
+       * Theme source color for an artwork, computed at most once per image (the
        * color is a pure function of the image bytes the hash addresses).
+       *
+       * Cached in `artworks-meta`, NEVER written back into the `artworks`
+       * record: those records are write-once (CAS invariant) because rewriting
+       * a record that carries a displayed blob may orphan the blob file backing
+       * a live object URL — the pre-v3 "covers vanish during downloads" bug
+       * class. Legacy records may still carry the color inline (pre-v4 writes);
+       * it is read as a fallback and copied forward into the meta store.
        */
       getArtworkThemeColor: async (
         hash: string
@@ -412,21 +418,27 @@ export const useFileStore = () => {
           throw new Error("File database not initialized")
         }
 
+        const meta = (await idbRequest(
+          fileDb
+            .transaction("artworks-meta")
+            .objectStore("artworks-meta")
+            .get(hash)
+        )) as { themeSourceColor?: number } | undefined
+        if (meta?.themeSourceColor !== undefined) {
+          return meta.themeSourceColor
+        }
+
         const artwork = await getArtworkFromIdb(fileDb, hash)
         if (!artwork) return undefined
-        if (artwork.themeSourceColor !== undefined) {
-          return artwork.themeSourceColor
-        }
-        const color = await extractColorFromImage(artwork.blob)
-        // Re-read before writing back: another consumer may have raced us, and
-        // the record may have gained fields in the meantime.
-        const latest = (await getArtworkFromIdb(fileDb, hash)) ?? artwork
-        const updated: ArtworkRecord = { ...latest, themeSourceColor: color }
+        const color =
+          artwork.themeSourceColor !== undefined
+            ? artwork.themeSourceColor
+            : await extractColorFromImage(artwork.blob)
         await idbRequest(
           fileDb
-            .transaction("artworks", "readwrite")
-            .objectStore("artworks")
-            .put(updated, hash)
+            .transaction("artworks-meta", "readwrite")
+            .objectStore("artworks-meta")
+            .put({ themeSourceColor: color }, hash)
         )
         return color
       },
@@ -1185,6 +1197,14 @@ export const FileStoreProvider = ({
             // v3: content-addressed artwork blobs (key = SHA-256 of the bytes)
             if (!names.contains("artworks")) {
               db.createObjectStore("artworks")
+            }
+            // v4: derived artwork metadata (key = same SHA-256). Kept OUTSIDE
+            // the `artworks` records so those stay write-once after creation:
+            // rewriting a record that carries a displayed blob is the bug class
+            // that made covers vanish during downloads before v3 (the engine
+            // may orphan the blob file backing a displayed object URL).
+            if (!names.contains("artworks-meta")) {
+              db.createObjectStore("artworks-meta")
             }
           }
         })

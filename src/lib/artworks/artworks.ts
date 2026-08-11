@@ -12,8 +12,11 @@ export interface ArtworkRecord {
   /** Original embedded picture bytes, untouched (mime lives in blob.type). */
   blob: Blob
   /**
-   * Theme source color extracted from this image, cached on first use so a
-   * track change never recomputes the color for an image it has already seen.
+   * @deprecated Read-only legacy field (pre-v4 records). The color now lives
+   * in the `artworks-meta` store so that `artworks` records stay write-once
+   * after creation — rewriting a record that carries a displayed blob may
+   * orphan the blob file backing a live object URL (the pre-v3 "covers vanish
+   * during downloads" bug class). Never write this field.
    */
   themeSourceColor?: number
   width?: number
