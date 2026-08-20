@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePlayerStore, AudioTrack } from "../stores/player-store"
 import { enqueueSnackbar } from "notistack"
-import { useArtworkUrl } from "@/src/features/files"
+import { resolveArtworkUrl, useFileStore } from "@/src/features/files"
 import assert from "assert"
 import { useAudioBus } from "@/src/stores/audio-bus-provider"
 import { createAudioAnalyser } from "@/src/lib/audio/audio-analyser"
@@ -19,6 +19,7 @@ const msSetPlaybackState = (state: "playing" | "paused") => {
 // Artwork URLs come from the shared per-image cache and are never revoked
 // here — other consumers (list rows, the player card) may hold the same URL.
 const msSetTrackMetadata = (track: AudioTrack, artworkUrl?: string) => {
+  console.log("msSetTrackMetadata", track.file.name, artworkUrl)
   const ms = window.navigator.mediaSession
   if (!ms) return
 
@@ -40,25 +41,11 @@ const msSetTrackMetadata = (track: AudioTrack, artworkUrl?: string) => {
   })
 }
 
-const msSetPlayingTrack = (track: AudioTrack, artworkUrl?: string) => {
-  console.log("msSetPlayingTrack", track.file.name)
-
-  const ms = window.navigator.mediaSession
-  if (!ms) return
-
-  msSetTrackMetadata(track, artworkUrl)
-  ms.playbackState = "playing"
-}
-
 export const AudioPlayer = () => {
   const [playerState, playerActions] = usePlayerStore()
+  const [, fileStoreActions] = useFileStore()
 
   const audioBus = useAudioBus()
-
-  // Shared per-image URL for the active track's artwork (Media Session).
-  const artworkUrl = useArtworkUrl(playerState.activeTrack?.file.artworkHash)
-  const artworkUrlRef = useRef(artworkUrl)
-  artworkUrlRef.current = artworkUrl
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const sourceRef = useRef<HTMLSourceElement>(null)
@@ -180,13 +167,26 @@ export const AudioPlayer = () => {
 
       console.log("Setting source", src, source.type)
       audio.load()
-      msSetPlayingTrack(activeTrack, artworkUrlRef.current)
+
+      // Media Session metadata is written exactly once per track, after the
+      // artwork URL settles (undefined = the track definitively has no
+      // artwork → placeholder). resolveArtworkUrl never rejects.
+      const trackId = activeTrack.file.id
+      const artworkHash = activeTrack.file.artworkHash
+      resolveArtworkUrl(artworkHash, () =>
+        fileStoreActions.getArtwork(artworkHash!)
+      ).then(url => {
+        // A later track may have taken over while the artwork resolved.
+        if (activeAudioTrackRef.current?.file.id !== trackId) return
+        msSetTrackMetadata(activeTrack, url)
+      })
     }
 
     audio
       .play()
       .then(() => {
         console.log("Played")
+        msSetPlaybackState("playing")
         const blob = activeTrack?.blob
         if (!blob) return
         audioAnalyser.setBuffer(blob)
@@ -222,18 +222,6 @@ export const AudioPlayer = () => {
     playerState.isPlaying,
     playerState.activeTrack,
   ])
-
-  useEffect(() => {
-    // The shared artwork URL resolves asynchronously, usually after
-    // msSetPlayingTrack already ran for this track — refresh the Media Session
-    // metadata (only) once it arrives.
-    if (!artworkUrl) return
-    const track = playerState.activeTrack
-    if (!track) return
-    if (window.navigator.mediaSession?.metadata === null) return
-    msSetTrackMetadata(track, artworkUrl)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [artworkUrl])
 
   useEffect(() => {
     const ms = window.navigator.mediaSession

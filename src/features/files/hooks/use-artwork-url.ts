@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useFileStore } from "../stores/file-store"
 import type { ArtworkRecord } from "@/src/lib/artworks/artworks"
 
@@ -32,7 +32,7 @@ const VERIFY_TTL_MS = 10_000
 const remintsByHash = new Map<string, number>()
 const MAX_REMINTS = 3
 
-type ArtworkLoader = () => Promise<ArtworkRecord | undefined>
+export type ArtworkLoader = () => Promise<ArtworkRecord | undefined>
 
 /** One re-issue event, kept in a small localStorage ring for Settings → Diagnostics. */
 export interface ArtworkUrlDiagEntry {
@@ -110,15 +110,16 @@ function verifyCachedUrl(
   hash: string,
   url: string,
   loadArtwork: ArtworkLoader
-): void {
+): Promise<void> {
   const verifiedAt = verifiedAtByHash.get(hash)
   if (
     verifiedAt !== undefined &&
     performance.now() - verifiedAt < VERIFY_TTL_MS
   ) {
-    return
+    return Promise.resolve()
   }
-  if (verifyInflightByHash.has(hash)) return
+  const inflight = verifyInflightByHash.get(hash)
+  if (inflight) return inflight
   const probe = (async () => {
     try {
       const res = await fetch(url)
@@ -135,6 +136,42 @@ function verifyCachedUrl(
     verifyInflightByHash.delete(hash)
   })
   verifyInflightByHash.set(hash, probe)
+  return probe
+}
+
+/**
+ * One-shot imperative variant of useArtworkUrl, for consumers outside React's
+ * render cycle (Media Session). Same shared per-image cache; a cached URL is
+ * verified live (and re-minted if the registry lost it) BEFORE being returned,
+ * so a dead URL is never handed to the OS. Never rejects: any failure resolves
+ * to undefined — for the caller that means "definitively no artwork".
+ */
+export async function resolveArtworkUrl(
+  hash: string | undefined,
+  loadArtwork: ArtworkLoader
+): Promise<string | undefined> {
+  if (!hash) return undefined
+  const cached = urlByHash.get(hash)
+  if (cached) {
+    await verifyCachedUrl(hash, cached, loadArtwork)
+    return urlByHash.get(hash) // re-minted URL, or undefined if re-mint failed
+  }
+  let promise = inflightByHash.get(hash)
+  if (!promise) {
+    promise = loadArtwork()
+      .then(artwork => {
+        if (!artwork) return undefined
+        const created = URL.createObjectURL(artwork.blob)
+        urlByHash.set(hash, created)
+        verifiedAtByHash.set(hash, performance.now())
+        return created
+      })
+      .finally(() => {
+        inflightByHash.delete(hash)
+      })
+    inflightByHash.set(hash, promise)
+  }
+  return promise.catch(() => undefined)
 }
 
 /**
@@ -144,8 +181,6 @@ function verifyCachedUrl(
  */
 export function useArtworkUrl(hash: string | undefined): string | undefined {
   const [fileStoreState, fileStoreActions] = useFileStore()
-  const refActions = useRef(fileStoreActions)
-  refActions.current = fileStoreActions
 
   const [url, setUrl] = useState<string | undefined>(() =>
     hash ? urlByHash.get(hash) : undefined
@@ -169,42 +204,23 @@ export function useArtworkUrl(hash: string | undefined): string | undefined {
     listeners.add(wake)
 
     let canceled = false
-    const loadArtwork: ArtworkLoader = () => refActions.current.getArtwork(hash)
+    const loadArtwork: ArtworkLoader = () => fileStoreActions.getArtwork(hash)
 
     const cached = urlByHash.get(hash)
     if (cached) {
       setUrl(cached)
       verifyCachedUrl(hash, cached, loadArtwork)
     } else {
-      let promise = inflightByHash.get(hash)
-      if (!promise) {
-        promise = loadArtwork()
-          .then(artwork => {
-            if (!artwork) return undefined
-            const created = URL.createObjectURL(artwork.blob)
-            urlByHash.set(hash, created)
-            verifiedAtByHash.set(hash, performance.now())
-            return created
-          })
-          .finally(() => {
-            inflightByHash.delete(hash)
-          })
-        inflightByHash.set(hash, promise)
-      }
-      promise
-        .then(resolved => {
-          if (!canceled) setUrl(resolved)
-        })
-        .catch(() => {
-          if (!canceled) setUrl(undefined)
-        })
+      resolveArtworkUrl(hash, loadArtwork).then(resolved => {
+        if (!canceled) setUrl(resolved)
+      })
     }
     return () => {
       canceled = true
       listeners.delete(wake)
       if (listeners.size === 0) listenersByHash.delete(hash)
     }
-  }, [hash, fileStoreState.configured, gen])
+  }, [hash, fileStoreState.configured, gen, fileStoreActions])
 
   return url
 }

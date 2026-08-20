@@ -141,6 +141,74 @@ old buffer (GC keeps it alive while referenced).
 Seeking still goes through the store (`changeCurrentTime` + `currentTimeChanged`),
 because it is a rare, user-initiated state change.
 
+### Media Session (OS integration)
+
+`navigator.mediaSession` is the channel to the OS media UI (lock screen, media
+notification). It carries two facts with different lifetimes, and each is
+written only when its fact changes — **deliberately as independent writes**
+(the OS has no cross-property transaction; pairing them in one tick would be
+fiction anyway, since resume writes state without metadata):
+
+| Property | Fact | Written when |
+| --- | --- | --- |
+| `ms.metadata` | what track this is | **Exactly once per track change**, after `resolveArtworkUrl` settles. `undefined` then means *definitively no artwork* → placeholder image. Sole write point: `msSetTrackMetadata` (audio-player.tsx) |
+| `ms.playbackState` | whether audio plays | Mirrors the element's real state: `play()` success → `"playing"`, pause branch → `"paused"` |
+
+Waiting for the artwork URL before the single metadata write is what fixes the
+"previous track's cover sticks on a no-artwork track" bug: a two-phase design
+(write early, patch when the URL arrives) cannot distinguish "still resolving"
+from "has no artwork" — both are `undefined` at write time. A track-id guard
+drops resolutions that finish after the user has already skipped on. Artwork
+URLs come from the shared per-image cache and are **never revoked here** (other
+consumers may hold the same URL); the resolver awaits the liveness probe so a
+registry-dead URL (iOS jetsam) is never handed to the OS. Action handlers
+(play/pause/next/prev/seekto) are registered once on mount.
+
+Accepted trade-off: for a few ms (artwork resolution latency: microtask when
+cached, one IndexedDB read on first sight) the OS may observe `"playing"` with
+the previous track's metadata. The pre-fix code had the mirror-image window
+(metadata + `"playing"` announced before sound started, corrected after a
+`play()` failure), so this is not a regression — just the window's direction.
+
+```mermaid
+sequenceDiagram
+    participant PS as PlayerStore
+    participant AP as AudioPlayer
+    participant AU as use-artwork-url (module cache)
+    participant IDB as IndexedDB (artworks)
+    participant MS as navigator.mediaSession (OS)
+
+    note over PS,MS: Track change — metadata is written exactly once
+    PS->>AP: activeTrack changed (new file id)
+    AP->>AP: swap source, audio.load(), audio.play()
+    AP->>MS: playbackState = "playing" (on play() success)
+    AP->>AU: resolveArtworkUrl(artworkHash)
+    alt no artworkHash (track has no artwork)
+        AU-->>AP: undefined (immediate)
+    else URL cached
+        AU->>AU: liveness probe (registry lookup, re-checked at most once per 10 s)
+        note right of AU: dead registration (iOS jetsam)<br/>→ re-mint from IndexedDB
+        AU-->>AP: shared object URL
+    else first sight of hash
+        AU->>IDB: get(hash)
+        IDB-->>AU: ArtworkRecord.blob
+        AU->>AU: createObjectURL + cache
+        AU-->>AP: shared object URL
+    end
+    AP->>AP: guard: still the active track?
+    AP->>MS: metadata = new MediaMetadata(title/artist/album + artwork or placeholder)
+
+    note over PS,MS: Pause / resume — metadata untouched
+    PS->>AP: isPlaying = false
+    AP->>MS: playbackState = "paused"
+    PS->>AP: isPlaying = true (same track)
+    AP->>MS: playbackState = "playing"
+
+    note over MS,AP: OS-initiated (reverse direction)
+    MS->>AP: action handlers (play/pause/next/prev/seekto)
+    AP->>PS: playerActions.*
+```
+
 ## Stores and provider hierarchy
 
 All stores follow the same pattern: `StateContext` + `DispatchContext`,
@@ -664,9 +732,13 @@ header-only `fetch` probe on the cached URL (body cancelled = registry lookup
 only, converged per hash with a 10 s TTL), and on failure a re-mint from
 IndexedDB that wakes every subscriber of that hash (bounded: 3 re-mints per
 hash per page). Detection, re-issue and distribution all live in the hook
-module; consumers, MediaSession (audio-player subscribes via the same hook)
-and components are untouched. Re-issue events land in a localStorage ring
-shown under Settings → Diagnostics ("Artwork URL re-issues").
+module, which offers two consumption modes: components subscribe via
+`useArtworkUrl` (URL handed immediately, probe in the background, re-mints
+wake the subscribers), while Media Session resolves one-shot via
+`resolveArtworkUrl` (awaits the probe, so a dead URL is never handed to the
+OS — see "Media Session (OS integration)"). Re-issue events land in a
+localStorage ring shown under Settings → Diagnostics ("Artwork URL
+re-issues").
 
 `themeSourceColor` is a cached derivative (pure function of the bytes),
 computed by the theming worker on first use via
