@@ -38,8 +38,6 @@ export const TrackFeatureRecorder = ({
   const [, playlistActions] = usePlaylistStore()
   const accumulator = useMemo(() => createTrackFeatureAccumulator(), [])
 
-  const refActions = useRef(playlistActions)
-  refActions.current = playlistActions
   // Read through a ref: duration arrives after metadata loads, and re-running
   // the effect for it would reset the accumulator mid-track.
   const refDuration = useRef(durationSeconds)
@@ -64,7 +62,7 @@ export const TrackFeatureRecorder = ({
     let previousCoverage = 0
 
     const arm = async () => {
-      const existing = await refActions.current.getTrackFeature(trackId)
+      const existing = await playlistActions.getTrackFeature(trackId)
       if (canceled) return
 
       if (existing && existing.version === TRACK_FEATURE_VERSION) {
@@ -105,13 +103,13 @@ export const TrackFeatureRecorder = ({
 
       const vector = accumulator.finish()
       if (!vector) return
-      refActions.current
+      playlistActions
         .recordTrackFeatures(trackId, vector, coverage, duration)
         .catch(error => {
           console.error(error)
         })
     }
-  }, [trackId, accumulator, audioBus])
+  }, [trackId, accumulator, audioBus, playlistActions])
 
   return null
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useFileStore } from "../stores/file-store"
 import type { ArtworkRecord } from "@/src/lib/artworks/artworks"
 
@@ -181,8 +181,6 @@ export async function resolveArtworkUrl(
  */
 export function useArtworkUrl(hash: string | undefined): string | undefined {
   const [fileStoreState, fileStoreActions] = useFileStore()
-  const refActions = useRef(fileStoreActions)
-  refActions.current = fileStoreActions
 
   const [url, setUrl] = useState<string | undefined>(() =>
     hash ? urlByHash.get(hash) : undefined
@@ -206,7 +204,7 @@ export function useArtworkUrl(hash: string | undefined): string | undefined {
     listeners.add(wake)
 
     let canceled = false
-    const loadArtwork: ArtworkLoader = () => refActions.current.getArtwork(hash)
+    const loadArtwork: ArtworkLoader = () => fileStoreActions.getArtwork(hash)
 
     const cached = urlByHash.get(hash)
     if (cached) {
@@ -222,7 +220,7 @@ export function useArtworkUrl(hash: string | undefined): string | undefined {
       listeners.delete(wake)
       if (listeners.size === 0) listenersByHash.delete(hash)
     }
-  }, [hash, fileStoreState.configured, gen])
+  }, [hash, fileStoreState.configured, gen, fileStoreActions])
 
   return url
 }
