@@ -31,7 +31,8 @@ flowchart TD
         SHARP --> PATCH["patch x: last 6 slices x [L32|R32]<br/>= 384 dims, non-negative"]
     end
     subgraph INTERP["INTERPRETATION: 64x64 = 4096 cells, W = 4096 x 384 atoms"]
-        PATCH --> FWD["forward: drive_i = W_i . x - thr_i"]
+        PATCH --> GAIN["per-cell stereo-position gain g_i (see (E)):<br/>gL = (2(1-m))^(1/4), gR = (2m)^(1/4), m from lattice column"]
+        GAIN --> FWD["forward: drive_i = W_i . (g_i o x) - thr_i"]
         FWD --> KWTA["k-WTA: top K_ACTIVE = 200 fire"]
         KWTA --> LEARN["learning (3 forces, see below)"]
     end
@@ -70,6 +71,11 @@ Notation:
   multiplies and the `selfT` scratch were dead computation; fusing the loops
   recovered ~0.8 ms/hop of the self-mask's measured in-situ cost). The design
   formula lives on in this note and the code comment.
+- `g_i` = the per-cell stereo-position gain (§ (E)): wherever a cell consumes
+  audio — forward, the self-mask target, the residual it absorbs, cooperation,
+  seeding — `x` (or `e`) enters as `g_i ∘ x`. The **global** recon/resid/alpha
+  accounting stays unweighted by design (a shared approximation, not a
+  per-cell percept). `PAN_DEPTH = 0` makes every `g_i` the identity.
 
 ```mermaid
 flowchart LR
@@ -203,6 +209,79 @@ bands — true sparse coding), which means changing (A)/(C)'s "everyone absorbs
 the mixture" dynamics — the load-bearing aesthetic machinery. That trade-off is
 a product decision, not a tuning knob.
 
+### (E) Stereo-position prior (2026-08-21; gain law revised to p=4 2026-08-22)
+
+Third synesthetic axis: **x = pan**, alongside y = pitch and hue = pitch class.
+Every cell hears the input through channel gains tied to its lattice column
+`u ∈ [-1(left), +1(right)]`:
+
+```text
+t  = clamp(u / PAN_EDGE, -1, 1)      the pan this column is tuned to
+m  = (1 + PAN_DEPTH·t) / 2           the R-energy share it prefers
+gL = (2(1-m))^(1/PAN_LAW),  gR = (2m)^(1/PAN_LAW)
+```
+
+The input patch always carried L/R separately (`[L32|R32]` per slice); the
+prior anchors WHERE channel structure lands. Mono material (analyser upmixes
+`ch1 = ch0`) is heard identically everywhere; `PAN_DEPTH = 0` disables exactly.
+
+**Why this law (the whole design reduces to one curve).** Heard energy
+`H = gL²·E_L + gR²·E_R` is LINEAR in `(gL², gR²)`, so a source's landing spot
+is decided purely by the curve those per-column points trace:
+
+- convex (`p<2`; the first implementation was the linear `p=1`) sends every
+  pan's argmax to a lattice EDGE — measured: winner mean u −0.84/+0.83 with
+  the center deserted, and edge energy inflated (+36 % for balanced input);
+- `p=2` (straight line = equal-power law) is perfectly energy-fair but anchors
+  nothing (mixed pans jump to the plateaus; center content is heard identically
+  everywhere — position becomes the historical lottery, confirmed by the
+  `pan=0` control runs whose orientation flipped between runs);
+- `p→∞` ("max=1 box") is also perfectly fair and funnels everything to the
+  center column. Fairness and unique anchoring are **provably exclusive**
+  (a constant support function forces one corner point to co-win every
+  direction); any anchoring law is strictly concave and carries a bounded
+  max-gain disparity `2^(2/p)`.
+
+`PAN_LAW = 4` is the unique member whose energy curve is a **circle**
+(`(gL²)² + (gR²)² = 2`): constant curvature = uniform anchoring sharpness over
+pan; disparity √2; closed-form matched column `m* = (1−c)²/(c²+(1−c)²)` for a
+source with L-energy share c (matched filter: the cell's energy-gain ratio
+equals the source's channel ratio). `PAN_EDGE = 0.75`: hard pans anchor at
+±0.75 with flat plateaus beyond (8 columns/side ≥ 2× converged cooperation
+radius), so hard-pan clusters own full neighborhoods instead of being clipped
+at the border. `PAN_DEPTH` sets the RESOLVED pan range (interior anchoring up
+to energy ratio `√((1+d)/(1−d))` = 2:1 = 3 dB at 0.6; stronger pans saturate
+into the bands). All three fixed constants; only `PAN_DEPTH` is live-tunable
+(`__fbcx.selfTune.pan`, rebuilds the gain table next frame; combine with `r`).
+
+Implementation is perf-neutral: per cell the gain vector collapses to two
+scalars, so the forward pass splits its nz-compacted dot product into L/R
+partial sums (`gL·sumL + gR·sumR`); fired-only terms use a static `chanOf[d]`
+table; cooperation applies half-slice blocks.
+
+**Measured verdict (p=4, depth 0.6; gain table verified against the formulas):**
+
+- 3-tone synthetic (hard-L 220 Hz / center 880 Hz / hard-R 3 kHz, coprime
+  3/4/5 s gates, ~104 s): solo-phase winner mean u = **−0.748 / 0.006 /
+  +0.705** with L/C/R splits 82/0/0, 27/26/29, 0/2/80 — hard pans sit exactly
+  on the ±0.75 anchors, center content centers on average (its concentration
+  is soft: the circle's center bonus is only ~5 %).
+- **Simultaneous hard-L + hard-R reads as center** (19/41/22): a balanced
+  channel total IS center content to any concave law (goniometer behavior).
+  `p=1` lateralized that case instead (839/12/789) — recorded as the accepted
+  trade; only convex laws split it, at the cost of every flaw above.
+- Mid-pan (60:40 tone): winner mean settles at −0.12, correct side but
+  compressed vs the matched column −0.48 — the interior peak is shallow (~2 %)
+  and IP rotation flattens it on continuous content; depth 0.8 did not sharpen
+  it (−0.10), so the softness is intrinsic, not a depth issue. The pan axis is
+  a graded tendency, not a projection.
+- Real track (a stereo J-pop track, ~111 s): **same-column pairCos 0.895** =
+  the §3 regime (tint equilibrium preserved); global pairCos 0.798 (the
+  structural cross-column component is much milder than the p=1 law's 0.574
+  because gains span only ±1–2 dB); timings unchanged (tForward 2.39 ms,
+  tLearn 2.98 ms), seams 0. Judge tint depth by same-column pairs only —
+  global pairs count the intended gain gradient.
+
 ### Support systems
 
 - **Seeding**: on the first audible hop, all 4096 cells are batch-initialized
@@ -278,6 +357,10 @@ let s=0;for(let t=0;t<300;t++)s+=cos((Math.random()*N)|0,(Math.random()*N)|0)
 s/300  // ~0.93 = original/homogeneous, lower = differentiated
 ```
 
+With the stereo-position prior on (`PAN_DEPTH > 0`), constrain both pair
+members to one column (same gains) to measure tint depth — global pairs also
+count the intended cross-column gain gradient and read ~0.3 lower (§2 (E)).
+
 ---
 
 ## 4. History: tried and rejected (do not re-attempt blindly)
@@ -312,12 +395,13 @@ Standing lessons:
 ## 5. Debug surface
 
 - `window.__fbcx`: `G M DIM seeded mature heat W thr usage centroidArr featVec
-  env2 stats drive drive2 selfTune audioBus setSeedRng setHemiScale setHemiBeta
-  setFlat setRound`.
+  env2 stats drive drive2 gLR selfTune audioBus setSeedRng setHemiScale
+  setHemiBeta setFlat setRound`.
 - `stats`: `mapAge` (audible seconds; annealing clock), `seams`, `resFrac`,
   `kThr`, `nWin2` (round-2 winners this hop; 0 = nothing unexplained), stage
   timings `tInput/tForward/tSelect/tLearn/tField/tParticles`.
-- `selfTune` (live-tunable): `eta sharp` (§2 (B)) and `r2cos r2gain` (§2 (D)).
+- `selfTune` (live-tunable): `eta sharp` (§2 (B)), `r2cos r2gain` (§2 (D)) and
+  `pan` (§2 (E); the per-cell gain table rebuilds on the next processed frame).
 - `r` key: reset map (weights, seeding, annealing clock; cochlear filter state
   intentionally survives).
 - `g` key: flat-lattice debug view; `,` / `.`: hemisphere roundness λ ±0.05.

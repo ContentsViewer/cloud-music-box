@@ -16,7 +16,9 @@ import { Hct } from "@material/material-color-utilities"
 //                      stacked as-is (384 dims, non-negative). Attack/decay/
 //                      vibrato/panning are not detected as features - they are
 //                      simply present in the window as raw data. Only compression
-//                      and lateral inhibition (generic cochlear nonlinearities).
+//                      and lateral inhibition (generic cochlear nonlinearities),
+//                      plus a per-cell stereo-position gain (PAN_DEPTH): cells in
+//                      the left columns hear L louder, right columns hear R.
 //     [INTERPRETATION] topographic sparse-coding map (N=4096 cells)
 //                      = k-WTA sparse firing + additive-reconstruction residual
 //                      learning + neighborhood cooperation + IP homeostasis.
@@ -61,6 +63,49 @@ const MAX_HOPS_FRAME = 2 // max hops consumed per frame (protects the frame budg
 // 4+ causes bursty frame drops (measured 51 fps).
 const SHARP = 0.6 // lateral inhibition (subtract the mean floor); stops the shared floor making all patches alike
 const LOUD_FLOOR = 0.3 // input energy floor (no learning or seeding on silence / very quiet input)
+// [stereo-position prior] Third synesthetic axis: x = pan (alongside y = pitch,
+// hue = pitch class). Every cell hears the input through channel gains tied to
+// its lattice column u in [-1(left), +1(right)]:
+//   t  = clamp(u / PAN_EDGE, -1, 1)     the pan this column is tuned to
+//   m  = (1 + PAN_DEPTH*t) / 2          the R-energy share it prefers
+//   gL = (2(1-m))^(1/PAN_LAW),  gR = (2m)^(1/PAN_LAW)
+// Anchoring: heard energy H = gL^2*E_L + gR^2*E_R is LINEAR in (gL^2, gR^2),
+// so where a source lands is decided purely by the curve those points trace:
+//  - convex (PAN_LAW p < 2; p=1 was the first, linear implementation) sends
+//    every pan's argmax to a lattice EDGE (measured: winner mean u -0.84/+0.83,
+//    center deserted) and inflates edge energy (+36% for balanced input) -
+//    amplitude-sum conservation is not energy conservation;
+//  - p = 2 (straight line = equal-power law) is perfectly energy-fair but
+//    anchors nothing: mixed pans jump to the plateaus, center content is heard
+//    identically everywhere (position = historical lottery);
+//  - p -> inf (the "max=1 box") is also perfectly fair and funnels every
+//    non-mathematically-hard pan to the center column.
+//  Fairness and unique anchoring are provably exclusive here (a constant
+//  support function forces one corner cell to co-win every direction); any
+//  anchoring law must be strictly concave and carries a bounded max-gain
+//  disparity of 2^(2/p). A source with L-energy share c is loudest at the
+//  column with m = (1-c)^2/(c^2+(1-c)^2) - i.e. where the cell's energy-gain
+//  ratio equals the source's channel ratio (matched filter).
+const PAN_DEPTH = 0.6
+// p = 4 is the unique member whose energy curve is a CIRCLE
+// ((gL^2)^2 + (gR^2)^2 = 2): constant curvature = uniform anchoring sharpness
+// across pan positions; disparity sqrt(2); closed-form matched column. Fixed by
+// that principle - not a knob. (p=1 + PAN_EDGE=1 reproduces the old linear law;
+// the rejected "box" profile is the p->inf limit, two lines in the table build.)
+const PAN_LAW = 4
+// Hard pans anchor at +-PAN_EDGE with a flat plateau beyond, so a hard-panned
+// cluster owns a full (untruncated) cooperation neighborhood instead of being
+// clipped at the lattice border: per-side band (1-PAN_EDGE)/2*G = 8 columns
+// >= 2*NB_RAD converged-radius columns. Fixed - not a knob.
+const PAN_EDGE = 0.75
+// PAN_DEPTH under p=4 sets the RESOLVED pan range: interior (unique-column)
+// anchoring covers channel energy ratios up to sqrt((1+d)/(1-d)) (2:1 = 3 dB
+// at 0.6); stronger pans saturate into the plateau bands. Mono material
+// (analyser upmixes ch1 = ch0) is heard identically everywhere; 0 disables the
+// prior exactly (every gain 1, clean A/B). Gains apply wherever a cell
+// consumes audio (forward, self-mask target, residual use, cooperation,
+// seeding); the global recon/resid ACCOUNTING stays unweighted (shared
+// approximation, not a per-cell percept). Live-tunable: __fbcx.selfTune.pan.
 
 // --- INTERPRETATION layer parameters ---
 const G = 64 // G x G lattice
@@ -572,9 +617,21 @@ export const FbSparseCortex = () => {
   const resid = useMemo(() => new Float32Array(DIM), [])
   const act = useMemo(() => new Float32Array(N), [])
   // compacted non-zero features (lateral inhibition zeroes many dims; the forward
-  // pass skips them - adding a zero term is an exact identity)
-  const nzIdx = useMemo(() => new Uint16Array(DIM), [])
+  // pass skips them - adding a zero term is an exact identity), split by channel
+  // half so the forward pass can weight the L and R partial sums per cell
+  const nzIdx = useMemo(() => new Uint16Array(DIM), []) // L dims
   const nzVal = useMemo(() => new Float32Array(DIM), [])
+  const nzIdxR = useMemo(() => new Uint16Array(DIM), [])
+  const nzValR = useMemo(() => new Float32Array(DIM), [])
+  // [stereo-position prior] per-cell channel gains [gL, gR] (see PAN_DEPTH) and
+  // the static dim -> channel table (0 = L half of a slice, 1 = R half)
+  const gLR = useMemo(() => new Float32Array(N * 2), [])
+  const chanOf = useMemo(() => {
+    const t = new Uint8Array(DIM)
+    for (let d = 0; d < DIM; d++) t[d] = d % SLICE >= M ? 1 : 0
+    return t
+  }, [])
+  const panRef = useRef(NaN) // last pan the gLR table was built for
   // batched neighborhood cooperation: per-cell product of (1-h) over all firing
   // sources this hop (applied once per cell), plus a dirty set that defers
   // updateCellVisual to one call per cell per hop
@@ -606,7 +663,7 @@ export const FbSparseCortex = () => {
   // live-tunable copies of ETA_SELF / SHARP_SELF / round-2 floors for window
   // exploration (exposed as __fbcx.selfTune; combine with "r" for fair A/B runs)
   const selfTune = useMemo(
-    () => ({ eta: ETA_SELF, sharp: SHARP_SELF, r2cos: R2_MIN_COS, r2gain: R2_GAIN }),
+    () => ({ eta: ETA_SELF, sharp: SHARP_SELF, r2cos: R2_MIN_COS, r2gain: R2_GAIN, pan: PAN_DEPTH }),
     []
   )
   const stats = useMemo(
@@ -821,7 +878,8 @@ export const FbSparseCortex = () => {
     ;(window as any).__fbcx = {
       G, M, DIM, seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats,
       drive, drive2, // selection scores (round 1 = mixture, round 2 = residual)
-      selfTune, // live ETA_SELF/SHARP_SELF tuning (window exploration)
+      gLR, // per-cell [gL, gR] stereo-position gains (see PAN_DEPTH)
+      selfTune, // live ETA_SELF/SHARP_SELF/PAN_DEPTH tuning (window exploration)
       audioBus, // record/replay verification: console can capture and re-emit frames
       setSeedRng: (fn: (() => number) | null) => { seedRngRef.current = fn ?? Math.random },
       // lens (field-of-view) tuning: 1.0 = 90deg vertical FOV, 0.84 = 100deg, 0.70 = 110deg
@@ -850,7 +908,7 @@ export const FbSparseCortex = () => {
         trailUniforms.uRound.value = c
       },
     }
-  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, drive, drive2, selfTune, audioBus, gasUniforms, headUniforms, trailUniforms])
+  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, drive, drive2, gLR, selfTune, audioBus, gasUniforms, headUniforms, trailUniforms])
 
   // [Logic input] Subscribe to the audio bus and stitch 0.5 s window snapshots by
   // file position. Push reception without React state (no re-renders, no interim
@@ -957,11 +1015,13 @@ export const FbSparseCortex = () => {
     const seedFrom = (j: number, useBmu: boolean, bmu: number) => {
       const bj = j * DIM
       const bb = bmu * DIM
+      const gjL = gLR[j * 2]
+      const gjR = gLR[j * 2 + 1]
       let nrm = 0
       for (let d = 0; d < DIM; d++) {
-        const base = useBmu
-          ? SEED_MIX * featVec[d] + (1 - SEED_MIX) * W[bb + d]
-          : featVec[d]
+        // the cell seeds from the input as IT hears it (stereo-position gain)
+        const xg = (chanOf[d] ? gjR : gjL) * featVec[d]
+        const base = useBmu ? SEED_MIX * xg + (1 - SEED_MIX) * W[bb + d] : xg
         const v = Math.max(0, base + (seedRngRef.current() * 2 - 1) * SEED_JITTER)
         W[bj + d] = v
         nrm += v * v
@@ -978,6 +1038,21 @@ export const FbSparseCortex = () => {
     return (maxHops: number): number => {
       const st = streamRef.current
       if (!st.frame || st.frame.samples0.length === 0) return 0
+      // [stereo-position prior] (re)build the per-cell gain table when the live
+      // knob moved (NaN on mount -> built on the first processed frame).
+      // Law: see the PAN_DEPTH/PAN_LAW/PAN_EDGE constants block.
+      if (panRef.current !== selfTune.pan) {
+        panRef.current = selfTune.pan
+        const pan = selfTune.pan
+        const invP = 1 / PAN_LAW
+        for (let i = 0; i < N; i++) {
+          const u = ((i % G) / (G - 1)) * 2 - 1
+          const t = Math.max(-1, Math.min(1, u / PAN_EDGE))
+          const m = (1 + pan * t) / 2
+          gLR[i * 2] = Math.pow(2 * (1 - m), invP)
+          gLR[i * 2 + 1] = Math.pow(2 * m, invP)
+        }
+      }
       let done = 0
       win.frame = st.frame
       win.s0 = win.frame.samples0
@@ -1067,14 +1142,21 @@ export const FbSparseCortex = () => {
           stats.tInput = ema(stats.tInput, performance.now() - tHop0)
           continue
         }
-        // compact non-zero features once per hop (ascending d preserves sum order)
-        let nnz = 0
+        // compact non-zero features once per hop, split into channel lists
+        // (ascending d within each list preserves the per-channel sum order)
+        let nnzL = 0
+        let nnzR = 0
         for (let d = 0; d < DIM; d++) {
           const xv = featVec[d]
-          if (xv !== 0) {
-            nzIdx[nnz] = d
-            nzVal[nnz] = xv
-            nnz++
+          if (xv === 0) continue
+          if (chanOf[d]) {
+            nzIdxR[nnzR] = d
+            nzValR[nnzR] = xv
+            nnzR++
+          } else {
+            nzIdx[nnzL] = d
+            nzVal[nnzL] = xv
+            nnzL++
           }
         }
         const tFwd0 = performance.now()
@@ -1091,9 +1173,12 @@ export const FbSparseCortex = () => {
           continue
         }
         const b = i * DIM
-        let s = 0
-        for (let k = 0; k < nnz; k++) s += W[b + nzIdx[k]] * nzVal[k]
-        const u = s - thr[i]
+        // L/R partial sums combined with this cell's stereo-position gains
+        let sL = 0
+        for (let k = 0; k < nnzL; k++) sL += W[b + nzIdx[k]] * nzVal[k]
+        let sR = 0
+        for (let k = 0; k < nnzR; k++) sR += W[b + nzIdxR[k]] * nzValR[k]
+        const u = gLR[i * 2] * sL + gLR[i * 2 + 1] * sR - thr[i]
         drive[i] = u
         if (u > maxU) {
           maxU = u
@@ -1163,8 +1248,18 @@ export const FbSparseCortex = () => {
             continue
           }
           const b = i * DIM
-          let s = 0
-          for (let d = 0; d < DIM; d++) s += W[b + d] * resid[d]
+          // the residual, heard through this cell's stereo-position gains
+          let sL = 0
+          let sR = 0
+          for (let t = 0; t < T_HIST; t++) {
+            const o = b + t * SLICE
+            const ro = t * SLICE
+            for (let m = 0; m < M; m++) {
+              sL += W[o + m] * resid[ro + m]
+              sR += W[o + M + m] * resid[ro + M + m]
+            }
+          }
+          const s = gLR[i * 2] * sL + gLR[i * 2 + 1] * sR
           drive2[i] = s
           if (s > max2) max2 = s
         }
@@ -1237,6 +1332,9 @@ export const FbSparseCortex = () => {
           // what turns a barely-matching recruit into a specialist of the new part)
           const aeff = fired1 ? alpha * act[i] : r2Amp * yi
           const b = i * DIM
+          // stereo-position gains: x and the residual enter this cell pre-scaled
+          const giL = gLR[i * 2]
+          const giR = gLR[i * 2 + 1]
           // self-masked target: the input heard through this cell's own bands.
           // Design formula: normalize(x^ * W_i / max W_i). The scalars 1/|x| and
           // 1/maxW are constant across d and cancel inside the normalize (docs
@@ -1246,7 +1344,7 @@ export const FbSparseCortex = () => {
           let mwS = 0
           for (let d = 0; d < DIM; d++) {
             const w = W[b + d]
-            const q = featVec[d] * w
+            const q = (chanOf[d] ? giR : giL) * featVec[d] * w
             qn += q * q
             mwS += w
           }
@@ -1257,10 +1355,11 @@ export const FbSparseCortex = () => {
           let nrm = 0
           for (let d = 0; d < DIM; d++) {
             const w = W[b + d]
+            const g = chanOf[d] ? giR : giL
             let wv =
               w +
-              ETA * dtScale * aeff * resid[d] +
-              sStep * (featVec[d] * w * qInv - w) -
+              ETA * dtScale * aeff * g * resid[d] +
+              sStep * (g * featVec[d] * w * qInv - w) -
               cutS
             if (wv < 0) wv = 0
             W[b + d] = wv
@@ -1291,14 +1390,22 @@ export const FbSparseCortex = () => {
           }
         }
       }
-      // apply the accumulated neighborhood blends once per touched cell
+      // apply the accumulated neighborhood blends once per touched cell; the
+      // blend target is the mixture as cell j hears it (stereo-position gains) -
+      // half-slice blocks keep the hot loop free of per-dim channel lookups
       for (let t = 0; t < nTouched; t++) {
         const j = nbTouched[t]
         const P = nbP[j]
         nbP[j] = 1
         const q = 1 - P
+        const qL = q * gLR[j * 2]
+        const qR = q * gLR[j * 2 + 1]
         const bj = j * DIM
-        for (let d = 0; d < DIM; d++) W[bj + d] = W[bj + d] * P + featVec[d] * q
+        for (let ts = 0; ts < T_HIST; ts++) {
+          const o = ts * SLICE
+          for (let d = o; d < o + M; d++) W[bj + d] = W[bj + d] * P + featVec[d] * qL
+          for (let d = o + M; d < o + SLICE; d++) W[bj + d] = W[bj + d] * P + featVec[d] * qR
+        }
       }
       // flush deferred visual updates: exactly one recompute per changed cell.
       // Timed as one block - per-cell now() brackets cost more than the loop
@@ -1331,7 +1438,7 @@ export const FbSparseCortex = () => {
       return done
     } // end processHops
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coeffs, stats, selfTune, updateCellVisual, x1, x2, y1, y2, env2, hist, featVec, nzIdx, nzVal, recon, resid, act, W, thr, usage, drive, driveSorted, drive2, drive2Sorted, fired2, seeded, mature, heat, hTab, nbP, nbTouched, dirtyFlag, dirtyList])
+  }, [coeffs, stats, selfTune, updateCellVisual, x1, x2, y1, y2, env2, hist, featVec, nzIdx, nzVal, nzIdxR, nzValR, gLR, chanOf, recon, resid, act, W, thr, usage, drive, driveSorted, drive2, drive2Sorted, fired2, seeded, mature, heat, hTab, nbP, nbTouched, dirtyFlag, dirtyList])
 
   useFrame((_state, deltaTime) => {
     if (resetRef.current) {
