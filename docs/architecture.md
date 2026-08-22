@@ -28,8 +28,11 @@ app/                       # Next.js routes. Pages compose features; keep them t
 src/
   features/
     player/                # Playback domain
-      components/          #   audio-player, player-card, timeline-slider
+      components/          #   audio-player (selector) + single-/dual-element
+                           #   players + audio-player-shared, player-card,
+                           #   timeline-slider
       stores/              #   player-store
+      player-mode.ts       #   engine detection + player-choice setting
       index.ts             #   public API
     files/                 # Cloud-drive browsing + local cache domain
       components/          #   file-list, file-list-item, track-list
@@ -95,7 +98,7 @@ src/
 ## Audio pipeline
 
 ```text
-HTMLAudioElement (features/player/components/audio-player.tsx)
+HTMLAudioElement (features/player/components/single-|dual-element-audio-player.tsx)
   │  timeupdate (~4 Hz while playing; also fires on seek while paused)
   ▼
 createAudioAnalyser (src/lib/audio/audio-analyser.ts)
@@ -143,6 +146,52 @@ because it is a rare, user-initiated state change.
 
 ### Media Session (OS integration)
 
+#### Two players, selected by engine
+
+`AudioPlayer` (audio-player.tsx) is a thin selector: it resolves which player
+runs this launch — once, after mount, because the static prerender has no
+`navigator` — and renders it. The split exists because the engines impose
+**opposite** constraints on how a track handoff may touch audio elements. All
+of the following was established by reading the engines' sources after
+continuous background playback died on Android (2025-08); the app had not
+changed — the platform had.
+
+| Player | Engines | Constraint (source) |
+| --- | --- | --- |
+| `single-element-audio-player` — one `<audio>`, src swapped in place, `'ended'`-driven advance | WebKit (all iOS browsers + Safari), Gecko (Firefox), unknown engines (default) | WebKit: under lock, `processSystemWillSleep()` interrupts every media session **except** the audibly-playing one (`PlatformMediaSession.cpp`: `beginInterruption` + `shouldOverrideBackgroundPlaybackRestriction`), and a fresh session cannot start while locked — so the handoff must **continue the same element's exempted session**. Proven on iOS for over a year (through PR #67). The first user-gesture `play()` permanently unlocks the element (`HTMLMediaElement.cpp`: `removeBehaviorRestrictionsAfterFirstUserGesture`), so one element never needs re-priming. Gecko: the tab-level `MediaController` tears down on a deactivation **timer**, not per element (`MediaController.cpp`: `UpdateDeactivationTimerIfNeeded`), so the sub-second swap gap is bridged by design (source-verified; not yet device-verified). |
+| `dual-element-audio-player` — two `<audio>` take turns; pre-end pause handoff (`PRE_END_HANDOFF_SEC = 0.6`) | Blink (Chrome, Edge, every Chromium-based browser) | `'ended'` and `load()` **remove** the element's player from the page's media session (`media_session_controller.cc`: `OnPlaybackPaused(reached_end_of_stream)` → `AddOrRemovePlayer`); the moment the player set empties, Chrome abandons system audio focus (`media_session_impl.cc`: `AbandonSystemAudioFocusIfNeeded`). Android 15+ denies re-acquiring focus from the background (app is neither top-app nor a foreground service) and Android 12+ fades unfocused streams out ~2 s in — measured on device as playback dying right after an auto-advance during sleep. A plain `pause()` keeps the player registered and the focus held, so the player pauses **before** `'ended'` fires, starts the next track on the sibling element, and releases the retired element only after the new one plays (the set never empties). No gesture priming: Blink's autoplay policy is document-sticky (`autoplay_policy.cc`: `kDocumentUserActivationRequired`) and installed-PWA scope is exempt (`IsInWebAppScope`), so the second element needs no per-element unlock. |
+
+The single-element flow was *the* player for years. The 2025 combination of
+Android 15's focus rules and Chromium's removal semantics broke background
+auto-advance: each `load()` momentarily emptied the session's player set,
+focus was abandoned, and the background re-request was denied. Dual-element
+is therefore a Blink-specific countermeasure, not a general improvement — on
+WebKit it would *start a fresh, non-exempt session per track* and die under
+lock (measured before the split).
+
+**Engine detection** (`src/features/player/player-mode.ts`): UA tokens are
+useless — every engine froze its UA around `AppleWebKit/537.36`. Blink is
+detected through the channels the specs keep truthful: UA Client Hints
+brands contain a `"Chromium"` entry on every Chromium-based browser, with
+`navigator.vendor === "Google Inc."` as the fallback (spec-frozen; HTML spec,
+`system-state.html#dom-navigator-vendor`). The dual-element mechanism is an
+engine property — auto assigns it to desktop Blink too, harmlessly — but it
+is *necessary* only on Android, where the OS enforces focus.
+
+**Settings → Playback → "Audio player"** is the operational escape hatch
+(`"auto" | "single" | "dual"`, localStorage `audioPlayerMode`, default
+`auto`). Auto is resolved per launch and never pinned, so detection
+improvements reach existing users. The player is chosen once at launch, so
+committing a change *is* a reload: the dialog stages the choice and an
+explicit **Apply & Reload** commits it (the same grammar as the page's
+"Clear & Reload" / "Reset & Reload"; M3 confirmation-dialog form). No
+stored-but-not-running intermediate state can exist, and the app never
+reloads unannounced. The instant-effect radio dialogs (visualizer, picker
+mode) stay tap-to-apply — the commit ritual follows the commitment cost, not
+the widget.
+
+#### The metadata contract
+
 `navigator.mediaSession` is the channel to the OS media UI (lock screen, media
 notification). It carries two facts with different lifetimes, and each is
 written only when its fact changes — **deliberately as independent writes**
@@ -151,7 +200,7 @@ fiction anyway, since resume writes state without metadata):
 
 | Property | Fact | Written when |
 | --- | --- | --- |
-| `ms.metadata` | what track this is | **Exactly once per track change**, after `resolveArtworkUrl` settles. `undefined` then means *definitively no artwork* → placeholder image. Sole write point: `msSetTrackMetadata` (audio-player.tsx) |
+| `ms.metadata` | what track this is | **Exactly once per track change**, after `resolveArtworkUrl` settles. `undefined` then means *definitively no artwork* → placeholder image. Sole write point: `msSetTrackMetadata` (audio-player-shared.tsx) |
 | `ms.playbackState` | whether audio plays | Mirrors the element's real state: `play()` success → `"playing"`, pause branch → `"paused"` |
 
 Waiting for the artwork URL before the single metadata write is what fixes the
@@ -162,7 +211,21 @@ drops resolutions that finish after the user has already skipped on. Artwork
 URLs come from the shared per-image cache and are **never revoked here** (other
 consumers may hold the same URL); the resolver awaits the liveness probe so a
 registry-dead URL (iOS jetsam) is never handed to the OS. Action handlers
-(play/pause/next/prev/seekto) are registered once on mount.
+(play/pause/next/prev/seekto) are registered once on mount
+(audio-player-shared.tsx; the single player runs its Safari pause/load
+registration hack first).
+
+The single player follows the contract exactly. The dual player carries two
+deviations, frozen as device-verified (ablating them requires Android
+re-verification and is a separate task):
+
+- **Sync placeholder write at swap** (diagnostic E2b): metadata without
+  artwork + `"playing"` are written synchronously at the handoff, then the
+  one-shot artwork write follows. The OS shows title/artist immediately; the
+  cover fills in.
+- **Deferred `play()`** (E6): `play()` waits for `loadedmetadata` — Chrome
+  grants the full notification only to players with a known duration ≥ 5 s
+  (matches the reference player minht11/local-music-pwa).
 
 Accepted trade-off: for a few ms (artwork resolution latency: microtask when
 cached, one IndexedDB read on first sight) the OS may observe `"playing"` with
@@ -173,14 +236,17 @@ the previous track's metadata. The pre-fix code had the mirror-image window
 ```mermaid
 sequenceDiagram
     participant PS as PlayerStore
-    participant AP as AudioPlayer
+    participant AP as audio player (single or dual)
     participant AU as use-artwork-url (module cache)
     participant IDB as IndexedDB (artworks)
     participant MS as navigator.mediaSession (OS)
 
     note over PS,MS: Track change — metadata is written exactly once
     PS->>AP: activeTrack changed (new file id)
-    AP->>AP: swap source, audio.load(), audio.play()
+    AP->>AP: swap source (single: in place / dual: standby element), load(), play()
+    opt dual only (diagnostic E2b)
+        AP->>MS: metadata (no artwork) + playbackState, sync at swap
+    end
     AP->>MS: playbackState = "playing" (on play() success)
     AP->>AU: resolveArtworkUrl(artworkHash)
     alt no artworkHash (track has no artwork)
