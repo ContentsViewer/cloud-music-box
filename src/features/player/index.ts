@@ -4,3 +4,10 @@ export { AudioPlayer } from "./components/audio-player"
 export { PlayerCard } from "./components/player-card"
 export { PlayerStoreProvider, usePlayerStore } from "./stores/player-store"
 export type { AudioTrack } from "./stores/player-store"
+export {
+  getPlayerMode,
+  setPlayerMode,
+  detectPlayerKind,
+  resolvePlayerKind,
+} from "./player-mode"
+export type { PlayerMode, PlayerKind } from "./player-mode"

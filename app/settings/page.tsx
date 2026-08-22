@@ -14,6 +14,14 @@ import {
   setGooglePickerMode,
   useFileStore,
 } from "@/src/features/files"
+import {
+  getPlayerMode,
+  setPlayerMode,
+  detectPlayerKind,
+  resolvePlayerKind,
+  PlayerMode,
+  PlayerKind,
+} from "@/src/features/player"
 import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
@@ -45,7 +53,7 @@ import {
 } from "@mui/material"
 import Dialog from "@mui/material/Dialog"
 import DialogTitle from "@mui/material/DialogTitle"
-import { enqueueSnackbar } from "notistack"
+import { closeSnackbar, enqueueSnackbar } from "notistack"
 import { css } from "@emotion/react"
 import { useInstallPrompt } from "@/src/hooks/use-install-prompt"
 import {
@@ -290,6 +298,120 @@ function ScreenSettingsArea() {
   )
 }
 
+const playerKindLabel = (kind: PlayerKind) =>
+  kind === "dual" ? "Dual player" : "Single player"
+
+// Escape hatch for the engine-based player selection (misdetection, future
+// engine changes) — see src/features/player/player-mode.ts for the split.
+// The player is chosen once at launch, so an EFFECTIVE change prompts for a
+// reload (never forced: the user may be listening); a choice that resolves to
+// the already-running player applies silently.
+function PlaybackSettingsArea() {
+  const [themeStoreState] = useThemeStore()
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+  const colorPrimaryInverse = hexFromArgb(
+    MaterialDynamicColors.inversePrimary.getArgb(themeStoreState.scheme)
+  )
+  // localStorage and engine detection are client-only, so render the SSR
+  // default until mounted (same hydration guard as the other settings areas).
+  const [mounted, setMounted] = useState(false)
+  const [playerMode, setPlayerModeState] = useState<PlayerMode>("auto")
+  const [detectedKind, setDetectedKind] = useState<PlayerKind>("single")
+  const [dialogOpen, setDialogOpen] = useState(false)
+  // What this launch is running (resolved at mount, before any change here).
+  const runningKindRef = useRef<PlayerKind>("single")
+  useEffect(() => {
+    setMounted(true)
+    setPlayerModeState(getPlayerMode())
+    setDetectedKind(detectPlayerKind())
+    runningKindRef.current = resolvePlayerKind()
+  }, [])
+
+  const secondary = !mounted
+    ? "Auto"
+    : playerMode === "auto"
+      ? `Auto (${playerKindLabel(detectedKind)})`
+      : playerKindLabel(playerMode)
+
+  return (
+    <div
+      css={css({
+        display: "flex",
+        flexDirection: "column",
+        marginTop: "16px",
+      })}
+    >
+      <Typography variant="h6">Playback</Typography>
+      <List>
+        <ListItemButton onClick={() => setDialogOpen(true)}>
+          <ListItemText
+            primary="Audio player"
+            secondary={secondary}
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
+          />
+        </ListItemButton>
+      </List>
+      <SettingsRadioDialog
+        open={dialogOpen}
+        title="Audio player"
+        value={playerMode}
+        note="Changing this applies after the app reloads."
+        options={[
+          {
+            value: "auto",
+            label: "Auto (recommended)",
+            description: "Picks the right player for this browser.",
+          },
+          {
+            value: "single",
+            label: "Single player",
+            description:
+              "One player that switches tracks in place. The proven choice on iPhone, iPad, Safari and Firefox.",
+          },
+          {
+            value: "dual",
+            label: "Dual player",
+            description:
+              "Two players take turns so the next track starts reliably while the screen is off. For Chromium-based browsers such as Chrome and Edge.",
+          },
+        ]}
+        onClose={() => setDialogOpen(false)}
+        onSelect={next => {
+          const nextMode = next as PlayerMode
+          setPlayerModeState(nextMode)
+          setPlayerMode(nextMode)
+          setDialogOpen(false)
+          const effective = nextMode === "auto" ? detectedKind : nextMode
+          if (effective !== runningKindRef.current) {
+            enqueueSnackbar("The selected audio player starts after reload.", {
+              key: "player-mode-reload",
+              preventDuplicate: true,
+              persist: true,
+              action: () => (
+                <Button
+                  sx={{ color: colorPrimaryInverse }}
+                  onClick={() => window.location.reload()}
+                >
+                  Reload
+                </Button>
+              ),
+            })
+          } else {
+            // Changed back to what is already running - nothing to apply.
+            closeSnackbar("player-mode-reload")
+          }
+        }}
+      />
+    </div>
+  )
+}
+
 function PlaylistSettingsArea() {
   const [themeStoreState] = useThemeStore()
   const [playlistState] = usePlaylistStore()
@@ -431,6 +553,7 @@ function SettingsRadioDialog<T extends string>({
   title,
   value,
   options,
+  note,
   onClose,
   onSelect,
 }: {
@@ -438,6 +561,8 @@ function SettingsRadioDialog<T extends string>({
   title: string
   value: T
   options: SettingsRadioOption<T>[]
+  /** One supporting line under the options (e.g. "applies after reload"). */
+  note?: string
   onClose: () => void
   onSelect: (value: T) => void
 }) {
@@ -476,6 +601,11 @@ function SettingsRadioDialog<T extends string>({
             />
           ))}
         </RadioGroup>
+        {note ? (
+          <Typography variant="body2" sx={{ color: colorOnSurfaceVariant }}>
+            {note}
+          </Typography>
+        ) : null}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
@@ -765,6 +895,9 @@ function DiagnosticsSettingsArea() {
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
+  const colorSurfaceContainer = hexFromArgb(
+    MaterialDynamicColors.surfaceContainer.getArgb(themeStoreState.scheme)
+  )
 
   useEffect(() => {
     setNavEntries(readNavDiag().slice().reverse())
@@ -880,11 +1013,14 @@ function DiagnosticsSettingsArea() {
       </List>
       <Paper
         variant="outlined"
-        css={css({
+        sx={{
           maxHeight: 280,
           overflowY: "auto",
           borderRadius: "12px",
-        })}
+          // Same tonal surface as the About card: let the dynamic background
+          // show through instead of painting an opaque slab.
+          backgroundColor: alpha(colorSurfaceContainer, 0.5),
+        }}
       >
         <List dense>
           {navEntries.map(entry => {
@@ -1054,6 +1190,7 @@ export default function Page() {
           <AccountSettingsArea />
           <StorageSettingsArea />
           <ScreenSettingsArea />
+          <PlaybackSettingsArea />
           <PlaylistSettingsArea />
           <VisualizerSettingsArea />
           <DataSettingsArea />
