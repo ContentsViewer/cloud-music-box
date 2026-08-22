@@ -181,8 +181,14 @@ is *necessary* only on Android, where the OS enforces focus.
 **Settings → Playback → "Audio player"** is the operational escape hatch
 (`"auto" | "single" | "dual"`, localStorage `audioPlayerMode`, default
 `auto`). Auto is resolved per launch and never pinned, so detection
-improvements reach existing users. Changes apply on reload; the settings page
-prompts and never auto-reloads (the user may be listening).
+improvements reach existing users. The player is chosen once at launch, so
+committing a change *is* a reload: the dialog stages the choice and an
+explicit **Apply & Reload** commits it (the same grammar as the page's
+"Clear & Reload" / "Reset & Reload"; M3 confirmation-dialog form). No
+stored-but-not-running intermediate state can exist, and the app never
+reloads unannounced. The instant-effect radio dialogs (visualizer, picker
+mode) stay tap-to-apply — the commit ritual follows the commitment cost, not
+the widget.
 
 #### The metadata contract
 

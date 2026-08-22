@@ -19,8 +19,8 @@
 // persisted, so detection improvements reach existing users. The explicit
 // values are the operational escape hatch (a browser hiding userAgentData,
 // future engine changes). Same plain-localStorage pattern as
-// GooglePickerMode: read once by the selector at mount; changes apply on
-// reload (the settings page prompts for it).
+// GooglePickerMode: read once by the selector at mount; a change commits by
+// reloading (the settings dialog's explicit "Apply & Reload").
 
 const DB_KEY_PLAYER_MODE = "audioPlayerMode"
 

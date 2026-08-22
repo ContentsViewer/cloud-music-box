@@ -18,7 +18,6 @@ import {
   getPlayerMode,
   setPlayerMode,
   detectPlayerKind,
-  resolvePlayerKind,
   PlayerMode,
   PlayerKind,
 } from "@/src/features/player"
@@ -53,7 +52,7 @@ import {
 } from "@mui/material"
 import Dialog from "@mui/material/Dialog"
 import DialogTitle from "@mui/material/DialogTitle"
-import { closeSnackbar, enqueueSnackbar } from "notistack"
+import { enqueueSnackbar } from "notistack"
 import { css } from "@emotion/react"
 import { useInstallPrompt } from "@/src/hooks/use-install-prompt"
 import {
@@ -303,16 +302,14 @@ const playerKindLabel = (kind: PlayerKind) =>
 
 // Escape hatch for the engine-based player selection (misdetection, future
 // engine changes) — see src/features/player/player-mode.ts for the split.
-// The player is chosen once at launch, so an EFFECTIVE change prompts for a
-// reload (never forced: the user may be listening); a choice that resolves to
-// the already-running player applies silently.
+// The player is chosen once at launch, so committing a change IS a reload:
+// the dialog stages the choice and "Apply & Reload" commits it. No
+// stored-but-not-running intermediate state can exist, and the app never
+// reloads unannounced (the cost is on the button label).
 function PlaybackSettingsArea() {
   const [themeStoreState] = useThemeStore()
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
-  )
-  const colorPrimaryInverse = hexFromArgb(
-    MaterialDynamicColors.inversePrimary.getArgb(themeStoreState.scheme)
   )
   // localStorage and engine detection are client-only, so render the SSR
   // default until mounted (same hydration guard as the other settings areas).
@@ -320,13 +317,10 @@ function PlaybackSettingsArea() {
   const [playerMode, setPlayerModeState] = useState<PlayerMode>("auto")
   const [detectedKind, setDetectedKind] = useState<PlayerKind>("single")
   const [dialogOpen, setDialogOpen] = useState(false)
-  // What this launch is running (resolved at mount, before any change here).
-  const runningKindRef = useRef<PlayerKind>("single")
   useEffect(() => {
     setMounted(true)
     setPlayerModeState(getPlayerMode())
     setDetectedKind(detectPlayerKind())
-    runningKindRef.current = resolvePlayerKind()
   }, [])
 
   const secondary = !mounted
@@ -361,7 +355,7 @@ function PlaybackSettingsArea() {
         open={dialogOpen}
         title="Audio player"
         value={playerMode}
-        note="Changing this applies after the app reloads."
+        confirmLabel="Apply & Reload"
         options={[
           {
             value: "auto",
@@ -383,29 +377,8 @@ function PlaybackSettingsArea() {
         ]}
         onClose={() => setDialogOpen(false)}
         onSelect={next => {
-          const nextMode = next as PlayerMode
-          setPlayerModeState(nextMode)
-          setPlayerMode(nextMode)
-          setDialogOpen(false)
-          const effective = nextMode === "auto" ? detectedKind : nextMode
-          if (effective !== runningKindRef.current) {
-            enqueueSnackbar("The selected audio player starts after reload.", {
-              key: "player-mode-reload",
-              preventDuplicate: true,
-              persist: true,
-              action: () => (
-                <Button
-                  sx={{ color: colorPrimaryInverse }}
-                  onClick={() => window.location.reload()}
-                >
-                  Reload
-                </Button>
-              ),
-            })
-          } else {
-            // Changed back to what is already running - nothing to apply.
-            closeSnackbar("player-mode-reload")
-          }
+          setPlayerMode(next as PlayerMode)
+          window.location.reload()
         }}
       />
     </div>
@@ -542,18 +515,25 @@ interface SettingsRadioOption<T extends string> {
   description: string
 }
 
-// The Android ListPreference pattern (per MD3 / Android settings guidance):
-// the list row shows only the current value; this dialog shows every option
-// with its description so the trade-offs can be compared before choosing.
-// Tapping a radio applies immediately and closes - there is no staged choice,
-// so the only button is Cancel (the explicit close affordance on touch,
-// where ESC does not exist and the back gesture is history navigation).
+// Selection dialog with two commit modes, split by commitment cost:
+//   - Instant-effect settings (no confirmLabel): tapping a radio applies and
+//     closes (the Android ListPreference behavior). Cancel is the explicit
+//     close affordance on touch, where ESC does not exist and the back
+//     gesture is history navigation.
+//   - Costly commits (confirmLabel set, e.g. "Apply & Reload"): tapping only
+//     stages the choice; the confirm button - disabled until the choice
+//     differs from the current value - commits it. This is the M3
+//     confirmation-dialog form (select, then confirm; the button label says
+//     what happens next) and matches the app's grammar for reload-bearing
+//     actions ("Clear & Reload", "Reset & Reload").
+// Either way the list row shows only the current value; the dialog shows
+// every option with its description so trade-offs can be compared.
 function SettingsRadioDialog<T extends string>({
   open,
   title,
   value,
   options,
-  note,
+  confirmLabel,
   onClose,
   onSelect,
 }: {
@@ -561,8 +541,8 @@ function SettingsRadioDialog<T extends string>({
   title: string
   value: T
   options: SettingsRadioOption<T>[]
-  /** One supporting line under the options (e.g. "applies after reload"). */
-  note?: string
+  /** Confirm-button label; when set, the selection is staged until confirmed. */
+  confirmLabel?: string
   onClose: () => void
   onSelect: (value: T) => void
 }) {
@@ -570,6 +550,12 @@ function SettingsRadioDialog<T extends string>({
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
+  // Staged mode keeps the choice local until confirmed; re-opening starts
+  // from the current value again.
+  const [staged, setStaged] = useState<T>(value)
+  useEffect(() => {
+    if (open) setStaged(value)
+  }, [open, value])
 
   return (
     <Dialog open={open} onClose={onClose}>
@@ -578,8 +564,12 @@ function SettingsRadioDialog<T extends string>({
           deliberately keeps less bottom padding than the MD3 default. */}
       <DialogContent sx={{ paddingBottom: "8px" }}>
         <RadioGroup
-          value={value}
-          onChange={event => onSelect(event.target.value as T)}
+          value={confirmLabel ? staged : value}
+          onChange={event =>
+            confirmLabel
+              ? setStaged(event.target.value as T)
+              : onSelect(event.target.value as T)
+          }
         >
           {options.map(option => (
             <FormControlLabel
@@ -601,14 +591,17 @@ function SettingsRadioDialog<T extends string>({
             />
           ))}
         </RadioGroup>
-        {note ? (
-          <Typography variant="body2" sx={{ color: colorOnSurfaceVariant }}>
-            {note}
-          </Typography>
-        ) : null}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
+        {confirmLabel ? (
+          <Button
+            disabled={staged === value}
+            onClick={() => onSelect(staged)}
+          >
+            {confirmLabel}
+          </Button>
+        ) : null}
       </DialogActions>
     </Dialog>
   )

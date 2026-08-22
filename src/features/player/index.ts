@@ -8,6 +8,5 @@ export {
   getPlayerMode,
   setPlayerMode,
   detectPlayerKind,
-  resolvePlayerKind,
 } from "./player-mode"
 export type { PlayerMode, PlayerKind } from "./player-mode"
