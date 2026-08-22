@@ -66,9 +66,10 @@ export const AudioPlayer = () => {
   // (no top-app, no foreground service), and Android 12+ then fades the
   // unfocused stream out ~2 s into the next track. An ended-but-untouched
   // element, however, stays REGISTERED (the session merely suspends and
-  // keeps holding focus). So: never touch the element that just ended -
-  // start the next track on the OTHER element, and reclaim the old one only
-  // two tracks later, when its sibling keeps the session populated.
+  // keeps holding focus). So: never touch the element being retired - start
+  // the next track on the OTHER element, and release the retired one only
+  // AFTER the new one is playing (its sibling then keeps the session
+  // populated, so the removal cannot empty it).
   const audioARef = useRef<HTMLAudioElement>(null)
   const sourceARef = useRef<HTMLSourceElement>(null)
   const audioBRef = useRef<HTMLAudioElement>(null)
@@ -78,9 +79,42 @@ export const AudioPlayer = () => {
   const audioAnalyser = useMemo(() => createAudioAnalyser(), [])
 
   const activeAudioTrackRef = useRef<AudioTrack | null>(null)
+  // The element retired by the last handoff; released once the new one plays.
+  const retiredRef = useRef<{
+    audio: HTMLAudioElement
+    source: HTMLSourceElement
+  } | null>(null)
 
   const getActiveAudio = () =>
     activeIdxRef.current === 0 ? audioARef.current : audioBRef.current
+
+  // [Gesture priming] WebKit's playback restrictions are PER ELEMENT and are
+  // lifted when load()/play() runs inside a user gesture (HTMLMediaElement::
+  // prepareForLoad / play -> removeBehaviorRestrictionsAfterFirstUserGesture).
+  // Blink's fallback per-element autoplay policy unlocks through load() the
+  // same way (TryUnlockingUserGesture). The first tap therefore load()s BOTH
+  // elements while they are still empty - without this, iOS rejects the
+  // second element's first programmatic play() with NotAllowedError
+  // (measured on device: first auto-advance in the foreground failed).
+  useEffect(() => {
+    const prime = () => {
+      for (const [audio, source] of [
+        [audioARef.current, sourceARef.current],
+        [audioBRef.current, sourceBRef.current],
+      ] as const) {
+        if (audio && source && !source.src) audio.load()
+      }
+      document.removeEventListener("click", prime, true)
+      document.removeEventListener("touchend", prime, true)
+      console.log("Audio elements primed by first gesture")
+    }
+    document.addEventListener("click", prime, true)
+    document.addEventListener("touchend", prime, true)
+    return () => {
+      document.removeEventListener("click", prime, true)
+      document.removeEventListener("touchend", prime, true)
+    }
+  }, [])
 
   useEffect(() => {
     const audioA = audioARef.current
@@ -207,12 +241,19 @@ export const AudioPlayer = () => {
       // A plain pause keeps it registered in the media session, so the
       // focus bridge stays intact. (Auto-advance already paused it in the
       // pre-end handoff.)
-      getActiveAudio()?.pause()
+      const retiredAudio = getActiveAudio()
+      const retiredSource =
+        activeIdxRef.current === 0 ? sourceARef.current : sourceBRef.current
+      retiredAudio?.pause()
+      retiredRef.current =
+        retiredAudio && retiredSource
+          ? { audio: retiredAudio, source: retiredSource }
+          : null
 
       // [R1] load the next track into the STANDBY element and swap roles;
-      // the outgoing element is otherwise left completely untouched (see the
-      // comment at the refs). Its object URL from two tracks ago is revoked
-      // only here, when the element is reclaimed.
+      // the outgoing element is otherwise left untouched until the new one
+      // plays (see the comment at the refs). The previousSrc revoke below is
+      // a fallback for handoffs whose release never ran (e.g. play errors).
       const standbyIdx = activeIdxRef.current === 0 ? 1 : 0
       const standbyAudio = standbyIdx === 0 ? audioARef.current : audioBRef.current
       const standbySource =
@@ -281,6 +322,22 @@ export const AudioPlayer = () => {
       .then(() => {
         console.log("Played")
         msSetPlaybackState("playing")
+        // Release the retired element once the handoff succeeded. iOS's Now
+        // Playing otherwise keeps tracking the lingering paused element
+        // (measured: stale/laggy lock-screen info), and the old blob URL can
+        // be freed. Safe for the Android focus bridge: the NEW element is
+        // playing and registered at this point, so removing the retired
+        // player cannot empty the media session.
+        const retired = retiredRef.current
+        if (retired && retired.audio !== audio) {
+          const oldSrc = retired.source.src
+          retired.source.removeAttribute("src")
+          retired.source.removeAttribute("type")
+          retired.audio.load()
+          if (oldSrc) URL.revokeObjectURL(oldSrc)
+          retiredRef.current = null
+          console.log("Retired element released")
+        }
         const blob = activeTrack?.blob
         if (!blob) return
         audioAnalyser.setBuffer(blob)
