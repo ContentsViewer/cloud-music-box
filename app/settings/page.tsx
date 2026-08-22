@@ -14,6 +14,13 @@ import {
   setGooglePickerMode,
   useFileStore,
 } from "@/src/features/files"
+import {
+  getPlayerMode,
+  setPlayerMode,
+  detectPlayerKind,
+  PlayerMode,
+  PlayerKind,
+} from "@/src/features/player"
 import { useThemeStore } from "@/src/stores/theme-store"
 import {
   MaterialDynamicColors,
@@ -290,6 +297,94 @@ function ScreenSettingsArea() {
   )
 }
 
+const playerKindLabel = (kind: PlayerKind) =>
+  kind === "dual" ? "Dual player" : "Single player"
+
+// Escape hatch for the engine-based player selection (misdetection, future
+// engine changes) — see src/features/player/player-mode.ts for the split.
+// The player is chosen once at launch, so committing a change IS a reload:
+// the dialog stages the choice and "Apply & Reload" commits it. No
+// stored-but-not-running intermediate state can exist, and the app never
+// reloads unannounced (the cost is on the button label).
+function PlaybackSettingsArea() {
+  const [themeStoreState] = useThemeStore()
+  const colorOnSurfaceVariant = hexFromArgb(
+    MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
+  )
+  // localStorage and engine detection are client-only, so render the SSR
+  // default until mounted (same hydration guard as the other settings areas).
+  const [mounted, setMounted] = useState(false)
+  const [playerMode, setPlayerModeState] = useState<PlayerMode>("auto")
+  const [detectedKind, setDetectedKind] = useState<PlayerKind>("single")
+  const [dialogOpen, setDialogOpen] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+    setPlayerModeState(getPlayerMode())
+    setDetectedKind(detectPlayerKind())
+  }, [])
+
+  const secondary = !mounted
+    ? "Auto"
+    : playerMode === "auto"
+      ? `Auto (${playerKindLabel(detectedKind)})`
+      : playerKindLabel(playerMode)
+
+  return (
+    <div
+      css={css({
+        display: "flex",
+        flexDirection: "column",
+        marginTop: "16px",
+      })}
+    >
+      <Typography variant="h6">Playback</Typography>
+      <List>
+        <ListItemButton onClick={() => setDialogOpen(true)}>
+          <ListItemText
+            primary="Audio player"
+            secondary={secondary}
+            secondaryTypographyProps={{
+              sx: {
+                color: colorOnSurfaceVariant,
+              },
+            }}
+          />
+        </ListItemButton>
+      </List>
+      <SettingsRadioDialog
+        open={dialogOpen}
+        title="Audio player"
+        value={playerMode}
+        confirmLabel="Apply & Reload"
+        options={[
+          {
+            value: "auto",
+            label: "Auto (recommended)",
+            description: "Picks the right player for this browser.",
+          },
+          {
+            value: "single",
+            label: "Single player",
+            description:
+              "One player that switches tracks in place. The proven choice on iPhone, iPad, Safari and Firefox.",
+          },
+          {
+            value: "dual",
+            label: "Dual player",
+            description:
+              "Two players take turns so the next track starts reliably while the screen is off. For Chromium-based browsers such as Chrome and Edge.",
+          },
+        ]}
+        onClose={() => setDialogOpen(false)}
+        onSelect={next => {
+          setPlayerMode(next as PlayerMode)
+          window.location.reload()
+        }}
+      />
+    </div>
+  )
+}
+
 function PlaylistSettingsArea() {
   const [themeStoreState] = useThemeStore()
   const [playlistState] = usePlaylistStore()
@@ -420,17 +515,25 @@ interface SettingsRadioOption<T extends string> {
   description: string
 }
 
-// The Android ListPreference pattern (per MD3 / Android settings guidance):
-// the list row shows only the current value; this dialog shows every option
-// with its description so the trade-offs can be compared before choosing.
-// Tapping a radio applies immediately and closes - there is no staged choice,
-// so the only button is Cancel (the explicit close affordance on touch,
-// where ESC does not exist and the back gesture is history navigation).
+// Selection dialog with two commit modes, split by commitment cost:
+//   - Instant-effect settings (no confirmLabel): tapping a radio applies and
+//     closes (the Android ListPreference behavior). Cancel is the explicit
+//     close affordance on touch, where ESC does not exist and the back
+//     gesture is history navigation.
+//   - Costly commits (confirmLabel set, e.g. "Apply & Reload"): tapping only
+//     stages the choice; the confirm button - disabled until the choice
+//     differs from the current value - commits it. This is the M3
+//     confirmation-dialog form (select, then confirm; the button label says
+//     what happens next) and matches the app's grammar for reload-bearing
+//     actions ("Clear & Reload", "Reset & Reload").
+// Either way the list row shows only the current value; the dialog shows
+// every option with its description so trade-offs can be compared.
 function SettingsRadioDialog<T extends string>({
   open,
   title,
   value,
   options,
+  confirmLabel,
   onClose,
   onSelect,
 }: {
@@ -438,6 +541,8 @@ function SettingsRadioDialog<T extends string>({
   title: string
   value: T
   options: SettingsRadioOption<T>[]
+  /** Confirm-button label; when set, the selection is staged until confirmed. */
+  confirmLabel?: string
   onClose: () => void
   onSelect: (value: T) => void
 }) {
@@ -445,6 +550,12 @@ function SettingsRadioDialog<T extends string>({
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
+  // Staged mode keeps the choice local until confirmed; re-opening starts
+  // from the current value again.
+  const [staged, setStaged] = useState<T>(value)
+  useEffect(() => {
+    if (open) setStaged(value)
+  }, [open, value])
 
   return (
     <Dialog open={open} onClose={onClose}>
@@ -453,8 +564,12 @@ function SettingsRadioDialog<T extends string>({
           deliberately keeps less bottom padding than the MD3 default. */}
       <DialogContent sx={{ paddingBottom: "8px" }}>
         <RadioGroup
-          value={value}
-          onChange={event => onSelect(event.target.value as T)}
+          value={confirmLabel ? staged : value}
+          onChange={event =>
+            confirmLabel
+              ? setStaged(event.target.value as T)
+              : onSelect(event.target.value as T)
+          }
         >
           {options.map(option => (
             <FormControlLabel
@@ -479,6 +594,14 @@ function SettingsRadioDialog<T extends string>({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
+        {confirmLabel ? (
+          <Button
+            disabled={staged === value}
+            onClick={() => onSelect(staged)}
+          >
+            {confirmLabel}
+          </Button>
+        ) : null}
       </DialogActions>
     </Dialog>
   )
@@ -765,6 +888,9 @@ function DiagnosticsSettingsArea() {
   const colorOnSurfaceVariant = hexFromArgb(
     MaterialDynamicColors.onSurfaceVariant.getArgb(themeStoreState.scheme)
   )
+  const colorSurfaceContainer = hexFromArgb(
+    MaterialDynamicColors.surfaceContainer.getArgb(themeStoreState.scheme)
+  )
 
   useEffect(() => {
     setNavEntries(readNavDiag().slice().reverse())
@@ -880,11 +1006,14 @@ function DiagnosticsSettingsArea() {
       </List>
       <Paper
         variant="outlined"
-        css={css({
+        sx={{
           maxHeight: 280,
           overflowY: "auto",
           borderRadius: "12px",
-        })}
+          // Same tonal surface as the About card: let the dynamic background
+          // show through instead of painting an opaque slab.
+          backgroundColor: alpha(colorSurfaceContainer, 0.5),
+        }}
       >
         <List dense>
           {navEntries.map(entry => {
@@ -1054,6 +1183,7 @@ export default function Page() {
           <AccountSettingsArea />
           <StorageSettingsArea />
           <ScreenSettingsArea />
+          <PlaybackSettingsArea />
           <PlaylistSettingsArea />
           <VisualizerSettingsArea />
           <DataSettingsArea />
