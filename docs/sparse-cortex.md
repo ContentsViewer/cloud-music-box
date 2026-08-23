@@ -242,21 +242,31 @@ display never showed W's channel structure (it always consumed W mono-summed
 per band), so no visual information was lost — and W memory halves, forward
 gets ~2× cheaper.
 
-**Coefficient curves** (gamma family, user-proposed; no piecewise plateau),
-orthogonalized as center response `C = wL+wR` and side response `D = wL−wR`:
+**Coefficient curves** (rev. 08-23b: ONE gamma ramp + plateau). The first
+attempt used two gammas on the C/D rotation (`C=1−|t|^γC`, `D=−2sign·|t|^γD`)
+and was **rejected as uncontrollable**: whenever the exponents differed, the
+own-side weight `(C+D)/2` grew an interior hump (rates of C's fall and D's
+rise crossing over), γC unexpectedly moved hard-pan anchors, and γC=6 let
+compressed opposite-channel bleed win mid-field. The revision applies one
+gamma ramp to wL/wR **directly** on the plateau-normalized position:
 
 ```text
-C(t) = 1 − |t|^GAMMA_C            aL=aR content: 1 at center → 0 at the edges
-D(t) = −2·sign(t)·|t|^GAMMA_D     L−R content; gamma<1 saturates near the edges
-wL = (C+D)/2,  wR = (C−D)/2       (GAMMA_C = 2, GAMMA_D = 0.5)
+s = clamp(|t| / PAN_EDGE, 0, 1)      r = s^PAN_GAMMA
+w_own = 0.5 + 0.5·r                  0.5 center → 1.0 plateau, monotone
+w_opp = 0.5 − 1.5·r                  0.5 center → −1.0 plateau, monotone
+(PAN_GAMMA = 1, PAN_EDGE = 0.75)
 ```
 
-The endpoints hold for ANY gamma (`C(±1)=0`, `|D(±1)|=2`), so the gammas only
-shape the interior; the `GAMMA_D<1` saturation replaces the old `PAN_EDGE`
-plateau smoothly (PAN_DEPTH/PAN_LAW/PAN_EDGE all retired). The single live
-knob `selfTune.pan` is the prior-strength homotopy `C_p=(1−p)+p·C, D_p=p·D`:
-0 = every column `(1/2,1/2)` uniform mono (verified exact), 1 = design
-(default).
+Both weights are monotone toward the edges for EVERY gamma (own response
+`(1+s^γ)/2` — hump impossible by construction). Derived: center content hears
+`1 − s^γ`; the opposite-channel subtraction starts at `s = (1/3)^(1/γ)`.
+The **plateau** (|t| ≥ 0.75, 8 columns/side, all exactly `(1,−1)`) is the
+v2-era rule restored deliberately: a hard-panned source has no single best
+border column, so cooperation + IP settle its cluster inside the band where a
+full neighborhood fits (8 ≥ 2×NB_RAD; anchoring at the lattice border clips
+the cooperation neighborhood and crushes the cluster). The single live knob
+`selfTune.pan` is the prior-strength homotopy `w = (1−p)·0.5 + p·w_design`:
+0 = every column `(1/2,1/2)` uniform mono (verified exact), 1 = design.
 
 **Wiring (the seven consumption points).** forward / self-mask target /
 cooperation target / round-2 read the column's `v`; the residual is consumed
@@ -269,16 +279,20 @@ recon/resid account stays in the shared [L|R] space** via the analysis
 adjoint (each fired atom synthesized back as `a·(wL·W | wR·W)`; wR<0 columns
 contribute signed entries; alpha/resid formulas unchanged).
 
-**Measured verdict (2026-08-23, pan=1, deterministic seed):**
+**Measured verdict (2026-08-23, single-gamma+plateau, pan=1, γ=1,
+deterministic seed):**
 
-- 3-tone coprime regression (~105 s): solo winner mean u = **−0.578 / 0.012 /
-  +0.574**, zones 81/19/0, 0.6/**98.6**/0.6, 1/16/82 %. Center content truly
-  anchors (v2: ~uniform 27/26/29). **Simultaneous hard-L + hard-R now SPLITS
-  to both edges** (zones 43/25/43 %) — v2's accepted goniometer trade is
-  resolved for spectrally distinct sources.
+- 3-tone coprime regression (~105 s): solo winner mean u = **−0.749 / −0.013 /
+  +0.777** — hard pans sit ON the ±0.75 anchors (v2 parity), center 98.9 %.
+  **Plateau works as designed**: solo winner-column modes at col 6 / 32 / 59 —
+  inside the 8-column bands, NOT pinned at the border (extreme columns 0,1,62,63
+  carry only 12–13 %), so hard-pan clusters keep full cooperation
+  neighborhoods. **Simultaneous hard-L + hard-R splits to both sides**
+  (zones 58/8/34 %) — v2's accepted goniometer trade stays resolved for
+  spectrally distinct sources.
 - Overwrite stress (center +10 dB simultaneous, 60 s): edge-weight cosine vs
-  solo signatures — left [own **0.856**, center 0.407], right [own **0.859**,
-  center 0.492]. Edge identities survive a +10 dB center (impossible under
+  solo signatures — left [own **0.820**, center 0.211], right [own **0.829**,
+  center 0.265]. Edge identities survive a +10 dB center (impossible under
   any nonnegative channel-gain law).
 - Same-band L/R-independent pair (210/230 Hz): solos anchor (−0.608/+0.595);
   the simultaneous phase reads 98 % center — the known LEVEL-DOMAIN limit
@@ -292,12 +306,14 @@ contribute signed entries; alpha/resid formulas unchanged).
   distribution measurement on real material (Stage 1.5) + the user's visual
   review.
 - pan=0: `colW ≡ (0.5, 0.5)` exactly; winner zones lose positional structure.
-- Timings: tForward **1.62–2.30 ms** (~30–40 % below the v2/v3 measurements —
-  the halved atom dims), tLearn 2.44–3.07 (neutral), tInput unchanged.
+- Timings: tForward **1.47–2.30 ms** (~30–40 % below the v2/v3 measurements —
+  the halved atom dims), tLearn 1.88–3.07 (neutral or better), tInput
+  unchanged.
 - Deliberate trades: mono / center-only material concentrates in the center
   columns (the old "mono heard identically everywhere" invariant is gone —
-  honest pan axis); hard-pan anchoring now rides the wL sweep (edge 1 vs
-  center 1/2 = a 2× gradient, stronger than v2's 1.125×).
+  honest pan axis); the hard-pan anchor gradient is the wL ramp (center 1/2 →
+  plateau 1, i.e. 2×, stronger than v2's 1.125×), terminating in the flat
+  plateau band rather than a border peak.
 
 ### Support systems
 
