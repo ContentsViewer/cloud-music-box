@@ -16,7 +16,10 @@ import { Hct } from "@material/material-color-utilities"
 //                      stacked as-is (384 dims, non-negative). Attack/decay/
 //                      vibrato/panning are not detected as features - they are
 //                      simply present in the window as raw data. Only compression
-//                      and lateral inhibition (generic cochlear nonlinearities).
+//                      and lateral inhibition (generic cochlear nonlinearities),
+//                      plus a per-COLUMN virtual-mic mix (GAMMA_C block): every
+//                      column hears its own mono L/R mix, sweeping from the
+//                      side signal L-R (left edge) to R-L (right edge).
 //     [INTERPRETATION] topographic sparse-coding map (N=4096 cells)
 //                      = k-WTA sparse firing + additive-reconstruction residual
 //                      learning + neighborhood cooperation + IP homeostasis.
@@ -36,11 +39,15 @@ const M = 32 // number of bands
 const T_HIST = 6 // time slices per patch
 const HOP_SEC = 0.02 // slice interval (~20 ms -> patch length ~120 ms)
 const SLICE = M * 2 // one slice = [L(32) | R(32)]
-const DIM = SLICE * T_HIST // 384
+const DIM = SLICE * T_HIST // 384 - the shared input space (featVec, recon, resid)
+// The mono VIEW space: cells hear their column's virtual-mic mix, so their
+// atoms are band-time templates without channel halves (see the stereo block)
+const DIMV = M * T_HIST // 192
 const F_LO = 45 // lower bound (~ lowest 4-string bass range E1+ / captures kick body)
 const F_HI = 16000
 const Q = 5.0
 const COMPRESS = 0.3 // cochlear-style compression
+const COMPRESS_E = COMPRESS / 2 // energy-domain exponent: E^(C/2) == amplitude^C
 // Envelopes use per-band leaky integration (cochlear-style): instead of a fixed
 // window, each band smooths y^2 with a time constant of TAU_CYCLES periods of its
 // own center frequency. Low bands = long window (removes flutter), high = short.
@@ -61,6 +68,55 @@ const MAX_HOPS_FRAME = 2 // max hops consumed per frame (protects the frame budg
 // 4+ causes bursty frame drops (measured 51 fps).
 const SHARP = 0.6 // lateral inhibition (subtract the mean floor); stops the shared floor making all patches alike
 const LOUD_FLOOR = 0.3 // input energy floor (no learning or seeding on silence / very quiet input)
+
+// === stereo-position prior ===
+// Third synesthetic axis: x = pan (alongside y = pitch, hue = pitch class),
+// realized as a VIRTUAL-MIC ARRAY in the ENERGY domain: every column is one
+// microphone angle on the unit circle, (wL, wR) = (cos th, sin th), hearing
+// the true mic energy per band
+//   E_col = wL^2*eL + wR^2*eR + 2*wL*wR*eLR       (raw, uncompressed)
+//   v_col = E_col^(COMPRESS/2)                    (feature units = amp^0.3)
+// The cross envelope eLR (see envX) carries the inter-channel correlation -
+// the cue every earlier level-only attempt was blind to:
+//  - CORRELATED content (true center / amplitude pans, eLR ~ sqrt(eL*eR)):
+//    E collapses to (wL*sqrt(eL) + wR*sqrt(eR))^2 - the amplitude matched
+//    filter: the source peaks at the column whose angle matches its pan, and
+//    the edge mics (wL*wR < 0) suppress dead-center content by 71 %.
+//  - DECORRELATED width (eLR ~ 0; most of a real mix - measured: only 18 %
+//    of an orchestral track's energy is correlated): heard at
+//    wL^2*eL + wR^2*eR. Balanced width TIES across all columns (unit-circle
+//    normalization = equal decorrelated power everywhere), leaning width
+//    anchors by its lean.
+//  - Levels are compared UNCOMPRESSED (a -12 dB lean is 16:1 here vs 1.5:1
+//    after the ^0.3 feature compression), so gentle pans finally register.
+// This dissolves the v2 fairness-vs-anchoring dilemma: anchoring comes from
+// correlation and lean, not gain disparity. The failed level-only families
+// (nonneg channel gains <= 3 dB; compressed-amplitude mixes blind to 96 % of
+// the material) are documented in docs (E).
+//
+// Angle sweep: th = 45deg + tau*67.5deg, tau in [-1,1] from the ramp below.
+// Center = 45deg (mono, equal power). Edges = -22.5deg/112.5deg = "own
+// channel minus a bit of the other". The pure-difference endpoint (-45deg)
+// was deliberately NOT chosen: |L-R| energy is left/right symmetric, so
+// difference mics are lean-blind and both edges would hear identical
+// material; -22.5deg trades 29 % dead-center leakage for a full lateral
+// identity (lean sensitivity cos(2th) = 0.707 at the edge).
+const PAN_GAMMA = 6 // ramp shape: <1 = sides grow from near the center, >1 = center-heavy
+// Inner plateau: every column with |t| <= PAN_IN is EXACTLY the center mic
+// (45deg), so dead-center content has no single best column - winners spread
+// across the tie-band instead of stacking on a response peak (k-WTA is a
+// global contest and positional drive gradients dwarf what IP can level:
+// THR_MAX 0.3 << the drive scale; measured 86 % of winners in cols 24-39).
+const PAN_IN = 0
+// Edge plateau: beyond +-PAN_EDGE every column is the SAME edge mic, so a
+// hard-panned cluster settles inside the band with a full cooperation
+// neighborhood instead of being clipped at the lattice border (v2 finding).
+const PAN_EDGE = 1.0
+// The single live knob (selfTune.pan) scales tau: 0 = every column the
+// 45deg mono mic (uniform, clean A/B), 1 = the full sweep (default).
+const PAN_STRENGTH = 1
+
+// ===
 
 // --- INTERPRETATION layer parameters ---
 const G = 64 // G x G lattice
@@ -186,7 +242,6 @@ const P_TRAIL_DIM = 0.14
 const P_LIFE = 3.2
 // Data-derived seeding (initialization): all cells batch-initialized from the first real input + jitter (classic SOM style)
 const SEED_JITTER = 0.04
-const SEED_MIX = 0.7
 const MATURE_RATE = 0.05
 // [Hemisphere mapping] The disk mapping removes the lattice's straight edges and
 // corners; the lattice is then treated as an orthographic view of a unit
@@ -562,6 +617,16 @@ export const FbSparseCortex = () => {
   const y1 = useMemo(() => new Float32Array(M * 2), [])
   const y2 = useMemo(() => new Float32Array(M * 2), [])
   const env2 = useMemo(() => new Float32Array(M * 2), []) // per-band leaky integration of y^2 (L/R)
+  // per-band leaky CROSS envelope E[yL*yR] (same time constant as env2): the
+  // inter-channel correlation - the information a level-only percept discards.
+  // The energy of a true virtual mic wL*L + wR*R is
+  //   E_col = wL^2*eL + wR^2*eR + 2*wL*wR*eLR
+  // whose cross term cancels CORRELATED content exactly where wL*wR < 0
+  // (same waveform both sides -> eLR = eL = eR -> the edge mic (1,-1) hears 0)
+  // while DECORRELATED equal-level width (eLR ~ 0) passes to its side - and it
+  // compares UNCOMPRESSED energies, so level leans survive. Measured first
+  // (Stage 1.5), wired second.
+  const envX = useMemo(() => new Float32Array(M), [])
   const ringRef = useRef({ filled: 0 })
   // patch history (ring of T_HIST slices) -> feature x
   const hist = useMemo(() => new Float32Array(DIM), [])
@@ -571,10 +636,27 @@ export const FbSparseCortex = () => {
   const recon = useMemo(() => new Float32Array(DIM), [])
   const resid = useMemo(() => new Float32Array(DIM), [])
   const act = useMemo(() => new Float32Array(N), [])
-  // compacted non-zero features (lateral inhibition zeroes many dims; the forward
-  // pass skips them - adding a zero term is an exact identity)
-  const nzIdx = useMemo(() => new Uint16Array(DIM), [])
-  const nzVal = useMemo(() => new Float32Array(DIM), [])
+  // compacted non-zero VIEW dims (lateral inhibition zeroes many bands; the
+  // forward pass skips them - a band pair is live if either channel is)
+  const nzIdx = useMemo(() => new Uint16Array(DIMV), [])
+  // [stereo-position prior] per-column mix coefficients [wL, wR] (see the
+  // GAMMA_C block; columns share u so G rows replace any per-cell table)
+  const colW = useMemo(() => new Float32Array(G * 2), [])
+  const panRef = useRef(NaN) // composite pan/gc/gd key the colW table was built for
+  // per-column heard patch (virtual-mic mix, clamped >= 0) + its energy; the
+  // forward pass, self-mask target, cooperation target and round-2 all read
+  // their column's row. eCol = the SIGNED mono-ized residual per column
+  // (no clamp - negative entries are "trim this band" error signals).
+  const colV = useMemo(() => new Float32Array(G * DIMV), [])
+  const colE = useMemo(() => new Float32Array(G), [])
+  const eCol = useMemo(() => new Float32Array(G * DIMV), [])
+  // per-column slice-history ring (the virtual-mic percept is built from RAW
+  // energies at commit time, so its history cannot be derived from the
+  // compressed [L|R] hist): colHist[col*DIMV + slice*M + m], slot = ring head.
+  // liveHist marks per-slice band liveness (pre-inhibition superset) for the
+  // shared nz list - per-column inhibition zeros differ per column.
+  const colHist = useMemo(() => new Float32Array(G * DIMV), [])
+  const liveHist = useMemo(() => new Uint8Array(T_HIST * M), [])
   // batched neighborhood cooperation: per-cell product of (1-h) over all firing
   // sources this hop (applied once per cell), plus a dirty set that defers
   // updateCellVisual to one call per cell per hop
@@ -590,7 +672,9 @@ export const FbSparseCortex = () => {
   const fieldDirtyRef = useRef(true)
 
   // ===== INTERPRETATION layer: weights and state =====
-  const W = useMemo(() => new Float32Array(N * DIM), []) // weights = non-negative patch atoms (parts)
+  // weights = non-negative MONO band-time atoms (DIMV dims; the cell's column
+  // mix carries the pan identity, so atoms have no channel halves)
+  const W = useMemo(() => new Float32Array(N * DIMV), [])
   const thr = useMemo(() => new Float32Array(N), [])
   const usage = useMemo(() => new Float32Array(N), [])
   const drive = useMemo(() => new Float32Array(N), [])
@@ -606,7 +690,10 @@ export const FbSparseCortex = () => {
   // live-tunable copies of ETA_SELF / SHARP_SELF / round-2 floors for window
   // exploration (exposed as __fbcx.selfTune; combine with "r" for fair A/B runs)
   const selfTune = useMemo(
-    () => ({ eta: ETA_SELF, sharp: SHARP_SELF, r2cos: R2_MIN_COS, r2gain: R2_GAIN }),
+    // gamma/pin: TEMPORARY tuning slots for the ramp shape and the inner
+    // plateau end (grid exploration on real material; frozen back into
+    // PAN_GAMMA/PAN_IN once settled - the ETA_SELF procedure).
+    () => ({ eta: ETA_SELF, sharp: SHARP_SELF, r2cos: R2_MIN_COS, r2gain: R2_GAIN, pan: PAN_STRENGTH, gamma: PAN_GAMMA, pin: PAN_IN }),
     []
   )
   const stats = useMemo(
@@ -671,14 +758,16 @@ export const FbSparseCortex = () => {
   // cells whose W changed (differential update).
   const updateCellVisual = useMemo(
     () => (i: number) => {
-      const b = i * DIM
+      // W is already mono (band-time atoms) - the old [L|R] version summed the
+      // halves here first, so the displayed quantities are unchanged by design
+      const b = i * DIMV
       let cnum = 0,
         cden = 1e-9,
         sumSq = 0
       for (let t = 0; t < T_HIST; t++) {
-        const bt = b + t * SLICE
+        const bt = b + t * M
         for (let m = 0; m < M; m++) {
-          const e = W[bt + m] + W[bt + M + m]
+          const e = W[bt + m]
           cnum += m * e
           cden += e
           sumSq += e * e
@@ -720,12 +809,14 @@ export const FbSparseCortex = () => {
       heat.fill(0)
       actMem.fill(0)
       hist.fill(0)
+      colHist.fill(0)
+      liveHist.fill(0)
       cellColor.fill(0)
       gasBright.fill(0)
       seededCountRef.current = 0
       mapAgeRef.current = 0 // a reset also restarts annealing from the beginning
     },
-    [W, thr, usage, heat, seeded, mature, actMem, hist, cellColor, gasBright]
+    [W, thr, usage, heat, seeded, mature, actMem, hist, colHist, liveHist, cellColor, gasBright]
   )
   const inited = useRef(false)
   if (!inited.current) {
@@ -819,9 +910,10 @@ export const FbSparseCortex = () => {
   const clearColorScratch = useMemo(() => new THREE.Color(), [])
   useEffect(() => {
     ;(window as any).__fbcx = {
-      G, M, DIM, seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats,
+      G, M, DIM, seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, envX, stats,
       drive, drive2, // selection scores (round 1 = mixture, round 2 = residual)
-      selfTune, // live ETA_SELF/SHARP_SELF tuning (window exploration)
+      colW, // per-column virtual-mic mix [wL, wR] (see the GAMMA_C block)
+      selfTune, // live ETA_SELF/SHARP_SELF/pan-strength tuning (window exploration)
       audioBus, // record/replay verification: console can capture and re-emit frames
       setSeedRng: (fn: (() => number) | null) => { seedRngRef.current = fn ?? Math.random },
       // lens (field-of-view) tuning: 1.0 = 90deg vertical FOV, 0.84 = 100deg, 0.70 = 110deg
@@ -850,7 +942,7 @@ export const FbSparseCortex = () => {
         trailUniforms.uRound.value = c
       },
     }
-  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, stats, drive, drive2, selfTune, audioBus, gasUniforms, headUniforms, trailUniforms])
+  }, [seeded, mature, heat, W, thr, usage, centroidArr, featVec, env2, envX, stats, drive, drive2, colW, selfTune, audioBus, gasUniforms, headUniforms, trailUniforms])
 
   // [Logic input] Subscribe to the audio bus and stitch 0.5 s window snapshots by
   // file position. Push reception without React state (no re-renders, no interim
@@ -951,23 +1043,33 @@ export const FbSparseCortex = () => {
       win.winEnd = pEnd
       return true
     }
-    // Data-derived seeding: first the central patch, then unseeded BMU
-    // neighbors, always from real features. Hoisted out of the hop loop
-    // (it used to be re-created every hop); `bmu` arrives as an argument.
-    const seedFrom = (j: number, useBmu: boolean, bmu: number) => {
-      const bj = j * DIM
-      const bb = bmu * DIM
+    // Data-derived seeding (one-shot): the whole field is batch-initialized
+    // from the first real input; the only caller is the `bmu < 0` branch in
+    // the hop below. Hoisted out of the hop loop (it used to be re-created
+    // every hop).
+    const seedFrom = (j: number) => {
+      const bj = j * DIMV
+      // Seeding hears WITHOUT the subtraction (rectified mix (wL+, wR+)): with
+      // the signed mix, a center-dominant first frame gives edge cells a ~zero
+      // percept and seeding would produce jitter-only weights = noise
+      // (violates the music-derived-first-frame requirement). Birth = "what my
+      // side's channel carries"; the subtractive learning then carves it.
+      const colB = (j % G) * 2
+      const wl = Math.max(0, colW[colB])
+      const wr = Math.max(0, colW[colB + 1])
       let nrm = 0
-      for (let d = 0; d < DIM; d++) {
-        const base = useBmu
-          ? SEED_MIX * featVec[d] + (1 - SEED_MIX) * W[bb + d]
-          : featVec[d]
-        const v = Math.max(0, base + (seedRngRef.current() * 2 - 1) * SEED_JITTER)
-        W[bj + d] = v
-        nrm += v * v
+      for (let ts = 0; ts < T_HIST; ts++) {
+        const oV = bj + ts * M
+        const oL = ts * SLICE
+        for (let m = 0; m < M; m++) {
+          const xg = wl * featVec[oL + m] + wr * featVec[oL + M + m]
+          const v = Math.max(0, xg + (seedRngRef.current() * 2 - 1) * SEED_JITTER)
+          W[oV + m] = v
+          nrm += v * v
+        }
       }
       const inv = 1 / (Math.sqrt(nrm) + 1e-6)
-      for (let d = 0; d < DIM; d++) W[bj + d] *= inv
+      for (let d = 0; d < DIMV; d++) W[bj + d] *= inv
       seeded[j] = 1
       mature[j] = 0
       thr[j] = 0
@@ -978,6 +1080,27 @@ export const FbSparseCortex = () => {
     return (maxHops: number): number => {
       const st = streamRef.current
       if (!st.frame || st.frame.samples0.length === 0) return 0
+      // [stereo-position prior] (re)build the per-COLUMN mix coefficients when
+      // a live knob moved (NaN key on mount -> built on the first processed
+      // frame). Curve + homotopy: see the PAN_GAMMA/PAN_EDGE block.
+      const panKey = selfTune.pan * 1e6 + selfTune.gamma * 1e3 + selfTune.pin
+      if (panRef.current !== panKey) {
+        panRef.current = panKey
+        const pan = selfTune.pan
+        const pin = selfTune.pin
+        for (let col = 0; col < G; col++) {
+          const t = (col / (G - 1)) * 2 - 1
+          // trapezoid position: inner tie-band [0, PAN_IN] -> gamma ramp ->
+          // edge plateau [PAN_EDGE, 1] (see the PAN_IN/PAN_EDGE blocks)
+          const s = Math.min(1, Math.max(0, (Math.abs(t) - pin) / (PAN_EDGE - pin)))
+          const tau = pan * Math.sign(t) * Math.pow(s, selfTune.gamma)
+          // virtual-mic angle on the unit circle (see the stereo block):
+          // 45deg mono at the center, -22.5deg/112.5deg at the edges
+          const th = Math.PI / 4 + tau * ((3 * Math.PI) / 8)
+          colW[col * 2] = Math.cos(th)
+          colW[col * 2 + 1] = Math.sin(th)
+        }
+      }
       let done = 0
       win.frame = st.frame
       win.s0 = win.frame.samples0
@@ -1014,6 +1137,7 @@ export const FbSparseCortex = () => {
           const cb0 = b0[m], cb2 = b2[m], ca1 = a1[m], ca2 = a2[m], aE = envA[m]
           let x1L = x1[iL], x2L = x2[iL], y1L = y1[iL], y2L = y2[iL], eL = env2[iL]
           let x1R = x1[iR], x2R = x2[iR], y1R = y1[iR], y2R = y2[iR], eR = env2[iR]
+          let eX = envX[m]
           for (let i = 0, idx = idx0; i < HOP_SAMPLES; i++, idx++) {
             const sL = s0[idx]
             const yL = cb0 * sL + cb2 * x2L - ca1 * y1L - ca2 * y2L
@@ -1023,9 +1147,11 @@ export const FbSparseCortex = () => {
             const yR = cb0 * sR + cb2 * x2R - ca1 * y1R - ca2 * y2R
             x2R = x1R; x1R = sR; y2R = y1R; y1R = Math.fround(yR)
             eR = Math.fround(eR + aE * (yR * yR - eR))
+            eX = Math.fround(eX + aE * (yL * yR - eX)) // cross envelope (see envX)
           }
           x1[iL] = x1L; x2[iL] = x2L; y1[iL] = y1L; y2[iL] = y2L; env2[iL] = eL
           x1[iR] = x1R; x2[iR] = x2R; y1[iR] = y1R; y2[iR] = y2R; env2[iR] = eR
+          envX[m] = eX
         }
         st.lastPos += HOP_SAMPLES
         done++
@@ -1051,6 +1177,34 @@ export const FbSparseCortex = () => {
           hist[slot + m] = Math.max(0, hist[slot + m] - SHARP * meanL)
           hist[slot + M + m] = Math.max(0, hist[slot + M + m] - SHARP * meanR)
         }
+        // [stereo-position prior] per-column virtual-mic slice: the TRUE mic
+        // energy E = wL^2*eL + wR^2*eR + 2*wL*wR*eLR (raw energies - leans
+        // survive compression; the cross term cancels correlated center where
+        // wL*wR < 0), compressed into feature units, then per-column lateral
+        // inhibition (each mic is its own cochlea). Written into the same
+        // ring slot epoch as `hist`.
+        const sliceV = histHeadRef.current * M
+        for (let col = 0; col < G; col++) {
+          const wl = colW[col * 2]
+          const wr = colW[col * 2 + 1]
+          const wll = wl * wl
+          const wrr = wr * wr
+          const wlr = 2 * wl * wr
+          const cbase = col * DIMV + sliceV
+          let meanV = 0
+          for (let m = 0; m < M; m++) {
+            const E = wll * env2[m * 2] + wrr * env2[m * 2 + 1] + wlr * envX[m]
+            const v = E > 0 ? Math.pow(E, COMPRESS_E) : 0
+            colHist[cbase + m] = v
+            meanV += v / M
+          }
+          for (let m = 0; m < M; m++) {
+            const v = colHist[cbase + m] - SHARP * meanV
+            colHist[cbase + m] = v > 0 ? v : 0
+          }
+        }
+        for (let m = 0; m < M; m++)
+          liveHist[sliceV + m] = env2[m * 2] + env2[m * 2 + 1] > 1e-12 ? 1 : 0
         // x = history concatenated oldest->newest (the slot just written is the newest).
         // Explicit element copy: set(subarray(...)) allocated 6 view objects per hop
         const head = histHeadRef.current
@@ -1067,14 +1221,17 @@ export const FbSparseCortex = () => {
           stats.tInput = ema(stats.tInput, performance.now() - tHop0)
           continue
         }
-        // compact non-zero features once per hop (ascending d preserves sum order)
-        let nnz = 0
-        for (let d = 0; d < DIM; d++) {
-          const xv = featVec[d]
-          if (xv !== 0) {
-            nzIdx[nnz] = d
-            nzVal[nnz] = xv
-            nnz++
+        // compact non-zero VIEW dims once per hop from the liveness ring
+        // (slice order oldest -> newest, matching the colV assembly below)
+        let nnzV = 0
+        {
+          const nh = histHeadRef.current
+          for (let ts = 0; ts < T_HIST; ts++) {
+            const src = ((nh + ts) % T_HIST) * M
+            const oV = ts * M
+            for (let m = 0; m < M; m++) {
+              if (liveHist[src + m]) nzIdx[nnzV++] = oV + m
+            }
           }
         }
         const tFwd0 = performance.now()
@@ -1083,6 +1240,27 @@ export const FbSparseCortex = () => {
       // ============================================================
       // [INTERPRETATION layer] forward pass (fit) -> seed growth -> k-WTA -> residual learning
       // ============================================================
+      // [stereo-position prior] assemble every column's heard patch from its
+      // slice ring (oldest -> newest, aligned with featVec's slice order) +
+      // its energy. All consumers of "what this cell hears" read their
+      // column's row; the forward pass stays one MAC per nz dim.
+      {
+        const nh = histHeadRef.current
+        for (let col = 0; col < G; col++) {
+          const cb = col * DIMV
+          let e = 0
+          for (let ts = 0; ts < T_HIST; ts++) {
+            const src = cb + ((nh + ts) % T_HIST) * M
+            const dst = cb + ts * M
+            for (let m = 0; m < M; m++) {
+              const v = colHist[src + m]
+              colV[dst + m] = v
+              e += v * v
+            }
+          }
+          colE[col] = e
+        }
+      }
       let maxU = -1e9
       let bmu = -1
       for (let i = 0; i < N; i++) {
@@ -1090,9 +1268,13 @@ export const FbSparseCortex = () => {
           drive[i] = -1e9
           continue
         }
-        const b = i * DIM
+        const b = i * DIMV
+        const cb = (i % G) * DIMV
         let s = 0
-        for (let k = 0; k < nnz; k++) s += W[b + nzIdx[k]] * nzVal[k]
+        for (let k = 0; k < nnzV; k++) {
+          const d = nzIdx[k]
+          s += W[b + d] * colV[cb + d]
+        }
         const u = s - thr[i]
         drive[i] = u
         if (u > maxU) {
@@ -1100,7 +1282,7 @@ export const FbSparseCortex = () => {
           bmu = i
         }
       }
-      // Data-derived seeding (growth): seedFrom lives in the factory above (no per-hop closure)
+      // Data-derived seeding: seedFrom lives in the factory above (no per-hop closure)
       if (bmu < 0) {
         // First time only: batch-initialize every cell with "first real input +
         // tiny jitter" (classic SOM style). Growth from the center (frontier
@@ -1109,7 +1291,7 @@ export const FbSparseCortex = () => {
         // distributed across the entire field. The jitter breaks symmetry, and
         // k-WTA + neighborhood cooperation + IP drive differentiation all over
         // the field.
-        for (let j = 0; j < N; j++) seedFrom(j, false, bmu)
+        for (let j = 0; j < N; j++) seedFrom(j)
       }
       const tSel0 = performance.now()
       stats.tForward = ema(stats.tForward, tSel0 - tFwd0)
@@ -1121,7 +1303,12 @@ export const FbSparseCortex = () => {
       const tLearn0 = performance.now()
       stats.tSelect = ema(stats.tSelect, tLearn0 - tSel0)
 
-      // additive reconstruction r = sum_active a_i D_i (a_i = max(0, s_i - kThr))
+      // additive reconstruction r = sum_active a_i D_i (a_i = max(0, s_i - kThr)).
+      // The GLOBAL account lives in the shared [L|R] space: each fired cell's
+      // mono atom is synthesized back through its column's coefficients (the
+      // ADJOINT of the virtual-mic analysis; wR<0 columns contribute signed
+      // entries) - the one bookkeeping that stays linearly consistent when
+      // every column hears a different mix.
       recon.fill(0)
       for (let i = 0; i < N; i++) {
         if (!seeded[i] || drive[i] < kThr) {
@@ -1130,8 +1317,19 @@ export const FbSparseCortex = () => {
         }
         const a = drive[i] - kThr
         act[i] = a
-        const b = i * DIM
-        for (let d = 0; d < DIM; d++) recon[d] += a * W[b + d]
+        const b = i * DIMV
+        const colB = (i % G) * 2
+        const awl = a * colW[colB]
+        const awr = a * colW[colB + 1]
+        for (let ts = 0; ts < T_HIST; ts++) {
+          const oV = b + ts * M
+          const oL = ts * SLICE
+          for (let m = 0; m < M; m++) {
+            const w = W[oV + m]
+            recon[oL + m] += awl * w
+            recon[oL + M + m] += awr * w
+          }
+        }
       }
       // least-squares scale alpha and residual e = x - alpha r
       let pr = 0,
@@ -1147,6 +1345,22 @@ export const FbSparseCortex = () => {
         resE += resid[d] * resid[d]
       }
       stats.resFrac = resE / inputE
+      // the residual as heard per column: SIGNED linear mono-ization (no
+      // clamp - negative entries are "trim this band" error signals, and the
+      // analysis map applied to the shared residual keeps consumption and
+      // bookkeeping exactly consistent)
+      for (let col = 0; col < G; col++) {
+        const wl = colW[col * 2]
+        const wr = colW[col * 2 + 1]
+        const base = col * DIMV
+        for (let ts = 0; ts < T_HIST; ts++) {
+          const oV = base + ts * M
+          const oL = ts * SLICE
+          for (let m = 0; m < M; m++) {
+            eCol[oV + m] = wl * resid[oL + m] + wr * resid[oL + M + m]
+          }
+        }
+      }
 
       // [residual second round] see the constants block. Score every non-fired
       // cell against what round 1 left unexplained; add winners above the floors.
@@ -1162,9 +1376,11 @@ export const FbSparseCortex = () => {
             drive2[i] = -1e9 // round-1 winners keep their seat; no double firing
             continue
           }
-          const b = i * DIM
+          const b = i * DIMV
+          const cb = (i % G) * DIMV
+          // the residual as this cell's column hears it
           let s = 0
-          for (let d = 0; d < DIM; d++) s += W[b + d] * resid[d]
+          for (let d = 0; d < DIMV; d++) s += W[b + d] * eCol[cb + d]
           drive2[i] = s
           if (s > max2) max2 = s
         }
@@ -1236,38 +1452,40 @@ export const FbSparseCortex = () => {
           // (same shared-residual rule, the residual IS their target - this is
           // what turns a barely-matching recruit into a specialist of the new part)
           const aeff = fired1 ? alpha * act[i] : r2Amp * yi
-          const b = i * DIM
+          const b = i * DIMV
+          // this cell's column: heard patch + heard residual (virtual mic)
+          const cb = (i % G) * DIMV
           // self-masked target: the input heard through this cell's own bands.
-          // Design formula: normalize(x^ * W_i / max W_i). The scalars 1/|x| and
+          // Design formula: normalize(v^ * W_i / max W_i). The scalars 1/|v| and
           // 1/maxW are constant across d and cancel inside the normalize (docs
-          // "Notation"), so only the direction featVec*W is needed; its squared
+          // "Notation"), so only the direction heard*W is needed; its squared
           // norm qn and the L1-cut mass mwS share one pass.
           let qn = 0
           let mwS = 0
-          for (let d = 0; d < DIM; d++) {
+          for (let d = 0; d < DIMV; d++) {
             const w = W[b + d]
-            const q = featVec[d] * w
+            const q = colV[cb + d] * w
             qn += q * q
             mwS += w
           }
           const qInv = 1 / (Math.sqrt(qn) + 1e-6)
-          const cutS = (sharpStep * mwS) / DIM // mask-narrowing feedback
+          const cutS = (sharpStep * mwS) / DIMV // mask-narrowing feedback
           // original shared-residual term + weak per-cell self-masked term
           // (see ETA_SELF); clamp(>=0) ; unit L2
           let nrm = 0
-          for (let d = 0; d < DIM; d++) {
+          for (let d = 0; d < DIMV; d++) {
             const w = W[b + d]
             let wv =
               w +
-              ETA * dtScale * aeff * resid[d] +
-              sStep * (featVec[d] * w * qInv - w) -
+              ETA * dtScale * aeff * eCol[cb + d] +
+              sStep * (colV[cb + d] * w * qInv - w) -
               cutS
             if (wv < 0) wv = 0
             W[b + d] = wv
             nrm += wv * wv
           }
           const inv = 1 / (Math.sqrt(nrm) + 1e-6)
-          for (let d = 0; d < DIM; d++) W[b + d] *= inv
+          for (let d = 0; d < DIMV; d++) W[b + d] *= inv
           heat[i] = Math.min(1.5, heat[i] + yi * dtScale)
           if (!dirtyFlag[i]) { dirtyFlag[i] = 1; dirtyList[nDirty++] = i }
 
@@ -1291,14 +1509,25 @@ export const FbSparseCortex = () => {
           }
         }
       }
-      // apply the accumulated neighborhood blends once per touched cell
+      // apply the accumulated neighborhood blends once per touched cell; the
+      // blend target is the mixture as cell j hears it (its column's virtual
+      // mic). A column hearing less than the loudness floor is hearing silence
+      // this hop - blending toward ~0 would only erode the weight norm (coop
+      // never renormalizes), so LOUD_FLOOR's no-learning-on-silence rule
+      // applies per column here.
       for (let t = 0; t < nTouched; t++) {
         const j = nbTouched[t]
+        const col = j % G
+        if (colE[col] < LOUD_FLOOR) {
+          nbP[j] = 1
+          continue
+        }
         const P = nbP[j]
         nbP[j] = 1
         const q = 1 - P
-        const bj = j * DIM
-        for (let d = 0; d < DIM; d++) W[bj + d] = W[bj + d] * P + featVec[d] * q
+        const bj = j * DIMV
+        const cb = col * DIMV
+        for (let d = 0; d < DIMV; d++) W[bj + d] = W[bj + d] * P + colV[cb + d] * q
       }
       // flush deferred visual updates: exactly one recompute per changed cell.
       // Timed as one block - per-cell now() brackets cost more than the loop
@@ -1331,7 +1560,7 @@ export const FbSparseCortex = () => {
       return done
     } // end processHops
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coeffs, stats, selfTune, updateCellVisual, x1, x2, y1, y2, env2, hist, featVec, nzIdx, nzVal, recon, resid, act, W, thr, usage, drive, driveSorted, drive2, drive2Sorted, fired2, seeded, mature, heat, hTab, nbP, nbTouched, dirtyFlag, dirtyList])
+  }, [coeffs, stats, selfTune, updateCellVisual, x1, x2, y1, y2, env2, envX, hist, colHist, liveHist, featVec, nzIdx, colW, colV, colE, eCol, recon, resid, act, W, thr, usage, drive, driveSorted, drive2, drive2Sorted, fired2, seeded, mature, heat, hTab, nbP, nbTouched, dirtyFlag, dirtyList])
 
   useFrame((_state, deltaTime) => {
     if (resetRef.current) {

@@ -30,8 +30,9 @@ flowchart TD
         CMP --> SHARP["lateral inhibition:<br/>subtract 0.6 x band mean, clamp >= 0"]
         SHARP --> PATCH["patch x: last 6 slices x [L32|R32]<br/>= 384 dims, non-negative"]
     end
-    subgraph INTERP["INTERPRETATION: 64x64 = 4096 cells, W = 4096 x 384 atoms"]
-        PATCH --> FWD["forward: drive_i = W_i . x - thr_i"]
+    subgraph INTERP["INTERPRETATION: 64x64 = 4096 cells, W = 4096 x 192 MONO atoms"]
+        PATCH --> GAIN["per-COLUMN virtual mic (see (E)):<br/>v_b(col) = max(0, wL(col)*aL_b + wR(col)*aR_b)<br/>L-R at the left edge, mono mix at center, R-L at the right"]
+        GAIN --> FWD["forward: drive_i = W_i . v(col_i) - thr_i"]
         FWD --> KWTA["k-WTA: top K_ACTIVE = 200 fire"]
         KWTA --> LEARN["learning (3 forces, see below)"]
     end
@@ -70,6 +71,15 @@ Notation:
   multiplies and the `selfT` scratch were dead computation; fusing the loops
   recovered ~0.8 ms/hop of the self-mask's measured in-situ cost). The design
   formula lives on in this note and the code comment.
+- `v(col)` = the cell's column virtual-mic mix (§ (E)): cells hold MONO
+  band-time atoms (192 dims) and hear `v_b = max(0, wL·aL_b + wR·aR_b)`.
+  Wherever a cell consumes audio — forward, the self-mask target, cooperation,
+  round-2 — it reads its column's `v`; the residual it absorbs is the SIGNED
+  mono-ization `e_col = wL·eL + wR·eR` (no clamp). Seeding alone hears the
+  rectified mix `(wL⁺, wR⁺)`. The **global** recon/resid/alpha account lives
+  in the shared [L|R] space via the analysis adjoint (each fired atom
+  synthesized back as `a·(wL·W | wR·W)`). `selfTune.pan = 0` makes every
+  column the uniform mono mix (1/2, 1/2) — clean A/B.
 
 ```mermaid
 flowchart LR
@@ -203,6 +213,108 @@ bands — true sparse coding), which means changing (A)/(C)'s "everyone absorbs
 the mixture" dynamics — the load-bearing aesthetic machinery. That trade-off is
 a product decision, not a tuning knob.
 
+### (E) Stereo-position prior (v2 channel gains 08-21/22; v4 virtual-mic array 2026-08-23)
+
+Third synesthetic axis: **x = pan**, alongside y = pitch and hue = pitch class.
+
+**History.** v1 (p=1 linear channel gains) lateralized everything; v2 (p=4
+circle law) anchored correctly but could not protect edge cells' weights: for
+ANY nonnegative channel-gain pair the edge preference for own-side-exclusive
+over center content is `2gL²/(gL²+gR²) ≤ 2` (3 dB) — far below the 6–10 dB by
+which center elements usually outweigh panned ones, so edge weights filled
+with center material (the measured overwrite problem; ×1.33 at v2's depth).
+v3 (a min-based common/exclusive decomposition) escaped the bound but was a
+misreading of the user's actual proposal and was discarded (kept in
+`stash@{0}`); its verified findings carried over. **v4 (current) is the
+user's design**: a per-column virtual-mic array.
+
+```text
+v_b(col) = max(0, wL(col)·aL_b + wR(col)·aR_b)     per band pair, per hop
+```
+
+Every column hears ONE mono mix, sweeping from the side signal `L−R` at the
+left edge through the plain mono mix `(1/2, 1/2)` at the center to `R−L` at
+the right. The subtraction cancels center content **in the data**, before any
+weight sees it (negative gains on [L|R] weight halves self-defeat: the
+learning clamp erases the halves the cancellation needs). Cells hold **mono
+band-time atoms** (`DIMV = 192`); the pan identity lives in the column. The
+display never showed W's channel structure (it always consumed W mono-summed
+per band), so no visual information was lost — and W memory halves, forward
+gets ~2× cheaper.
+
+**Coefficient curves** (rev. 08-23b: ONE gamma ramp + plateau). The first
+attempt used two gammas on the C/D rotation (`C=1−|t|^γC`, `D=−2sign·|t|^γD`)
+and was **rejected as uncontrollable**: whenever the exponents differed, the
+own-side weight `(C+D)/2` grew an interior hump (rates of C's fall and D's
+rise crossing over), γC unexpectedly moved hard-pan anchors, and γC=6 let
+compressed opposite-channel bleed win mid-field. The revision applies one
+gamma ramp to wL/wR **directly** on the plateau-normalized position:
+
+```text
+s = clamp(|t| / PAN_EDGE, 0, 1)      r = s^PAN_GAMMA
+w_own = 0.5 + 0.5·r                  0.5 center → 1.0 plateau, monotone
+w_opp = 0.5 − 1.5·r                  0.5 center → −1.0 plateau, monotone
+(PAN_GAMMA = 1, PAN_EDGE = 0.75)
+```
+
+Both weights are monotone toward the edges for EVERY gamma (own response
+`(1+s^γ)/2` — hump impossible by construction). Derived: center content hears
+`1 − s^γ`; the opposite-channel subtraction starts at `s = (1/3)^(1/γ)`.
+The **plateau** (|t| ≥ 0.75, 8 columns/side, all exactly `(1,−1)`) is the
+v2-era rule restored deliberately: a hard-panned source has no single best
+border column, so cooperation + IP settle its cluster inside the band where a
+full neighborhood fits (8 ≥ 2×NB_RAD; anchoring at the lattice border clips
+the cooperation neighborhood and crushes the cluster). The single live knob
+`selfTune.pan` is the prior-strength homotopy `w = (1−p)·0.5 + p·w_design`:
+0 = every column `(1/2,1/2)` uniform mono (verified exact), 1 = design.
+
+**Wiring (the seven consumption points).** forward / self-mask target /
+cooperation target / round-2 read the column's `v`; the residual is consumed
+as the SIGNED mono-ization `e_col = wL·eL + wR·eR` (no clamp — negative
+entries are "trim this band" signals); **seeding hears the rectified mix**
+`(wL⁺, wR⁺)` (a center-dominant first frame would otherwise noise-seed the
+edges); cooperation **skips columns with `colE < LOUD_FLOOR`** (blending
+toward ~0 erodes weight norms — coop never renormalizes); the **global
+recon/resid account stays in the shared [L|R] space** via the analysis
+adjoint (each fired atom synthesized back as `a·(wL·W | wR·W)`; wR<0 columns
+contribute signed entries; alpha/resid formulas unchanged).
+
+**Measured verdict (2026-08-23, single-gamma+plateau, pan=1, γ=1,
+deterministic seed):**
+
+- 3-tone coprime regression (~105 s): solo winner mean u = **−0.749 / −0.013 /
+  +0.777** — hard pans sit ON the ±0.75 anchors (v2 parity), center 98.9 %.
+  **Plateau works as designed**: solo winner-column modes at col 6 / 32 / 59 —
+  inside the 8-column bands, NOT pinned at the border (extreme columns 0,1,62,63
+  carry only 12–13 %), so hard-pan clusters keep full cooperation
+  neighborhoods. **Simultaneous hard-L + hard-R splits to both sides**
+  (zones 58/8/34 %) — v2's accepted goniometer trade stays resolved for
+  spectrally distinct sources.
+- Overwrite stress (center +10 dB simultaneous, 60 s): edge-weight cosine vs
+  solo signatures — left [own **0.820**, center 0.211], right [own **0.829**,
+  center 0.265]. Edge identities survive a +10 dB center (impossible under
+  any nonnegative channel-gain law).
+- Same-band L/R-independent pair (210/230 Hz): solos anchor (−0.608/+0.595);
+  the simultaneous phase reads 98 % center — the known LEVEL-DOMAIN limit
+  (equal-level decorrelated width is indistinguishable from true center).
+  On a real mix ~97 % of energy arrives level-balanced, so **real songs
+  center-collapse under any level-only variant** (measured on v3; the
+  discriminator is degenerate — no wL/wR curve can fix it). The staged fix
+  is the coherence measurement `psi = clamp(2·eLR/(eL+eR),0,1)` (per-band
+  cross envelope in the existing biquad loop): subtract only the CORRELATED
+  part, pass decorrelated width to its own side. Decision pends a psi
+  distribution measurement on real material (Stage 1.5) + the user's visual
+  review.
+- pan=0: `colW ≡ (0.5, 0.5)` exactly; winner zones lose positional structure.
+- Timings: tForward **1.47–2.30 ms** (~30–40 % below the v2/v3 measurements —
+  the halved atom dims), tLearn 1.88–3.07 (neutral or better), tInput
+  unchanged.
+- Deliberate trades: mono / center-only material concentrates in the center
+  columns (the old "mono heard identically everywhere" invariant is gone —
+  honest pan axis); the hard-pan anchor gradient is the wL ramp (center 1/2 →
+  plateau 1, i.e. 2×, stronger than v2's 1.125×), terminating in the flat
+  plateau band rather than a border peak.
+
 ### Support systems
 
 - **Seeding**: on the first audible hop, all 4096 cells are batch-initialized
@@ -278,6 +390,10 @@ let s=0;for(let t=0;t<300;t++)s+=cos((Math.random()*N)|0,(Math.random()*N)|0)
 s/300  // ~0.93 = original/homogeneous, lower = differentiated
 ```
 
+With the stereo-position prior on (`PAN_DEPTH > 0`), constrain both pair
+members to one column (same gains) to measure tint depth — global pairs also
+count the intended cross-column gain gradient and read ~0.3 lower (§2 (E)).
+
 ---
 
 ## 4. History: tried and rejected (do not re-attempt blindly)
@@ -312,12 +428,13 @@ Standing lessons:
 ## 5. Debug surface
 
 - `window.__fbcx`: `G M DIM seeded mature heat W thr usage centroidArr featVec
-  env2 stats drive drive2 selfTune audioBus setSeedRng setHemiScale setHemiBeta
-  setFlat setRound`.
+  env2 stats drive drive2 gLR selfTune audioBus setSeedRng setHemiScale
+  setHemiBeta setFlat setRound`.
 - `stats`: `mapAge` (audible seconds; annealing clock), `seams`, `resFrac`,
   `kThr`, `nWin2` (round-2 winners this hop; 0 = nothing unexplained), stage
   timings `tInput/tForward/tSelect/tLearn/tField/tParticles`.
-- `selfTune` (live-tunable): `eta sharp` (§2 (B)) and `r2cos r2gain` (§2 (D)).
+- `selfTune` (live-tunable): `eta sharp` (§2 (B)), `r2cos r2gain` (§2 (D)) and
+  `pan` (§2 (E); the per-cell gain table rebuilds on the next processed frame).
 - `r` key: reset map (weights, seeding, annealing clock; cochlear filter state
   intentionally survives).
 - `g` key: flat-lattice debug view; `,` / `.`: hemisphere roundness λ ±0.05.
