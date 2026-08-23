@@ -231,7 +231,6 @@ const P_TRAIL_DIM = 0.14
 const P_LIFE = 3.2
 // Data-derived seeding (initialization): all cells batch-initialized from the first real input + jitter (classic SOM style)
 const SEED_JITTER = 0.04
-const SEED_MIX = 0.7
 const MATURE_RATE = 0.05
 // [Hemisphere mapping] The disk mapping removes the lattice's straight edges and
 // corners; the lattice is then treated as an orthographic view of a unit
@@ -1009,20 +1008,19 @@ export const FbSparseCortex = () => {
       win.winEnd = pEnd
       return true
     }
-    // Data-derived seeding: first the central patch, then unseeded BMU
-    // neighbors, always from real features. Hoisted out of the hop loop
-    // (it used to be re-created every hop); `bmu` arrives as an argument.
-    const seedFrom = (j: number, useBmu: boolean, bmu: number) => {
+    // Data-derived seeding (one-shot): the whole field is batch-initialized
+    // from the first real input; the only caller is the `bmu < 0` branch in
+    // the hop below. Hoisted out of the hop loop (it used to be re-created
+    // every hop).
+    const seedFrom = (j: number) => {
       const bj = j * DIM
-      const bb = bmu * DIM
       const gjL = gLR[j * 2]
       const gjR = gLR[j * 2 + 1]
       let nrm = 0
       for (let d = 0; d < DIM; d++) {
         // the cell seeds from the input as IT hears it (stereo-position gain)
         const xg = (chanOf[d] ? gjR : gjL) * featVec[d]
-        const base = useBmu ? SEED_MIX * xg + (1 - SEED_MIX) * W[bb + d] : xg
-        const v = Math.max(0, base + (seedRngRef.current() * 2 - 1) * SEED_JITTER)
+        const v = Math.max(0, xg + (seedRngRef.current() * 2 - 1) * SEED_JITTER)
         W[bj + d] = v
         nrm += v * v
       }
@@ -1185,7 +1183,7 @@ export const FbSparseCortex = () => {
           bmu = i
         }
       }
-      // Data-derived seeding (growth): seedFrom lives in the factory above (no per-hop closure)
+      // Data-derived seeding: seedFrom lives in the factory above (no per-hop closure)
       if (bmu < 0) {
         // First time only: batch-initialize every cell with "first real input +
         // tiny jitter" (classic SOM style). Growth from the center (frontier
@@ -1194,7 +1192,7 @@ export const FbSparseCortex = () => {
         // distributed across the entire field. The jitter breaks symmetry, and
         // k-WTA + neighborhood cooperation + IP drive differentiation all over
         // the field.
-        for (let j = 0; j < N; j++) seedFrom(j, false, bmu)
+        for (let j = 0; j < N; j++) seedFrom(j)
       }
       const tSel0 = performance.now()
       stats.tForward = ema(stats.tForward, tSel0 - tFwd0)
